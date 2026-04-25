@@ -1,70 +1,119 @@
-# Getting Started with Create React App
+# 🍯 HONEY BEE Event Manager
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+大船のライブハウス HONEY BEE のイベント管理・テキスト自動生成アプリ。
 
-## Available Scripts
+## 機能
 
-In the project directory, you can run:
+- イベント情報を一度入力するだけで以下を自動生成：
+  - HP用告知文
+  - Instagram投稿文（絵文字・ハッシュタグ付き）
+  - Facebook投稿文
+  - Googleフォーム説明文
+  - 短い告知コピー
+  - **🌐 Wixサイト更新用テキスト一式**
+    - イベント詳細ページ本文
+    - 月間スケジュール用テキスト
+    - トップページ ピックアップ文
+    - SEOタイトル（形式：`イベント名｜大船HONEY BEE`）
+    - SEOディスクリプション（160文字以内・大船/ライブ/HONEY BEE含む）
+    - 画像 alt テキスト
+    - 予約ボタン文言
+- イベントの保存・管理（複数イベント対応）
+- テンプレート保存・再利用
 
-### `npm start`
+## 起動方法
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+```bash
+cd honey-bee-eventsnpm
+npm start
+```
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+ブラウザで http://localhost:3000 を開く。
 
-### `npm test`
+---
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+## 🌐 Wix CMS API 連携 — 将来の方針
 
-### `npm run build`
+### イベントデータ構造（Wix CMS コレクション設計案）
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+| アプリ内フィールド | Wix CMSフィールド名 | 型 |
+|---|---|---|
+| name | title | Text |
+| date | date | Date |
+| day | dayOfWeek | Text |
+| open | openTime | Text |
+| start | startTime | Text |
+| price | price | Text |
+| cap | capacity | Number |
+| perf | performers | Text |
+| desc | description | Rich Text |
+| url | reservationUrl | URL |
+| notes | notes | Text |
+| genre | genre | Text |
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+### 連携の実装イメージ
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+Wix CMS APIを使うことで、アプリからイベントを登録すると自動的にWixサイトに反映させることが可能。
 
-### `npm run eject`
+```js
+// Wix CMS API 連携サンプル（将来実装予定）
+// Wix REST API: https://dev.wix.com/api/rest/cms/collection-items
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+async function pushToWixCMS(eventData) {
+  const response = await fetch(
+    "https://www.wixapis.com/cms/v3/items",
+    {
+      method: "POST",
+      headers: {
+        "Authorization": "Bearer YOUR_WIX_API_KEY",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        collectionId: "Events",
+        item: {
+          title: eventData.name,
+          date: eventData.date,
+          dayOfWeek: eventData.day,
+          openTime: eventData.open,
+          startTime: eventData.start,
+          price: eventData.price,
+          capacity: Number(eventData.cap),
+          performers: eventData.perf,
+          description: eventData.desc,
+          reservationUrl: eventData.url,
+          notes: eventData.notes,
+          genre: eventData.genre,
+        },
+      }),
+    }
+  );
+  return response.json();
+}
+```
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+### 連携に必要なもの
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+1. Wix の Business & Ecommerce プラン以上
+2. Wix Headless / REST API キー（Wix管理画面 > API Keys から取得）
+3. CMS コレクション「Events」の作成（上記フィールド設定）
+4. アプリへの「Wixへ送信」ボタン追加
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+---
 
-## Learn More
+## 技術スタック
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+- React（Create React App）
+- ローカルストレージでデータ永続化
+- Vercel でホスティング
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+## 開発者向け
 
-### Code Splitting
+### デプロイ（更新時）
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+```bash
+git add .
+git commit -m "更新内容を記述"
+git push
+```
 
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+Vercelが自動でデプロイします。
