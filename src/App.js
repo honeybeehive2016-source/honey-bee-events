@@ -24,6 +24,56 @@ const emptyForm = {
   price: "", cap: "", perf: "", desc: "", url: "", notes: "", genre: "",
 };
 
+// スプレッドシートの列順：日付/曜日/イベント名/内容/開場/開演/料金/演者入り時間/ポスター/タイムテーブル
+function parseCSV(text) {
+  const lines = text.trim().split("\n");
+  const results = [];
+  // 1行目がヘッダーかどうか判定（日付っぽくなければスキップ）
+  const startIdx = lines[0] && /^\d{4}|^\d{1,2}\//.test(lines[0].trim()) ? 0 : 1;
+  for (let i = startIdx; i < lines.length; i++) {
+    const cols = lines[i].split(",").map(c => c.trim().replace(/^"|"$/g, ""));
+    if (!cols[2]) continue; // イベント名がなければスキップ
+    // 日付をYYYY-MM-DD形式に変換
+    let rawDate = cols[0] || "";
+    let isoDate = "";
+    // 2026/4/25 や 2026-04-25 など対応
+    const m = rawDate.match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+    if (m) isoDate = `${m[1]}-${m[2].padStart(2,"0")}-${m[3].padStart(2,"0")}`;
+    // 曜日
+    let day = cols[1] ? cols[1].replace(/曜日?/, "") + "曜日" : "";
+    if (!day && isoDate) {
+      const d = new Date(isoDate + "T00:00:00");
+      day = DAYS[d.getDay()] + "曜日";
+    }
+    // 時間をHH:MM形式に変換
+    const toTime = (s) => {
+      if (!s) return "";
+      const tm = s.match(/(\d{1,2}):(\d{2})/);
+      if (tm) return `${tm[1].padStart(2,"0")}:${tm[2]}`;
+      return "";
+    };
+    results.push({
+      date: isoDate,
+      day,
+      name: cols[2] || "",
+      perf: cols[3] || "",   // 内容 → 出演者
+      open: toTime(cols[4]), // 開場
+      start: toTime(cols[5]),// 開演
+      price: cols[6] || "",
+      rehearsal: cols[7] || "",   // 演者入り時間（参考情報として保持）
+      poster: cols[8] || "",      // ポスターURL
+      timetable: cols[9] || "",   // タイムテーブルURL
+      desc: "",
+      url: "",
+      notes: "",
+      genre: "",
+      cap: "",
+      savedAt: new Date().toLocaleDateString("ja-JP"),
+    });
+  }
+  return results;
+}
+
 function fmtDate(d) {
   if (!d) return "";
   const dt = new Date(d + "T00:00:00");
@@ -218,9 +268,36 @@ export default function App() {
   const [tplName, setTplName] = useState("");
   const [showTplModal, setShowTplModal] = useState(false);
   const [copied, setCopied] = useState("");
+  const [csvMsg, setCsvMsg] = useState("");
 
   useEffect(() => { localStorage.setItem("hb-events", JSON.stringify(events)); }, [events]);
   useEffect(() => { localStorage.setItem("hb-templates", JSON.stringify(templates)); }, [templates]);
+
+  const handleCSV = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const imported = parseCSV(ev.target.result);
+        if (imported.length === 0) { setCsvMsg("⚠️ 読み込めるイベントがありませんでした。"); return; }
+        setEvents(ev2 => {
+          const merged = [...ev2];
+          imported.forEach(imp => {
+            const exists = merged.some(e => e.date === imp.date && e.name === imp.name);
+            if (!exists) merged.push(imp);
+          });
+          return merged;
+        });
+        setCsvMsg(`✅ ${imported.length}件のイベントを読み込みました！`);
+        setTimeout(() => setCsvMsg(""), 4000);
+      } catch(err) {
+        setCsvMsg("⚠️ 読み込みに失敗しました。CSVの形式を確認してください。");
+      }
+    };
+    reader.readAsText(file, "UTF-8");
+    e.target.value = "";
+  };
 
   const setField = (k, v) => setForm(f => {
     const next = { ...f, [k]: v };
@@ -271,8 +348,19 @@ export default function App() {
         <div style={{ padding: "1.5rem 2rem" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.25rem" }}>
             <span style={{ ...S.secTitle, border: "none", padding: 0, margin: 0 }}>イベント &amp; テンプレート一覧</span>
-            <button style={S.btn("gold")} onClick={() => { clearForm(); setView("form"); }}>＋ 新規イベント</button>
+            <div style={{ display: "flex", gap: ".5rem", alignItems: "center" }}>
+              <label style={{ ...S.btn("ghost"), padding: ".45rem .9rem", cursor: "pointer", fontSize: ".72rem" }}>
+                📂 CSVを読み込む
+                <input type="file" accept=".csv" onChange={handleCSV} style={{ display: "none" }} />
+              </label>
+              <button style={S.btn("gold")} onClick={() => { clearForm(); setView("form"); }}>＋ 新規イベント</button>
+            </div>
           </div>
+          {csvMsg && (
+            <div style={{ marginBottom: "1rem", padding: ".6rem 1rem", borderRadius: 5, background: csvMsg.startsWith("✅") ? "rgba(100,200,100,0.1)" : "rgba(226,75,74,0.1)", border: `1px solid ${csvMsg.startsWith("✅") ? "rgba(100,200,100,0.3)" : "rgba(226,75,74,0.3)"}`, fontSize: ".8rem", color: csvMsg.startsWith("✅") ? "#7ec87e" : "#e24b4a" }}>
+              {csvMsg}
+            </div>
+          )}
 
           <div style={S.secTitle}>テンプレート</div>
           {templates.length === 0 && <div style={{ color: "rgba(240,232,208,0.2)", fontSize: ".75rem", marginBottom: "1rem" }}>テンプレートはまだありません</div>}
@@ -297,9 +385,11 @@ export default function App() {
               <div key={i} style={S.card(false)}>
                 <div>
                   <div style={{ fontFamily: "Georgia, serif", fontSize: "1rem", marginBottom: ".3rem" }}>{e.name || "（無題）"}</div>
-                  <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.4)", display: "flex", gap: "1rem" }}>
+                  <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.4)", display: "flex", gap: "1rem", flexWrap: "wrap" }}>
                     {e.date && <span>📅 {fmtDate(e.date)}</span>}
                     {e.price && <span>💴 {e.price}</span>}
+                    {e.poster && <a href={e.poster} target="_blank" rel="noreferrer" style={{ color: "#c9a84c88", textDecoration: "none" }}>🖼 ポスター</a>}
+                    {e.timetable && <a href={e.timetable} target="_blank" rel="noreferrer" style={{ color: "#c9a84c88", textDecoration: "none" }}>📋 TT</a>}
                     <span>保存：{e.savedAt || "–"}</span>
                   </div>
                 </div>
