@@ -18,26 +18,47 @@ export const emptyRental = {
   purpose: "", people: "", budget: "",
   food: "", drinks: "", stage: false, sound: false, mic: false,
   contactName: "", phone: "", email: "",
-  customerCompany: "", // 法人/団体名
+  customerCompany: "",
   status: "new",
   replyStatus: "", quoteStatus: "",
   outcome: "",
   memo: "",
-  quoteItems: [], // [{name, qty, unit, price}]
+  quoteItems: [],
   quoteNo: "",
   invoiceNo: "",
-  quoteSubject: "",   // 見積件名
-  invoiceSubject: "", // 請求件名
-  validityDate: "",   // 見積有効期限
+  quoteSubject: "",
+  invoiceSubject: "",
+  validityDate: "",
+  // 予約金管理
+  depositPolicy: "required",   // "required"=もらう / "waived"=もらわない
+  depositReceived: false,      // 受領済みかどうか
+  depositDate: "",             // 受領日
+  depositAmount: "30000",      // 金額（デフォルト3万円）
+  depositMemo: "",
+  // 担当者
+  staff: "",
+  // 発行履歴：[{type, no, date, items, subject, snapshot}]
+  documentHistory: [],
 };
+
+// 担当者リスト
+export const STAFF_LIST = ["西崎", "渡辺"];
 
 // プリセット項目
 const PRESET_ITEMS = [
-  { name: "ホールレンタル料金（平日10:00〜15:00）", price: 50000 },
-  { name: "ホールレンタル料金（平日15:00〜21:00）", price: 80000 },
-  { name: "ホールレンタル料金（土日祝10:00〜15:00）", price: 80000 },
-  { name: "ホールレンタル料金（土日祝15:00〜21:00）", price: 150000 },
-  { name: "予約金", price: 30000 },
+  // ホールレンタル料金
+  { name: "ホールレンタル料金（平日10:00〜15:00）", price: 50000, unit: "式", group: "ホール" },
+  { name: "ホールレンタル料金（平日15:00〜21:00）", price: 80000, unit: "式", group: "ホール" },
+  { name: "ホールレンタル料金（土日祝10:00〜15:00）", price: 80000, unit: "式", group: "ホール" },
+  { name: "ホールレンタル料金（土日祝15:00〜21:00）", price: 150000, unit: "式", group: "ホール" },
+  // 飲み放題
+  { name: "飲み放題（1時間）", price: 1500, unit: "名", group: "飲み放題" },
+  { name: "飲み放題（2時間）", price: 2500, unit: "名", group: "飲み放題" },
+  { name: "飲み放題（3時間）", price: 3500, unit: "名", group: "飲み放題" },
+  // コース料理
+  { name: "コース料理（5品）", price: 2500, unit: "名", group: "料理" },
+  { name: "コース料理（7〜8品）", price: 3500, unit: "名", group: "料理" },
+  { name: "コース料理（10品）", price: 4500, unit: "名", group: "料理" },
 ];
 
 const S = {
@@ -95,26 +116,29 @@ const COMPANY_INFO = {
   bankName: "ビーハイブ カブシキガイシャ",
 };
 
-function buildDocumentHTML(type, rental, items, no, subject) {
-  const isInvoice = type === "invoice";
+function buildDocumentHTMLFromSnapshot(snap) {
+  const isInvoice = snap.type === "invoice";
   const title = isInvoice ? "御請求書" : "御見積書";
   const dateLabel = isInvoice ? "請求日" : "見積日";
   const noLabel = isInvoice ? "請求No." : "見積No.";
 
-  const today = new Date();
-  const dateStr = `${today.getFullYear()}年${today.getMonth()+1}月${today.getDate()}日`;
+  const docDate = snap.date ? new Date(snap.date) : new Date();
+  const dateStr = `${docDate.getFullYear()}年${docDate.getMonth()+1}月${docDate.getDate()}日`;
 
-  const subtotal = items.reduce((s,i)=>s+(Number(i.qty||0)*Number(i.price||0)),0);
-  const tax = Math.round(subtotal * 0.1);
-  const total = subtotal + tax;
+  const subtotal = snap.subtotal || snap.items.reduce((s,i)=>s+(Number(i.qty||0)*Number(i.price||0)),0);
+  const tax = snap.tax || Math.round(subtotal * 0.1);
+  const total = snap.total || subtotal + tax;
+  const depositAmount = snap.depositAmount || 0;
+  const balance = snap.balance != null ? snap.balance : (total - depositAmount);
+  const showDeposit = isInvoice && depositAmount > 0;
 
-  const validityStr = rental.validityDate
-    ? `${new Date(rental.validityDate).getFullYear()}年${new Date(rental.validityDate).getMonth()+1}月${new Date(rental.validityDate).getDate()}日`
+  const validityStr = snap.validityDate
+    ? `${new Date(snap.validityDate).getFullYear()}年${new Date(snap.validityDate).getMonth()+1}月${new Date(snap.validityDate).getDate()}日`
     : "発行日より30日間";
 
-  const customerName = rental.customerCompany || rental.contactName || "";
+  const customerName = snap.customerName || "";
+  const items = snap.items || [];
 
-  // テーブル行（最低15行確保）
   const minRows = 15;
   const itemRows = [];
   for (let i = 0; i < Math.max(minRows, items.length); i++) {
@@ -158,8 +182,7 @@ function buildDocumentHTML(type, rental, items, no, subject) {
   .left-info .field { margin-bottom: .3em; display: flex; align-items: center; gap: .5em; }
   .left-info .field-label { white-space: nowrap; }
   .left-info .field-value { flex: 1; border-bottom: 1px solid #000; padding: 0 .3em; }
-  .company { font-size: 10pt; line-height: 1.7; position: relative; padding-right: 90px; }
-  .stamp { position: absolute; right: 0; top: 5px; width: 75px; height: 75px; opacity: .92; }
+  .company { font-size: 10pt; line-height: 1.7; }
   .total-box { border: 2px solid #000; padding: .6em 1em; margin: .5em 0 1em; display: flex; align-items: center; gap: 1em; }
   .total-label { font-size: 12pt; font-weight: bold; }
   .total-value { font-size: 14pt; font-weight: bold; flex: 1; }
@@ -197,7 +220,7 @@ function buildDocumentHTML(type, rental, items, no, subject) {
       <span class="customer-name">${escapeHtml(customerName)}</span><span>様</span>
     </div>
     <div class="meta">
-      <div class="meta-row"><span class="meta-label">${noLabel}</span><span class="meta-val">${escapeHtml(no)}</span></div>
+      <div class="meta-row"><span class="meta-label">${noLabel}</span><span class="meta-val">${escapeHtml(snap.no||"")}</span></div>
       <div class="meta-row"><span class="meta-label">${dateLabel}</span><span class="meta-val">${dateStr}</span></div>
     </div>
   </div>
@@ -207,7 +230,7 @@ function buildDocumentHTML(type, rental, items, no, subject) {
       <div class="greeting">下記のとおり、${isInvoice?"御請求":"御見積"}申し上げます。</div>
       <div class="field">
         <span class="field-label">件　名：</span>
-        <span class="field-value">${escapeHtml(subject||"")}</span>
+        <span class="field-value">${escapeHtml(snap.subject||"")}</span>
       </div>
       ${!isInvoice?`<div class="field">
         <span class="field-label">有効期限：</span>
@@ -215,7 +238,6 @@ function buildDocumentHTML(type, rental, items, no, subject) {
       </div>`:""}
     </div>
     <div class="company">
-      <img src="${window.location.origin}/stamp.png" class="stamp" alt="印"/>
       <div><strong>${COMPANY_INFO.name}</strong></div>
       <div>${COMPANY_INFO.zip}</div>
       <div>${COMPANY_INFO.address}</div>
@@ -227,10 +249,15 @@ function buildDocumentHTML(type, rental, items, no, subject) {
   </div>
 
   <div class="total-box">
-    <span class="total-label">合計金額</span>
-    <span class="total-value">¥${total.toLocaleString()}</span>
+    <span class="total-label">${showDeposit?"ご請求金額":"合計金額"}</span>
+    <span class="total-value">¥${(showDeposit?balance:total).toLocaleString()}</span>
     <span class="tax-note">（税込）</span>
   </div>
+
+  ${showDeposit?`
+  <div style="font-size: 9.5pt; margin: -0.5em 0 0.7em; padding: 0.4em 0.8em; background: #f5f5f5; border-left: 3px solid #888;">
+    合計金額 ¥${total.toLocaleString()}（税込）から、ご入金済み予約金 ¥${depositAmount.toLocaleString()}${snap.depositDate?`（${new Date(snap.depositDate).getFullYear()}/${new Date(snap.depositDate).getMonth()+1}/${new Date(snap.depositDate).getDate()}受領）`:""} を差し引いた残額となります。
+  </div>`:""}
 
   <table>
     <thead>
@@ -256,6 +283,15 @@ function buildDocumentHTML(type, rental, items, no, subject) {
         <td colspan="4" class="num">合計</td>
         <td class="num">¥${total.toLocaleString()}</td>
       </tr>
+      ${showDeposit?`
+      <tr class="total-row">
+        <td colspan="4" class="num">ご入金済み（予約金）</td>
+        <td class="num">－¥${depositAmount.toLocaleString()}</td>
+      </tr>
+      <tr class="total-row" style="background:#e8e8e8;">
+        <td colspan="4" class="num"><strong>ご請求金額（残額）</strong></td>
+        <td class="num"><strong>¥${balance.toLocaleString()}</strong></td>
+      </tr>`:""}
     </tbody>
   </table>
 
@@ -277,6 +313,17 @@ function buildDocumentHTML(type, rental, items, no, subject) {
 </html>`;
 }
 
+// 旧 buildDocumentHTML は互換のため残す（呼ばれない）
+function buildDocumentHTML(type, rental, items, no, subject) {
+  const subtotal = items.reduce((s,i)=>s+(Number(i.qty||0)*Number(i.price||0)),0);
+  return buildDocumentHTMLFromSnapshot({
+    type, no, date: new Date().toISOString().split("T")[0], subject,
+    customerName: rental.customerCompany || rental.contactName || "",
+    items, validityDate: rental.validityDate,
+    subtotal, tax: Math.round(subtotal*0.1), total: subtotal + Math.round(subtotal*0.1),
+  });
+}
+
 function escapeHtml(s) {
   if (!s) return "";
   return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -288,15 +335,47 @@ async function openDocumentWindow(type, rental, setRental) {
     alert("見積項目を1つ以上追加してください");
     return;
   }
-  let no = type === "invoice" ? rental.invoiceNo : rental.quoteNo;
-  // 連番がなければ取得
-  if (!no) {
-    no = await getNextNumber(type === "invoice" ? "invoice" : "quote");
-    if (type === "invoice") setRental(r => ({ ...r, invoiceNo: no }));
-    else setRental(r => ({ ...r, quoteNo: no }));
-  }
+  // 新しい連番を毎回取得（=新しい書類として履歴に残す）
+  const no = await getNextNumber(type === "invoice" ? "invoice" : "quote");
   const subject = type === "invoice" ? (rental.invoiceSubject || rental.quoteSubject) : rental.quoteSubject;
-  const html = buildDocumentHTML(type, rental, items, no, subject);
+
+  // 履歴用のスナップショット
+  const today = new Date();
+  const depositReceived = !!(rental.depositPolicy === "required" && rental.depositReceived);
+  const depositAmount = depositReceived ? Number(rental.depositAmount || 0) : 0;
+  const snapshot = {
+    type,
+    no,
+    date: today.toISOString().split("T")[0],
+    issuedAt: today.toLocaleString("ja-JP"),
+    subject,
+    customerName: rental.customerCompany || rental.contactName || "",
+    items: JSON.parse(JSON.stringify(items)),
+    validityDate: rental.validityDate || "",
+    subtotal: items.reduce((s,i)=>s+(Number(i.qty||0)*Number(i.price||0)),0),
+    depositReceived,
+    depositAmount,
+    depositDate: rental.depositDate || "",
+  };
+  snapshot.tax = Math.round(snapshot.subtotal * 0.1);
+  snapshot.total = snapshot.subtotal + snapshot.tax;
+  snapshot.balance = snapshot.total - snapshot.depositAmount;
+
+  // フォームに現在のNoと履歴を保存
+  setRental(r => {
+    const history = [...(r.documentHistory || []), snapshot];
+    const update = { ...r, documentHistory: history };
+    if (type === "invoice") update.invoiceNo = no;
+    else update.quoteNo = no;
+    return update;
+  });
+
+  // ウィンドウを開く（スナップショットから生成）
+  openDocFromSnapshot(snapshot);
+}
+
+function openDocFromSnapshot(snapshot) {
+  const html = buildDocumentHTMLFromSnapshot(snapshot);
   const w = window.open("", "_blank", "width=900,height=1200");
   if (!w) { alert("ポップアップがブロックされました。許可してください。"); return; }
   w.document.write(html);
@@ -379,6 +458,7 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack })
   const [form, setForm] = useState(emptyRental);
   const [editingId, setEditingId] = useState(null);
   const [filter, setFilter] = useState("all");
+  const [staffFilter, setStaffFilter] = useState("all");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiReply, setAiReply] = useState("");
   const [copied, setCopied] = useState("");
@@ -450,7 +530,11 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack })
     count: rentals.filter(r => r.status === s.key).length,
   }));
 
-  const filtered = filter === "all" ? rentals : rentals.filter(r => r.status === filter);
+  const filtered = rentals.filter(r => {
+    if (filter !== "all" && r.status !== filter) return false;
+    if (staffFilter !== "all" && (r.staff||"") !== staffFilter) return false;
+    return true;
+  });
   const sorted = [...filtered].sort((a, b) => (b.inquiryDate || "").localeCompare(a.inquiryDate || ""));
 
   if (view === "edit") {
@@ -471,6 +555,12 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack })
               <Field label="電話番号"><input style={S.inp} value={form.phone} onChange={e=>setField("phone",e.target.value)} placeholder="090-..."/></Field>
               <Field label="メール"><input type="email" style={S.inp} value={form.email} onChange={e=>setField("email",e.target.value)} placeholder="@..."/></Field>
               <Field label="問い合わせ日"><input type="date" style={S.inp} value={form.inquiryDate} onChange={e=>setField("inquiryDate",e.target.value)}/></Field>
+              <Field label="店舗担当者" full>
+                <select style={S.inp} value={form.staff||""} onChange={e=>setField("staff",e.target.value)}>
+                  <option value="">未割当</option>
+                  {STAFF_LIST.map(s=><option key={s} value={s}>{s}</option>)}
+                </select>
+              </Field>
             </div>
 
             <div style={S.secTitle}>希望条件</div>
@@ -509,6 +599,42 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack })
               <Field label="見積状況"><input style={S.inp} value={form.quoteStatus} onChange={e=>setField("quoteStatus",e.target.value)} placeholder="例：見積提出済"/></Field>
             </div>
 
+            {/* 予約金管理 */}
+            <div style={S.secTitle}>💰 予約金</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:".7rem"}} className="hb-form-grid">
+              <Field label="予約金の有無" full>
+                <div style={{display:"flex",gap:"1rem",marginTop:".25rem"}}>
+                  <label style={{display:"flex",alignItems:"center",gap:".4rem",cursor:"pointer",fontSize:".85rem",color:form.depositPolicy==="required"?"#c9a84c":"rgba(240,232,208,0.55)"}}>
+                    <input type="radio" name="depositPolicy" checked={form.depositPolicy==="required"} onChange={()=>setField("depositPolicy","required")} style={{accentColor:"#c9a84c"}}/>
+                    もらう
+                  </label>
+                  <label style={{display:"flex",alignItems:"center",gap:".4rem",cursor:"pointer",fontSize:".85rem",color:form.depositPolicy==="waived"?"#c9a84c":"rgba(240,232,208,0.55)"}}>
+                    <input type="radio" name="depositPolicy" checked={form.depositPolicy==="waived"} onChange={()=>setField("depositPolicy","waived")} style={{accentColor:"#c9a84c"}}/>
+                    もらわない
+                  </label>
+                </div>
+              </Field>
+              {form.depositPolicy==="required" && (
+                <>
+                  <Field label="金額"><input type="number" style={S.inp} value={form.depositAmount} onChange={e=>setField("depositAmount",e.target.value)} placeholder="30000"/></Field>
+                  <Field label="受領状態">
+                    <label style={{display:"flex",alignItems:"center",gap:".5rem",cursor:"pointer",fontSize:".85rem",padding:".55rem 0",color:form.depositReceived?"#7ec87e":"rgba(240,232,208,0.55)"}}>
+                      <input type="checkbox" checked={!!form.depositReceived} onChange={e=>setField("depositReceived",e.target.checked)} style={{accentColor:"#7ec87e"}}/>
+                      {form.depositReceived?"✓ 受領済み":"未受領"}
+                    </label>
+                  </Field>
+                  {form.depositReceived && (
+                    <Field label="受領日" full>
+                      <input type="date" style={S.inp} value={form.depositDate||""} onChange={e=>setField("depositDate",e.target.value)}/>
+                    </Field>
+                  )}
+                  <Field label="メモ" full>
+                    <input style={S.inp} value={form.depositMemo||""} onChange={e=>setField("depositMemo",e.target.value)} placeholder="例：銀行振込 / 現金受領 など"/>
+                  </Field>
+                </>
+              )}
+            </div>
+
             <div style={S.secTitle}>メモ</div>
             <textarea style={{...S.inp,resize:"vertical",lineHeight:1.5}} rows={4} value={form.memo} onChange={e=>setField("memo",e.target.value)} placeholder="自由記述"/>
 
@@ -540,13 +666,19 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack })
           {/* 明細 */}
           <div style={{fontSize:".68rem",color:"rgba(201,168,76,0.7)",marginBottom:".5rem",letterSpacing:".1em"}}>明細</div>
 
-          {/* プリセット追加ボタン */}
-          <div style={{display:"flex",gap:".35rem",flexWrap:"wrap",marginBottom:".75rem"}}>
-            {PRESET_ITEMS.map((p,i)=>(
-              <button key={i} style={{...S.btn("sm"),fontSize:".6rem",padding:".25rem .5rem"}} onClick={()=>{
-                const newItem = { name: p.name, qty: 1, unit: "式", price: p.price };
-                setField("quoteItems", [...(form.quoteItems||[]), newItem]);
-              }}>＋ {p.name.length>20?p.name.slice(0,20)+"...":p.name}</button>
+          {/* プリセット追加ボタン（グループ分け） */}
+          <div style={{marginBottom:".75rem"}}>
+            {["ホール","飲み放題","料理"].map(group=>(
+              <div key={group} style={{display:"flex",gap:".35rem",flexWrap:"wrap",marginBottom:".4rem",alignItems:"center"}}>
+                <span style={{fontSize:".6rem",letterSpacing:".1em",color:"rgba(201,168,76,0.5)",minWidth:60,textTransform:"uppercase"}}>{group}：</span>
+                {PRESET_ITEMS.filter(p=>p.group===group).map((p,i)=>(
+                  <button key={i} style={{...S.btn("sm"),fontSize:".6rem",padding:".25rem .5rem"}} onClick={()=>{
+                    const qty = p.unit==="名" ? Number(form.people||1) : 1;
+                    const newItem = { name: p.name, qty, unit: p.unit, price: p.price };
+                    setField("quoteItems", [...(form.quoteItems||[]), newItem]);
+                  }}>＋ {p.name.replace(group+"・","").replace(/^.*?（/,"（").length>20?p.name.slice(0,20)+"...":p.name}</button>
+                ))}
+              </div>
             ))}
           </div>
 
@@ -593,11 +725,22 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack })
           {(form.quoteItems||[]).length > 0 && (() => {
             const sub = (form.quoteItems||[]).reduce((s,i)=>s+(Number(i.qty||0)*Number(i.price||0)),0);
             const tax = Math.round(sub * 0.1);
+            const total = sub + tax;
+            const dep = (form.depositPolicy==="required" && form.depositReceived) ? Number(form.depositAmount||0) : 0;
+            const balance = total - dep;
             return (
-              <div style={{padding:".75rem 1rem",background:"#111",borderRadius:5,marginBottom:"1rem",display:"flex",gap:"1.5rem",justifyContent:"flex-end",fontSize:".82rem",alignItems:"baseline",flexWrap:"wrap"}}>
-                <span style={{color:"rgba(240,232,208,0.55)"}}>小計: <strong style={{color:"#f0e8d0"}}>¥{sub.toLocaleString()}</strong></span>
-                <span style={{color:"rgba(240,232,208,0.55)"}}>消費税(10%): <strong style={{color:"#f0e8d0"}}>¥{tax.toLocaleString()}</strong></span>
-                <span style={{color:"#c9a84c"}}>合計: <strong style={{fontSize:"1.05rem"}}>¥{(sub+tax).toLocaleString()}</strong></span>
+              <div style={{padding:".75rem 1rem",background:"#111",borderRadius:5,marginBottom:"1rem",fontSize:".82rem"}}>
+                <div style={{display:"flex",gap:"1.5rem",justifyContent:"flex-end",alignItems:"baseline",flexWrap:"wrap"}}>
+                  <span style={{color:"rgba(240,232,208,0.55)"}}>小計: <strong style={{color:"#f0e8d0"}}>¥{sub.toLocaleString()}</strong></span>
+                  <span style={{color:"rgba(240,232,208,0.55)"}}>消費税(10%): <strong style={{color:"#f0e8d0"}}>¥{tax.toLocaleString()}</strong></span>
+                  <span style={{color:"#c9a84c"}}>合計: <strong style={{fontSize:"1.05rem"}}>¥{total.toLocaleString()}</strong></span>
+                </div>
+                {dep > 0 && (
+                  <div style={{display:"flex",gap:"1.5rem",justifyContent:"flex-end",alignItems:"baseline",flexWrap:"wrap",marginTop:".4rem",paddingTop:".4rem",borderTop:"1px dashed rgba(201,168,76,0.15)"}}>
+                    <span style={{color:"rgba(126,200,127,0.8)"}}>ご入金済み（予約金）: <strong>−¥{dep.toLocaleString()}</strong></span>
+                    <span style={{color:"#c9a84c"}}>請求書の残額: <strong style={{fontSize:"1.1rem"}}>¥{balance.toLocaleString()}</strong></span>
+                  </div>
+                )}
               </div>
             );
           })()}
@@ -625,6 +768,34 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack })
           <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.4)",marginTop:".5rem"}}>
             ※ 新しいウィンドウが開きます。「PDFとして保存」ボタンでPDF出力 or 印刷できます。
           </div>
+
+          {/* 発行履歴 */}
+          {(form.documentHistory||[]).length>0 && (
+            <div style={{marginTop:"1.5rem",paddingTop:"1.25rem",borderTop:"1px dashed rgba(201,168,76,0.2)"}}>
+              <div style={{fontSize:".68rem",color:"rgba(201,168,76,0.7)",marginBottom:".75rem",letterSpacing:".15em"}}>📚 発行履歴（{form.documentHistory.length}件）</div>
+              <div style={{display:"flex",flexDirection:"column",gap:".4rem"}}>
+                {[...form.documentHistory].reverse().map((doc,ri)=>{
+                  const i = form.documentHistory.length - 1 - ri;
+                  return (
+                    <div key={i} style={{display:"grid",gridTemplateColumns:"auto 1fr auto auto",gap:".75rem",alignItems:"center",padding:".55rem .75rem",background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.1)",borderRadius:5}}>
+                      <div style={{fontSize:".58rem",letterSpacing:".1em",padding:".15rem .45rem",borderRadius:2,background:doc.type==="invoice"?"rgba(126,200,227,0.15)":"rgba(201,168,76,0.15)",color:doc.type==="invoice"?"#7ec8e3":"#c9a84c",textTransform:"uppercase"}}>
+                        {doc.type==="invoice"?"請求書":"見積書"} No.{doc.no}
+                      </div>
+                      <div style={{fontSize:".72rem",color:"rgba(240,232,208,0.65)"}}>
+                        <div>{doc.subject||"（件名未設定）"}</div>
+                        <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.4)",marginTop:".15rem"}}>発行日：{doc.issuedAt} ／ ¥{(doc.total||0).toLocaleString()}</div>
+                      </div>
+                      <button style={{...S.btn("sm"),padding:".25rem .55rem",fontSize:".58rem"}} onClick={()=>openDocFromSnapshot(doc)}>📄 表示</button>
+                      <button style={{padding:".22rem .4rem",background:"transparent",border:"1px solid rgba(226,75,74,0.27)",borderRadius:3,color:"#e24b4a",cursor:"pointer",fontSize:".7rem"}} onClick={()=>{
+                        if(!window.confirm("この履歴を削除しますか？(連番は復活しません)"))return;
+                        setField("documentHistory", form.documentHistory.filter((_,idx)=>idx!==i));
+                      }} title="履歴削除">✕</button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
         <div style={{display:"flex",gap:".5rem",marginTop:"1.5rem",flexWrap:"wrap"}}>
@@ -660,6 +831,16 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack })
         ))}
       </div>
 
+      {/* 担当者フィルター */}
+      <div style={{display:"flex",alignItems:"center",gap:".75rem",marginBottom:"1rem",flexWrap:"wrap"}}>
+        <span style={{fontSize:".68rem",letterSpacing:".15em",color:"rgba(201,168,76,0.7)"}}>👤 担当:</span>
+        <button onClick={()=>setStaffFilter("all")} style={{padding:".3rem .7rem",borderRadius:3,border:"1px solid "+(staffFilter==="all"?"#c9a84c":"rgba(201,168,76,0.2)"),background:staffFilter==="all"?"#c9a84c":"transparent",color:staffFilter==="all"?"#0a0a0a":"rgba(201,168,76,0.7)",fontSize:".65rem",cursor:"pointer",fontFamily:"inherit",letterSpacing:".05em"}}>全員</button>
+        {STAFF_LIST.map(s=>(
+          <button key={s} onClick={()=>setStaffFilter(s)} style={{padding:".3rem .7rem",borderRadius:3,border:"1px solid "+(staffFilter===s?"#c9a84c":"rgba(201,168,76,0.2)"),background:staffFilter===s?"#c9a84c":"transparent",color:staffFilter===s?"#0a0a0a":"rgba(201,168,76,0.7)",fontSize:".65rem",cursor:"pointer",fontFamily:"inherit",letterSpacing:".05em"}}>{s}</button>
+        ))}
+        <button onClick={()=>setStaffFilter("")} style={{padding:".3rem .7rem",borderRadius:3,border:"1px solid "+(staffFilter===""?"#c9a84c":"rgba(201,168,76,0.2)"),background:staffFilter===""?"#c9a84c":"transparent",color:staffFilter===""?"#0a0a0a":"rgba(201,168,76,0.7)",fontSize:".65rem",cursor:"pointer",fontFamily:"inherit",letterSpacing:".05em"}}>未割当</button>
+      </div>
+
       {/* 一覧 */}
       {sorted.length === 0 && (
         <div style={{textAlign:"center",padding:"3rem",color:"rgba(240,232,208,0.25)",fontSize:".85rem"}}>
@@ -669,9 +850,21 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack })
       {sorted.map(r=>(
         <div key={r._id} style={S.card} className="hb-card">
           <div onClick={()=>startEdit(r)} style={{cursor:"pointer"}}>
-            <div style={{display:"flex",alignItems:"center",gap:".75rem",marginBottom:".35rem"}}>
+            <div style={{display:"flex",alignItems:"center",gap:".5rem",marginBottom:".35rem",flexWrap:"wrap"}}>
               <span style={{fontFamily:"Georgia,serif",fontSize:"1rem"}}>{r.contactName||"（無題）"}</span>
               <StatusBadge status={r.status}/>
+              {r.staff && <span style={{display:"inline-block",padding:".1rem .4rem",borderRadius:2,fontSize:".55rem",letterSpacing:".08em",background:"rgba(201,168,76,0.1)",color:"rgba(201,168,76,0.8)"}}>👤 {r.staff}</span>}
+              {r.depositPolicy==="required" && (
+                <span style={{display:"inline-block",padding:".1rem .4rem",borderRadius:2,fontSize:".55rem",letterSpacing:".08em",background:r.depositReceived?"rgba(126,200,127,0.13)":"rgba(244,162,97,0.13)",color:r.depositReceived?"#7ec87e":"#f4a261"}}>
+                  {r.depositReceived?"💰 受領済":"💰 未受領"}
+                </span>
+              )}
+              {r.depositPolicy==="waived" && (
+                <span style={{display:"inline-block",padding:".1rem .4rem",borderRadius:2,fontSize:".55rem",letterSpacing:".08em",background:"rgba(255,255,255,0.05)",color:"rgba(240,232,208,0.5)"}}>予約金なし</span>
+              )}
+              {(r.documentHistory||[]).length>0 && (
+                <span style={{display:"inline-block",padding:".1rem .4rem",borderRadius:2,fontSize:".55rem",letterSpacing:".08em",background:"rgba(126,200,227,0.13)",color:"#7ec8e3"}}>📄 {r.documentHistory.length}件</span>
+              )}
             </div>
             <div style={{fontSize:".7rem",color:"rgba(240,232,208,0.5)",display:"flex",gap:"1rem",flexWrap:"wrap"}}>
               {r.desiredDate && <span>📅 希望: {r.desiredDate} {r.desiredTime}</span>}
