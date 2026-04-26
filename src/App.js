@@ -154,18 +154,25 @@ function CalendarView({events,onEdit}){
   );
 }
 
-async function callClaudeAPI(prompt) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+async function callOpenAIAPI(prompt, apiKey) {
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer " + apiKey,
+    },
     body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1000,
+      model: "gpt-4o-mini",
+      max_tokens: 500,
       messages: [{ role: "user", content: prompt }],
     }),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(()=>({}));
+    throw new Error(err.error?.message || "API呼び出しに失敗しました");
+  }
   const data = await res.json();
-  return data.content?.[0]?.text || "";
+  return data.choices?.[0]?.message?.content || "";
 }
 
 function FlyerTab({ outputs, copied, copyText }) {
@@ -238,6 +245,9 @@ export default function App() {
   const [csvMsg, setCsvMsg] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem("hb-openai-key") || "");
+  const [showApiModal, setShowApiModal] = useState(false);
+  const [tempApiKey, setTempApiKey] = useState("");
 
   useEffect(()=>{localStorage.setItem("hb-events",JSON.stringify(events));},[events]);
   useEffect(()=>{localStorage.setItem("hb-templates",JSON.stringify(templates));},[templates]);
@@ -253,6 +263,7 @@ export default function App() {
 
   const handleAIDesc=async()=>{
     if(!form.name){setAiError("イベント名を入力してください");return;}
+    if(!apiKey){setTempApiKey("");setShowApiModal(true);return;}
     setAiLoading(true);setAiError("");
     try{
       const prompt=`あなたはライブハウス「大船HONEY BEE」のイベント告知文ライターです。
@@ -266,10 +277,20 @@ export default function App() {
 開場/開演：${form.open||""}/${form.start||""}
 
 説明文のみを出力し、前置きや後書きは不要です。`;
-      const result=await callClaudeAPI(prompt);
+      const result=await callOpenAIAPI(prompt, apiKey);
       setField("desc",result.trim());
-    }catch(e){setAiError("AI生成に失敗しました。しばらくしてから再試行してください。");}
+    }catch(e){
+      setAiError("AI生成に失敗しました："+e.message);
+    }
     setAiLoading(false);
+  };
+
+  const saveApiKey=()=>{
+    if(!tempApiKey.trim()){alert("APIキーを入力してください");return;}
+    localStorage.setItem("hb-openai-key", tempApiKey.trim());
+    setApiKey(tempApiKey.trim());
+    setShowApiModal(false);
+    setTempApiKey("");
   };
 
   const handleSaveEvent=()=>{
@@ -316,9 +337,10 @@ export default function App() {
 
       <div style={S.hdr}>
         <div style={S.logo}>HONEY BEE <small style={S.logoSm}>Event Manager</small></div>
-        <div style={{display:"flex",gap:".4rem"}}>
+        <div style={{display:"flex",gap:".4rem",alignItems:"center"}}>
           <button style={S.navTab(view==="list")} onClick={()=>setView("list")}>📋 一覧</button>
           <button style={S.navTab(view==="form")} onClick={()=>setView("form")}>✦ 新規作成</button>
+          <button style={{...S.btn("sm"),padding:".35rem .65rem",marginLeft:".5rem"}} onClick={()=>{setTempApiKey(apiKey);setShowApiModal(true);}} title="OpenAI APIキー設定">{apiKey?"🔑":"🔓"}</button>
         </div>
       </div>
 
@@ -469,6 +491,28 @@ export default function App() {
               {outputs&&activeOut==="flyer"&&(
                 <FlyerTab outputs={outputs} copied={copied} copyText={copyText}/>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showApiModal&&(
+        <div style={{position:"fixed",top:0,left:0,width:"100%",height:"100%",background:"rgba(0,0,0,0.85)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div style={{background:"#111",border:"1px solid rgba(201,168,76,0.27)",borderRadius:8,padding:"1.5rem",width:420,maxWidth:"90%"}}>
+            <div style={{fontFamily:"Georgia,serif",fontSize:".95rem",color:"#c9a84c",marginBottom:".75rem"}}>🔑 OpenAI APIキー設定</div>
+            <div style={{fontSize:".7rem",color:"rgba(240,232,208,0.55)",marginBottom:".75rem",lineHeight:1.6}}>
+              AI説明文生成にOpenAI APIキーが必要です。<br/>
+              <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" style={{color:"#c9a84c"}}>https://platform.openai.com/api-keys</a> から取得してください。
+            </div>
+            <label style={S.lbl}>APIキー（sk-... で始まる）</label>
+            <input type="password" style={{...S.inp,marginTop:".3rem",marginBottom:".4rem",fontFamily:"monospace",fontSize:".75rem"}} value={tempApiKey} onChange={e=>setTempApiKey(e.target.value)} placeholder="sk-proj-..."/>
+            <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.4)",marginBottom:".75rem"}}>
+              ※ キーはこのブラウザのみに保存され、外部には送信されません
+            </div>
+            <div style={{display:"flex",gap:".5rem"}}>
+              <button style={S.btn("gold")} onClick={saveApiKey}>保存</button>
+              <button style={S.btn("ghost")} onClick={()=>{setShowApiModal(false);setTempApiKey("");}}>キャンセル</button>
+              {apiKey&&<button style={S.btn("danger")} onClick={()=>{if(window.confirm("APIキーを削除しますか？")){localStorage.removeItem("hb-openai-key");setApiKey("");setShowApiModal(false);}}}>削除</button>}
             </div>
           </div>
         </div>
