@@ -261,12 +261,12 @@ function CalendarView({events,onEdit}){
         <button style={S.btn("sm")} onClick={next}>▶</button>
         {!isCurrentMonth&&<button style={{...S.btn("ghost"),padding:".3rem .7rem",fontSize:".62rem"}} onClick={goToday}>今月</button>}
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:2}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,minmax(0,1fr))",gap:2,marginBottom:2}}>
         {["日","月","火","水","木","金","土"].map((d,i)=>(
           <div key={d} style={{textAlign:"center",fontSize:".65rem",padding:".3rem 0",color:i===0?"#e24b4a":i===6?"#7ec8e3":"rgba(240,232,208,0.4)"}}>{d}</div>
         ))}
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,minmax(0,1fr))",gap:2}}>
         {cells.map((day,idx)=>{
           if(!day)return<div key={"e"+idx}/>;
           const dateKey=`${calYear}-${String(calMonth+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
@@ -274,10 +274,10 @@ function CalendarView({events,onEdit}){
           const isToday=dateKey===todayStr;
           const dow=(firstDay+day-1)%7;
           return(
-            <div key={idx} style={{background:isToday?"rgba(201,168,76,0.12)":"#111",border:isToday?"1px solid rgba(201,168,76,0.5)":"1px solid rgba(255,255,255,0.04)",borderRadius:4,padding:".3rem .25rem",minHeight:58}}>
-              <div style={{fontSize:".72rem",fontWeight:500,marginBottom:".2rem",color:isToday?"#c9a84c":dow===0?"#e24b4a":dow===6?"#7ec8e3":"rgba(240,232,208,0.55)"}}>{day}</div>
+            <div key={idx} className="hb-cal-cell" style={{background:isToday?"rgba(201,168,76,0.12)":"#111",border:isToday?"1px solid rgba(201,168,76,0.5)":"1px solid rgba(255,255,255,0.04)",borderRadius:4,padding:".3rem .25rem",minHeight:58,minWidth:0,overflow:"hidden"}}>
+              <div className="hb-cal-day-num" style={{fontSize:".72rem",fontWeight:500,marginBottom:".2rem",color:isToday?"#c9a84c":dow===0?"#e24b4a":dow===6?"#7ec8e3":"rgba(240,232,208,0.55)"}}>{day}</div>
               {evs.map((ev,ei)=>(
-                <div key={ei} onClick={()=>onEdit(events.indexOf(ev))} style={{fontSize:".55rem",lineHeight:1.3,padding:".15rem .28rem",marginBottom:".12rem",background:"rgba(201,168,76,0.15)",borderLeft:"2px solid #c9a84c",borderRadius:2,cursor:"pointer",color:"#f0e8d0cc",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}} title={ev.name}>{ev.name}</div>
+                <div key={ei} className="hb-cal-event" onClick={()=>onEdit(events.indexOf(ev))} style={{fontSize:".55rem",lineHeight:1.3,padding:".15rem .28rem",marginBottom:".12rem",background:"rgba(201,168,76,0.15)",borderLeft:"2px solid #c9a84c",borderRadius:2,cursor:"pointer",color:"#f0e8d0cc",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}} title={ev.name}>{ev.name}</div>
               ))}
             </div>
           );
@@ -770,26 +770,22 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
     <div style={S.app}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
       <style>{`
+        html, body, #root { overflow-x: hidden; max-width: 100%; }
         @media (max-width: 768px) {
-          .hb-hdr { padding: 0.85rem 1rem !important; flex-wrap: wrap !important; gap: 0.5rem !important; }
-          .hb-logo { font-size: 1.1rem !important; }
-          .hb-view { padding: 1rem !important; }
+          .hb-hdr { padding: 0.75rem 0.85rem !important; flex-wrap: wrap !important; gap: 0.4rem !important; }
+          .hb-logo { font-size: 1rem !important; }
+          .hb-view { padding: 0.85rem 0.6rem !important; }
           .hb-form-layout { grid-template-columns: 1fr !important; gap: 1rem !important; }
           .hb-form-grid { grid-template-columns: 1fr !important; }
           .hb-output-panel { border-left: none !important; padding-left: 0 !important; border-top: 1px solid rgba(201,168,76,0.1); padding-top: 1rem !important; }
-          .hb-cal-cell { min-height: 48px !important; padding: 0.2rem 0.15rem !important; }
-          .hb-cal-day-num { font-size: 0.65rem !important; }
-          .hb-cal-event { font-size: 0.5rem !important; padding: 0.1rem 0.2rem !important; }
+          .hb-cal-cell { min-height: 44px !important; padding: 0.15rem 0.1rem !important; }
+          .hb-cal-day-num { font-size: 0.6rem !important; }
+          .hb-cal-event { font-size: 0.45rem !important; padding: 0.08rem 0.15rem !important; line-height: 1.2 !important; }
           .hb-toolbar { flex-direction: column !important; align-items: stretch !important; }
           .hb-card { grid-template-columns: 1fr !important; }
-          .hb-card-actions { justify-content: flex-end; }
           .hb-tabs { gap: 0.25rem !important; }
           .hb-tab { font-size: 0.6rem !important; padding: 0.3rem 0.5rem !important; letter-spacing: 0.05em !important; }
           input, textarea, select { font-size: 16px !important; }
-          .hb-event-actions-mobile { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.5rem; }
-        }
-        @media (min-width: 769px) {
-          .hb-event-actions-mobile { display: none !important; }
         }
       `}</style>
 
