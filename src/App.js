@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 
 const DAYS = ["日","月","火","水","木","金","土"];
 const MONTH_NAMES = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
-const emptyForm = { name:"",date:"",day:"",open:"",start:"",price:"",cap:"",perf:"",desc:"",url:"",notes:"",genre:"",rehearsal:"",poster:"",timetable:"" };
+const emptyForm = { name:"",date:"",day:"",open:"",start:"",price:"",cap:"",perf:"",desc:"",url:"",notes:"",genre:"",rehearsal:"",poster:"",timetable:"",reference:"" };
 
 function parseCSVLine(line) {
   const cols=[]; let cur="",inQ=false;
@@ -477,6 +477,7 @@ export default function App() {
 出演者：${form.perf||"未定"}
 料金：${form.price||"未定"}
 開場/開演：${form.open||""}/${form.start||""}
+${form.reference ? `\n【参考情報（出演者の経歴・特徴など）】\n${form.reference}\n上記の参考情報を活かして、出演者の魅力が伝わるよう具体的に書いてください。` : ""}
 
 説明文のみを出力し、前置きや後書きは不要です。`;
       const result=await callOpenAIAPI(prompt, apiKey);
@@ -635,6 +636,9 @@ export default function App() {
                 <Field label="定員"><input type="number" style={S.inp} value={form.cap} onChange={e=>setField("cap",e.target.value)} placeholder="例：50"/></Field>
                 <Field label="ジャンル（SEO用）" full><input style={S.inp} value={form.genre} onChange={e=>setField("genre",e.target.value)} placeholder="例：ジャズ / ロック / アコースティック"/></Field>
                 <Field label="出演者" full><input style={S.inp} value={form.perf} onChange={e=>setField("perf",e.target.value)} placeholder="例：山田太郎（Gt）/ 田中花子（Vo）"/></Field>
+                <Field label="📝 参考情報（AI用・任意）" full>
+                  <textarea style={{...S.inp,resize:"vertical",lineHeight:1.5}} rows={3} value={form.reference} onChange={e=>setField("reference",e.target.value)} placeholder="出演者のプロフィール・SNSの紹介文・経歴など、ネットで調べた情報をここに貼り付けるとAIが説明文に活かしてくれます"/>
+                </Field>
                 <Field label="イベント説明" full>
                   <div style={{position:"relative"}}>
                     <textarea style={{...S.inp,resize:"vertical",lineHeight:1.5,paddingBottom:"2.5rem"}} rows={4} value={form.desc} onChange={e=>setField("desc",e.target.value)} placeholder="イベントの雰囲気・内容（下のボタンでAI自動生成も可）"/>
