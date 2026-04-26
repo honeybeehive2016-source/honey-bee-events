@@ -4,38 +4,142 @@ const DAYS = ["日","月","火","水","木","金","土"];
 const MONTH_NAMES = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
 const emptyForm = { name:"",date:"",day:"",open:"",start:"",price:"",cap:"",perf:"",desc:"",url:"",notes:"",genre:"",rehearsal:"",poster:"",timetable:"",reference:"" };
 
-function parseCSVLine(line) {
-  const cols=[]; let cur="",inQ=false;
-  for(let i=0;i<line.length;i++){
-    const c=line[i];
-    if(c==='"'){inQ=!inQ;continue;}
-    if(c===','&&!inQ){cols.push(cur.trim());cur="";continue;}
-    cur+=c;
+// 行単位ではなく1文字ずつ読んでパースする（セル内改行に対応）
+function parseCSVText(text) {
+  const rows = [];
+  let row = [], cur = "", inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i], nx = text[i+1];
+    if (inQ) {
+      if (c === '"' && nx === '"') { cur += '"'; i++; }
+      else if (c === '"') { inQ = false; }
+      else { cur += c; }
+    } else {
+      if (c === '"') { inQ = true; }
+      else if (c === ',') { row.push(cur); cur = ""; }
+      else if (c === '\r') { /* skip */ }
+      else if (c === '\n') { row.push(cur); rows.push(row); row = []; cur = ""; }
+      else { cur += c; }
+    }
   }
-  cols.push(cur.trim()); return cols;
+  if (cur || row.length) { row.push(cur); rows.push(row); }
+  return rows;
+}
+
+// 時間帯ラベル（昼/夜/深夜）と開演/開場時間を抽出
+function extractTimePeriod(eventName, descText) {
+  // ラベル検出
+  const labelMatch = eventName.match(/[（(](昼|夜|深夜|朝|午前|午後)[）)]/);
+  const label = labelMatch ? labelMatch[1] : "";
+  const cleanName = eventName.replace(/[（(](昼|夜|深夜|朝|午前|午後)[）)]\s*/, "").trim();
+
+  // descTextから時間情報を抽出（例：「昼 開場12:30 開演13:00」）
+  let open = "", start = "", price = "";
+  if (label && descText) {
+    // ラベル付近の時間を探す
+    const lines = descText.split(/\r?\n/);
+    for (const line of lines) {
+      if (line.includes(label) || line.includes(`(${label})`) || line.includes(`（${label}）`)) {
+        const openMatch = line.match(/開場\s*(\d{1,2}[:：]\d{2})/);
+        const startMatch = line.match(/開演\s*(\d{1,2}[:：]\d{2})/);
+        const priceMatch = line.match(/[¥￥]\s?(\d[\d,]*)/) || line.match(/(\d[\d,]{3,})\s*円/);
+        const timeRangeMatch = line.match(/(\d{1,2}[:：]\d{2})\s*[／\/～\-~]\s*(\d{1,2}[:：]\d{2})/);
+        const singleTimeMatch = !openMatch && !startMatch && !timeRangeMatch ? line.match(/(\d{1,2}[:：]\d{2})/) : null;
+        if (openMatch) open = openMatch[1].replace("：",":");
+        if (startMatch) start = startMatch[1].replace("：",":");
+        if (timeRangeMatch && !open) { open = timeRangeMatch[1].replace("：",":"); start = timeRangeMatch[2].replace("：",":"); }
+        if (singleTimeMatch && !start) start = singleTimeMatch[1].replace("：",":");
+        if (priceMatch) price = "¥" + priceMatch[1];
+        break;
+      }
+    }
+  }
+
+  return { label, cleanName, open, start, price };
 }
 
 function parseCSV(text) {
-  const clean=text.replace(/^\uFEFF/,"");
-  const lines=clean.trim().split(/\r?\n/);
-  const results=[]; const now=new Date(); const cy=now.getFullYear();
-  const startIdx=lines[0]&&/^\d{1,2}\/\d{1,2}/.test(lines[0].trim())?0:1;
-  const toHHMM=s=>{const m=s.match(/(\d{1,2}):(\d{2})/);return m?`${m[1].padStart(2,"0")}:${m[2]}`:"";}; 
-  for(let i=startIdx;i<lines.length;i++){
-    if(!lines[i].trim())continue;
-    const cols=parseCSVLine(lines[i]);
-    const rawDate=cols[0]||""; const name=cols[2]||"";
-    if(!name||name==="イベント名"||name==="店休日")continue;
-    let isoDate="";
-    const mS=rawDate.match(/^(\d{1,2})\/(\d{1,2})$/);
-    const mF=rawDate.match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
-    if(mF){isoDate=`${mF[1]}-${mF[2].padStart(2,"0")}-${mF[3].padStart(2,"0")}`;}
-    else if(mS){const mo=parseInt(mS[1]),dy=parseInt(mS[2]);let yr=cy;if(mo<now.getMonth()-2)yr=cy+1;isoDate=`${yr}-${String(mo).padStart(2,"0")}-${String(dy).padStart(2,"0")}`;}
-    let day="";
-    if(cols[1]){const d=cols[1].replace(/曜日?/,"").trim();if(d.length===1)day=d+"曜日";}
-    if(!day&&isoDate){const dt=new Date(isoDate+"T00:00:00");day=DAYS[dt.getDay()]+"曜日";}
-    const timeCol=cols[4]||""; const tp=timeCol.split("/").map(s=>s.trim());
-    results.push({date:isoDate,day,name,perf:cols[3]||"",open:toHHMM(tp[0]||""),start:toHHMM(tp[1]||tp[0]||""),price:cols[5]||"",rehearsal:cols[6]||"",poster:cols[7]||"",timetable:cols[8]||"",desc:"",url:"",notes:"",genre:"",cap:"",savedAt:new Date().toLocaleDateString("ja-JP")});
+  const clean = text.replace(/^\uFEFF/, "");
+  const rows = parseCSVText(clean);
+  const results = [];
+  const now = new Date();
+  const cy = now.getFullYear();
+  const toHHMM = s => { const m = s.match(/(\d{1,2})[:：](\d{2})/); return m ? `${m[1].padStart(2,"0")}:${m[2]}` : ""; };
+
+  // ヘッダースキップ判定
+  const startIdx = rows[0] && /^\d{1,2}\/\d{1,2}/.test((rows[0][0]||"").trim()) ? 0 : 1;
+
+  for (let i = startIdx; i < rows.length; i++) {
+    const cols = rows[i];
+    if (!cols || !cols.length) continue;
+    const rawDate = (cols[0] || "").trim();
+    const rawName = (cols[2] || "").trim();
+    if (!rawName || rawName === "イベント名" || rawName === "店休日") continue;
+
+    // 日付変換
+    let isoDate = "";
+    const mS = rawDate.match(/^(\d{1,2})\/(\d{1,2})$/);
+    const mF = rawDate.match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+    if (mF) isoDate = `${mF[1]}-${mF[2].padStart(2,"0")}-${mF[3].padStart(2,"0")}`;
+    else if (mS) {
+      const mo = parseInt(mS[1]), dy = parseInt(mS[2]);
+      let yr = cy;
+      if (mo < now.getMonth() - 2) yr = cy + 1;
+      isoDate = `${yr}-${String(mo).padStart(2,"0")}-${String(dy).padStart(2,"0")}`;
+    }
+    // 曜日
+    let day = "";
+    if (cols[1]) { const d = cols[1].replace(/曜日?/, "").trim(); if (d.length === 1) day = d + "曜日"; }
+    if (!day && isoDate) { const dt = new Date(isoDate + "T00:00:00"); day = DAYS[dt.getDay()] + "曜日"; }
+
+    // 開場/開演（デフォルト・夜のイベント用）
+    const timeCol = (cols[4] || "").trim();
+    const tp = timeCol.split(/[\/／]/).map(s => s.trim());
+    const defaultOpen = toHHMM(tp[0] || "");
+    const defaultStart = toHHMM(tp[1] || tp[0] || "");
+    const defaultPrice = (cols[5] || "").trim();
+    const descText = (cols[3] || "").trim();
+    const rehearsal = (cols[6] || "").trim();
+    const notes = ((cols[7] || "") + " " + (cols[8] || "")).trim();
+
+    // イベント名がセル内改行で複数あるか判定
+    const nameLines = rawName.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+
+    if (nameLines.length <= 1) {
+      // 単一イベント
+      results.push({
+        date: isoDate, day, name: rawName, perf: descText,
+        open: defaultOpen, start: defaultStart, price: defaultPrice,
+        rehearsal, poster: "", timetable: "", desc: "", url: "",
+        notes, genre: "", cap: "", reference: "",
+        savedAt: new Date().toLocaleDateString("ja-JP"),
+      });
+    } else {
+      // 複数イベント（昼/夜/深夜）
+      nameLines.forEach((line, idx) => {
+        const { label, cleanName, open, start, price } = extractTimePeriod(line, descText);
+        // 各イベントの内容欄から該当する行を抽出
+        let eventDesc = "";
+        if (label && descText) {
+          const descLines = descText.split(/\r?\n/);
+          const matchedLine = descLines.find(l =>
+            l.includes(`(${label})`) || l.includes(`（${label}）`) || l.includes(label + ")")
+          );
+          if (matchedLine) eventDesc = matchedLine.replace(/[（(](昼|夜|深夜|朝|午前|午後)[）)]\s*/, "").trim();
+        }
+        results.push({
+          date: isoDate, day,
+          name: label ? `[${label}] ${cleanName}` : line,
+          perf: eventDesc || (idx === nameLines.length - 1 ? descText : ""),
+          open: open || (idx === nameLines.length - 1 ? defaultOpen : ""),
+          start: start || (idx === nameLines.length - 1 ? defaultStart : ""),
+          price: price || (idx === nameLines.length - 1 ? defaultPrice : ""),
+          rehearsal, poster: "", timetable: "", desc: "", url: "",
+          notes, genre: "", cap: "", reference: "",
+          savedAt: new Date().toLocaleDateString("ja-JP"),
+        });
+      });
+    }
   }
   return results;
 }
@@ -117,16 +221,35 @@ function CalendarView({events,onEdit}){
   events.forEach(e=>{if(!e.date)return;if(!eventMap[e.date])eventMap[e.date]=[];eventMap[e.date].push(e);});
   const prev=()=>{if(calMonth===0){setCalYear(y=>y-1);setCalMonth(11);}else setCalMonth(m=>m-1);};
   const next=()=>{if(calMonth===11){setCalYear(y=>y+1);setCalMonth(0);}else setCalMonth(m=>m+1);};
+  const goToday=()=>{setCalYear(today.getFullYear());setCalMonth(today.getMonth());};
+  const handleJump=(e)=>{
+    const [y,m]=e.target.value.split("-").map(Number);
+    setCalYear(y);setCalMonth(m);
+  };
+  // 前後12ヶ月分の選択肢を生成
+  const jumpOptions=[];
+  const baseY=today.getFullYear(),baseM=today.getMonth();
+  for(let i=-6;i<=18;i++){
+    const m=((baseM+i)%12+12)%12;
+    const y=baseY+Math.floor((baseM+i)/12);
+    jumpOptions.push({val:`${y}-${m}`,label:`${y}年${MONTH_NAMES[m]}`});
+  }
+  const currentVal=`${calYear}-${calMonth}`;
+  const isCurrentMonth=calYear===today.getFullYear()&&calMonth===today.getMonth();
+
   const cells=[];
   for(let i=0;i<firstDay;i++)cells.push(null);
   for(let d=1;d<=daysInMonth;d++)cells.push(d);
   const todayStr=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
   return(
     <div>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1.25rem"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:".5rem",marginBottom:"1.25rem",flexWrap:"wrap"}}>
         <button style={S.btn("sm")} onClick={prev}>◀</button>
-        <span style={{fontFamily:"Georgia,serif",fontSize:"1.1rem",color:"#c9a84c",letterSpacing:".1em"}}>{calYear}年 {MONTH_NAMES[calMonth]}</span>
+        <select value={currentVal} onChange={handleJump} style={{...S.inp,width:"auto",minWidth:140,padding:".4rem .65rem",fontFamily:"Georgia,serif",fontSize:"1rem",color:"#c9a84c",letterSpacing:".05em",textAlign:"center",cursor:"pointer"}}>
+          {jumpOptions.map(o=>(<option key={o.val} value={o.val}>{o.label}</option>))}
+        </select>
         <button style={S.btn("sm")} onClick={next}>▶</button>
+        {!isCurrentMonth&&<button style={{...S.btn("ghost"),padding:".3rem .7rem",fontSize:".62rem"}} onClick={goToday}>今月</button>}
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:2}}>
         {["日","月","火","水","木","金","土"].map((d,i)=>(
