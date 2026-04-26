@@ -278,7 +278,28 @@ function CalendarView({events,onEdit}){
   );
 }
 
-async function callOpenAIAPI(prompt, apiKey) {
+// GoogleドライブのviewリンクをサムネイルURLに変換（画像直接表示用）
+function gdriveDirectUrl(url) {
+  if (!url) return "";
+  const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (!m) return url;
+  const id = m[1];
+  // thumbnail APIを使う（CORSが緩い）
+  return `https://drive.google.com/thumbnail?id=${id}&sz=w1000`;
+}
+
+async function callOpenAIAPI(prompt, apiKey, imageUrl) {
+  const useVision = !!imageUrl;
+  const messages = useVision
+    ? [{
+        role: "user",
+        content: [
+          { type: "text", text: prompt },
+          { type: "image_url", image_url: { url: imageUrl } },
+        ],
+      }]
+    : [{ role: "user", content: prompt }];
+
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -286,9 +307,9 @@ async function callOpenAIAPI(prompt, apiKey) {
       "Authorization": "Bearer " + apiKey,
     },
     body: JSON.stringify({
-      model: "gpt-4o-mini",
+      model: useVision ? "gpt-4o" : "gpt-4o-mini",
       max_tokens: 500,
-      messages: [{ role: "user", content: prompt }],
+      messages,
     }),
   });
   if (!res.ok) {
@@ -592,6 +613,8 @@ export default function App() {
     if(!apiKey){setTempApiKey("");setShowApiModal(true);return;}
     setAiLoading(true);setAiError("");
     try{
+      const hasPoster = !!form.poster;
+      const posterUrl = hasPoster ? gdriveDirectUrl(form.poster) : "";
       const prompt=`あなたはライブハウス「大船HONEY BEE」のイベント告知文ライターです。
 以下のイベント情報をもとに、魅力的なイベント説明文を日本語で150〜200字程度で書いてください。
 ライブハウスらしい熱量と高級感を両立した文体で、お客さんが「行きたい！」と思えるような内容にしてください。
@@ -602,9 +625,10 @@ export default function App() {
 料金：${form.price||"未定"}
 開場/開演：${form.open||""}/${form.start||""}
 ${form.reference ? `\n【参考情報（出演者の経歴・特徴など）】\n${form.reference}\n上記の参考情報を活かして、出演者の魅力が伝わるよう具体的に書いてください。` : ""}
+${hasPoster ? `\n【ポスター画像も添付しています】\n画像から読み取れる情報（出演者名、ジャンル、雰囲気、デザインの世界観など）を必ず説明文に活かしてください。画像内の文字情報も参考にしてください。` : ""}
 
 説明文のみを出力し、前置きや後書きは不要です。`;
-      const result=await callOpenAIAPI(prompt, apiKey);
+      const result=await callOpenAIAPI(prompt, apiKey, posterUrl);
       setField("desc",result.trim());
     }catch(e){
       setAiError("AI生成に失敗しました："+e.message);
@@ -767,7 +791,7 @@ ${form.reference ? `\n【参考情報（出演者の経歴・特徴など）】\
                   <div style={{position:"relative"}}>
                     <textarea style={{...S.inp,resize:"vertical",lineHeight:1.5,paddingBottom:"2.5rem"}} rows={4} value={form.desc} onChange={e=>setField("desc",e.target.value)} placeholder="イベントの雰囲気・内容（下のボタンでAI自動生成も可）"/>
                     <button onClick={handleAIDesc} disabled={aiLoading} style={{position:"absolute",bottom:".5rem",right:".5rem",...S.btn("ai"),opacity:aiLoading?0.6:1}}>
-                      {aiLoading?"⏳ 生成中...":"✨ AIで自動生成"}
+                      {aiLoading?"⏳ 生成中...":(form.poster?"✨ AI生成（ポスター読込）":"✨ AIで自動生成")}
                     </button>
                   </div>
                   {aiError&&<div style={{fontSize:".68rem",color:"#e24b4a",marginTop:".3rem"}}>{aiError}</div>}
@@ -775,7 +799,15 @@ ${form.reference ? `\n【参考情報（出演者の経歴・特徴など）】\
                 <Field label="予約URL" full><input type="url" style={S.inp} value={form.url} onChange={e=>setField("url",e.target.value)} placeholder="https://..."/></Field>
                 <Field label="注意事項" full><textarea style={{...S.inp,resize:"vertical",lineHeight:1.5}} rows={2} value={form.notes} onChange={e=>setField("notes",e.target.value)} placeholder="未成年者入場不可 / etc."/></Field>
                 {form.rehearsal&&<Field label="バンド入り時間（参考）" full><input style={{...S.inp,color:"rgba(201,168,76,0.5)"}} value={form.rehearsal} readOnly/></Field>}
-                {form.poster&&<Field label="ポスター" full><a href={form.poster} target="_blank" rel="noreferrer" style={{color:"#c9a84c",fontSize:".8rem"}}>🖼 ポスターを開く</a></Field>}
+                {form.poster&&(
+                  <Field label="🖼 ポスター" full>
+                    <a href={form.poster} target="_blank" rel="noreferrer" style={{display:"block",textAlign:"center",background:"#0f0f0f",border:"1px solid rgba(201,168,76,0.15)",borderRadius:6,padding:".75rem",textDecoration:"none"}}>
+                      <img src={gdriveDirectUrl(form.poster)} alt="ポスター" style={{maxWidth:"100%",maxHeight:340,borderRadius:4,display:"block",margin:"0 auto"}} onError={(e)=>{e.target.style.display="none";e.target.nextSibling.style.display="block";}}/>
+                      <div style={{display:"none",color:"#c9a84c",fontSize:".8rem",padding:"1rem"}}>🖼 ポスターを開く（プレビュー読み込み失敗 - クリックで開く）</div>
+                      <div style={{color:"rgba(201,168,76,0.6)",fontSize:".68rem",marginTop:".5rem",letterSpacing:".1em"}}>クリックで原寸表示</div>
+                    </a>
+                  </Field>
+                )}
                 {form.timetable&&<Field label="タイムテーブル" full><a href={form.timetable} target="_blank" rel="noreferrer" style={{color:"#c9a84c",fontSize:".8rem"}}>📋 タイムテーブルを開く</a></Field>}
               </div>
               <div style={{display:"flex",gap:".5rem",marginTop:"1rem",flexWrap:"wrap"}}>
