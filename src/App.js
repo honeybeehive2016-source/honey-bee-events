@@ -214,8 +214,15 @@ function Field({label,children,full}){return(<div style={{gridColumn:full?"1/-1"
 
 function CalendarView({events,onEdit}){
   const today=new Date();
-  const [calYear,setCalYear]=useState(today.getFullYear());
-  const [calMonth,setCalMonth]=useState(today.getMonth());
+  const [calYear,setCalYear]=useState(()=>{
+    const saved=localStorage.getItem("hb-cal-year");
+    return saved?parseInt(saved):today.getFullYear();
+  });
+  const [calMonth,setCalMonth]=useState(()=>{
+    const saved=localStorage.getItem("hb-cal-month");
+    return saved!==null?parseInt(saved):today.getMonth();
+  });
+  useEffect(()=>{localStorage.setItem("hb-cal-year",calYear);localStorage.setItem("hb-cal-month",calMonth);},[calYear,calMonth]);
   const firstDay=new Date(calYear,calMonth,1).getDay();
   const daysInMonth=new Date(calYear,calMonth+1,0).getDate();
   const eventMap={};
@@ -560,11 +567,12 @@ function TimeTableTab({ form, copyText, copied }) {
 export default function App() {
   const [view, setView] = useState("list");
 
-  // ブラウザの戻るボタン対応
+  // ブラウザの戻るボタン対応 - 常にlistに戻る
   useEffect(() => {
     const handlePopState = (e) => {
-      if (e.state && e.state.view) setView(e.state.view);
-      else setView("list");
+      // どんな戻るボタンの操作でも一覧に戻す
+      setView("list");
+      window.history.replaceState({ view: "list" }, "");
     };
     window.addEventListener("popstate", handlePopState);
     if (!window.history.state || !window.history.state.view) {
@@ -574,7 +582,13 @@ export default function App() {
   }, []);
 
   const navigateTo = (newView) => {
-    if (newView !== view) {
+    if (newView === view) return;
+    if (newView === "list") {
+      // 一覧に戻るときはhistoryをきれいにする
+      window.history.replaceState({ view: "list" }, "");
+      setView("list");
+    } else {
+      // フォームなどに進むときはhistoryに追加
       window.history.pushState({ view: newView }, "");
       setView(newView);
     }
@@ -671,9 +685,35 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
       try{
         const imported=parseCSV(ev.target.result);
         if(!imported.length){setCsvMsg("⚠️ 読み込めるイベントがありませんでした。");return;}
-        setEvents(ev2=>{const merged=[...ev2];imported.forEach(imp=>{const exists=merged.some(e=>e.date===imp.date&&e.name===imp.name);if(!exists)merged.push(imp);});return merged;});
-        setCsvMsg(`✅ ${imported.length}件のイベントを読み込みました！`);
-        setTimeout(()=>setCsvMsg(""),4000);
+
+        // CSVから来た情報で上書きするフィールド
+        const csvFields = ["date","day","name","perf","open","start","price","rehearsal","poster","notes"];
+        // アプリ側で守るフィールド（手動入力・AI生成）
+        // desc, url, genre, cap, reference, timetable
+
+        let added = 0, updated = 0;
+        setEvents(ev2 => {
+          const merged = [...ev2];
+          imported.forEach(imp => {
+            const existIdx = merged.findIndex(e => e.date === imp.date && e.name === imp.name);
+            if (existIdx >= 0) {
+              // 既存：CSVフィールドだけ上書き、手動入力は保持
+              const existing = merged[existIdx];
+              const updatedEvent = { ...existing };
+              csvFields.forEach(f => { updatedEvent[f] = imp[f] || ""; });
+              updatedEvent.savedAt = new Date().toLocaleDateString("ja-JP");
+              merged[existIdx] = updatedEvent;
+              updated++;
+            } else {
+              // 新規：そのまま追加
+              merged.push(imp);
+              added++;
+            }
+          });
+          return merged;
+        });
+        setCsvMsg(`✅ 読み込み完了：新規 ${added}件 / 更新 ${updated}件`);
+        setTimeout(()=>setCsvMsg(""),5000);
       }catch(err){setCsvMsg("⚠️ 読み込みに失敗しました。");}
     };
     reader.readAsText(file,"UTF-8");e.target.value="";
@@ -685,9 +725,37 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
   return(
     <div style={S.app}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+      <style>{`
+        @media (max-width: 768px) {
+          .hb-hdr { padding: 0.85rem 1rem !important; flex-wrap: wrap !important; gap: 0.5rem !important; }
+          .hb-logo { font-size: 1.1rem !important; }
+          .hb-view { padding: 1rem !important; }
+          .hb-form-layout { grid-template-columns: 1fr !important; gap: 1rem !important; }
+          .hb-form-grid { grid-template-columns: 1fr !important; }
+          .hb-output-panel { border-left: none !important; padding-left: 0 !important; border-top: 1px solid rgba(201,168,76,0.1); padding-top: 1rem !important; }
+          .hb-cal-cell { min-height: 48px !important; padding: 0.2rem 0.15rem !important; }
+          .hb-cal-day-num { font-size: 0.65rem !important; }
+          .hb-cal-event { font-size: 0.5rem !important; padding: 0.1rem 0.2rem !important; }
+          .hb-toolbar { flex-direction: column !important; align-items: stretch !important; }
+          .hb-card { grid-template-columns: 1fr !important; }
+          .hb-card-actions { justify-content: flex-end; }
+          .hb-tabs { gap: 0.25rem !important; }
+          .hb-tab { font-size: 0.6rem !important; padding: 0.3rem 0.5rem !important; letter-spacing: 0.05em !important; }
+          input, textarea, select { font-size: 16px !important; }
+          .hb-event-actions-mobile { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.5rem; }
+        }
+        @media (min-width: 769px) {
+          .hb-event-actions-mobile { display: none !important; }
+        }
+      `}</style>
 
-      <div style={S.hdr}>
-        <div style={S.logo}>HONEY BEE <small style={S.logoSm}>Event Manager</small></div>
+      <div style={S.hdr} className="hb-hdr">
+        <div style={{display:"flex",alignItems:"center",gap:".75rem"}}>
+          {view!=="list"&&(
+            <button onClick={()=>navigateTo("list")} style={{background:"transparent",border:"1px solid rgba(201,168,76,0.27)",borderRadius:4,color:"#c9a84c",padding:".35rem .7rem",fontSize:".75rem",cursor:"pointer",fontFamily:"inherit",letterSpacing:".05em"}} title="一覧に戻る">← 戻る</button>
+          )}
+          <div style={S.logo} className="hb-logo">HONEY BEE <small style={S.logoSm}>Event Manager</small></div>
+        </div>
         <div style={{display:"flex",gap:".4rem",alignItems:"center"}}>
           <button style={S.navTab(view==="list")} onClick={()=>navigateTo("list")}>📋 一覧</button>
           <button style={S.navTab(view==="form")} onClick={()=>navigateTo("form")}>✦ 新規作成</button>
@@ -696,8 +764,8 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
       </div>
 
       {view==="list"&&(
-        <div style={{padding:"1.5rem 2rem"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem",flexWrap:"wrap",gap:".5rem"}}>
+        <div style={{padding:"1.5rem 2rem"}} className="hb-view">
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem",flexWrap:"wrap",gap:".5rem"}} className="hb-toolbar">
             <div style={{display:"flex",gap:".4rem"}}>
               <button style={S.navTab(listMode==="calendar")} onClick={()=>setListMode("calendar")}>📅 カレンダー</button>
               <button style={S.navTab(listMode==="list")} onClick={()=>setListMode("list")}>☰ リスト</button>
@@ -760,7 +828,7 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
       )}
 
       {view==="form"&&(
-        <div style={{padding:"1.5rem 2rem"}}>
+        <div style={{padding:"1.5rem 2rem"}} className="hb-view">
           {templates.length>0&&(
             <div style={{display:"flex",alignItems:"center",gap:".75rem",padding:".7rem 1rem",background:"#111",border:"1px solid rgba(201,168,76,0.1)",borderRadius:5,marginBottom:"1.25rem"}}>
               <label style={{...S.lbl,margin:0,whiteSpace:"nowrap"}}>テンプレートから読み込み：</label>
@@ -771,10 +839,10 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
             </div>
           )}
 
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1.5rem"}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1.5rem"}} className="hb-form-layout">
             <div>
               <div style={S.secTitle}>イベント情報</div>
-              <div style={S.fgrid}>
+              <div style={S.fgrid} className="hb-form-grid">
                 <Field label="イベント名" full><input style={S.inp} value={form.name} onChange={e=>setField("name",e.target.value)} placeholder="例：Jazz Night Premium"/></Field>
                 <Field label="日程"><input type="date" style={S.inp} value={form.date} onChange={e=>setField("date",e.target.value)}/></Field>
                 <Field label="曜日"><input style={{...S.inp,color:"rgba(201,168,76,0.6)"}} value={form.day} readOnly placeholder="自動入力"/></Field>
@@ -818,10 +886,17 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
               <div style={{display:"flex",gap:".5rem",marginTop:".5rem"}}>
                 <button style={S.btn("sm")} onClick={clearForm}>クリア</button>
                 <button style={S.btn("sm")} onClick={()=>navigateTo("list")}>← 一覧</button>
+                {editingIdx!==null&&(
+                  <button style={{...S.btn("danger"),padding:".35rem .7rem",fontSize:".65rem",marginLeft:"auto"}} onClick={()=>{
+                    if(!window.confirm(`「${form.name}」を削除しますか？`))return;
+                    deleteEvent(editingIdx);
+                    navigateTo("list");
+                  }}>🗑 このイベントを削除</button>
+                )}
               </div>
             </div>
 
-            <div style={{borderLeft:"1px solid rgba(201,168,76,0.1)",paddingLeft:"1.5rem"}}>
+            <div style={{borderLeft:"1px solid rgba(201,168,76,0.1)",paddingLeft:"1.5rem"}} className="hb-output-panel">
               <div style={S.secTitle}>生成テキスト</div>
               <div style={{display:"flex",gap:".35rem",marginBottom:"1rem",flexWrap:"wrap"}}>
                 {OUTPUT_TABS.map(t=>(<button key={t.key} style={S.outTab(activeOut===t.key)} onClick={()=>setActiveOut(t.key)}>{t.label}</button>))}
