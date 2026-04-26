@@ -81,7 +81,7 @@ function generateTexts(d){
   return{hp,ig,fb,gf,cp,wixDetail,wixSchedule,wixPickup,seoTitle,seoDesc,altText,reserveBtn,flyer};
 }
 
-const OUTPUT_TABS=[{key:"hp",label:"HP用"},{key:"ig",label:"Instagram"},{key:"fb",label:"Facebook"},{key:"gf",label:"フォーム"},{key:"cp",label:"告知コピー"},{key:"wix",label:"🌐 Wix"},{key:"flyer",label:"🎨 フライヤー"}];
+const OUTPUT_TABS=[{key:"hp",label:"HP用"},{key:"ig",label:"Instagram"},{key:"fb",label:"Facebook"},{key:"gf",label:"フォーム"},{key:"cp",label:"告知コピー"},{key:"wix",label:"🌐 Wix"},{key:"flyer",label:"🎨 フライヤー"},{key:"tt",label:"⏱ TT"}];
 const WIX_SECTIONS=[{key:"wixDetail",label:"イベント詳細ページ本文"},{key:"wixSchedule",label:"月間スケジュール用"},{key:"wixPickup",label:"トップページ ピックアップ"},{key:"seoTitle",label:"SEOタイトル",note:v=>`${v.length}文字（推奨：60文字以内）`},{key:"seoDesc",label:"SEOディスクリプション",note:v=>`${v.length}文字（推奨：160文字以内）`},{key:"altText",label:"画像 alt テキスト"},{key:"reserveBtn",label:"予約ボタン文言"}];
 
 const S={
@@ -230,8 +230,210 @@ function FlyerTab({ outputs, copied, copyText }) {
   );
 }
 
+// ============================================================
+// タイムテーブル機能
+// ============================================================
+const TT_TEMPLATES = {
+  oneman: {
+    label: "ワンマン（2ステージ）",
+    bands: 1,
+    generate: (perfList) => {
+      const a = perfList[0] || "出演者";
+      return [
+        { time: "16:00", text: "入り" },
+        { time: "16:00-17:45", text: `${a} リハーサル` },
+        { time: "18:00", text: "開場" },
+        { time: "19:00", text: `${a} 1st Stage` },
+        { time: "19:50", text: "休憩" },
+        { time: "20:10", text: `${a} 2nd Stage` },
+        { time: "21:00", text: "終演" },
+      ];
+    },
+  },
+  two: {
+    label: "2バンド対バン",
+    bands: 2,
+    generate: (perfList) => {
+      const [a="バンドA", b="バンドB"] = perfList;
+      return [
+        { time: "16:00", text: "入り" },
+        { time: "16:00-16:50", text: `${a} リハーサル` },
+        { time: "16:55-17:45", text: `${b} リハーサル` },
+        { time: "18:00", text: "開場" },
+        { time: "19:00-19:45", text: a },
+        { time: "19:45-19:55", text: "転換" },
+        { time: "19:55-20:40", text: b },
+        { time: "20:50", text: "終演" },
+      ];
+    },
+  },
+  three: {
+    label: "3バンド対バン",
+    bands: 3,
+    generate: (perfList) => {
+      const [a="バンドA", b="バンドB", c="バンドC"] = perfList;
+      return [
+        { time: "16:00", text: "入り" },
+        { time: "16:00-16:35", text: `${a} リハーサル` },
+        { time: "16:40-17:15", text: `${b} リハーサル` },
+        { time: "17:20-17:45", text: `${c} リハーサル` },
+        { time: "18:00", text: "開場" },
+        { time: "19:00-19:30", text: a },
+        { time: "19:30-19:35", text: "転換" },
+        { time: "19:35-20:05", text: b },
+        { time: "20:05-20:10", text: "転換" },
+        { time: "20:10-20:40", text: c },
+        { time: "20:50", text: "終演" },
+      ];
+    },
+  },
+  four: {
+    label: "4バンド対バン",
+    bands: 4,
+    generate: (perfList) => {
+      const [a="バンドA", b="バンドB", c="バンドC", d="バンドD"] = perfList;
+      return [
+        { time: "16:00", text: "入り" },
+        { time: "16:00-16:25", text: `${a} リハーサル` },
+        { time: "16:30-16:55", text: `${b} リハーサル` },
+        { time: "17:00-17:25", text: `${c} リハーサル` },
+        { time: "17:30-17:55", text: `${d} リハーサル` },
+        { time: "18:00", text: "開場" },
+        { time: "18:30-19:00", text: a },
+        { time: "19:00-19:05", text: "転換" },
+        { time: "19:05-19:35", text: b },
+        { time: "19:35-19:40", text: "転換" },
+        { time: "19:40-20:10", text: c },
+        { time: "20:10-20:15", text: "転換" },
+        { time: "20:15-20:45", text: d },
+        { time: "21:00", text: "終演" },
+      ];
+    },
+  },
+};
+
+function TimeTableTab({ form, copyText, copied }) {
+  const ttKey = `hb-tt-${form.date || ""}-${form.name || ""}`;
+  const [rows, setRows] = useState(() => {
+    const saved = localStorage.getItem(ttKey);
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  useEffect(() => {
+    if (rows.length > 0) localStorage.setItem(ttKey, JSON.stringify(rows));
+  }, [rows, ttKey]);
+
+  const loadTemplate = (key) => {
+    const tpl = TT_TEMPLATES[key];
+    if (!tpl) return;
+    const perfList = (form.perf || "").split(/[\/／,、]/).map(s => s.trim()).filter(Boolean);
+    setRows(tpl.generate(perfList));
+  };
+
+  const updateRow = (i, field, value) => {
+    setRows(rs => rs.map((r, idx) => idx === i ? { ...r, [field]: value } : r));
+  };
+  const addRow = () => setRows(rs => [...rs, { time: "", text: "" }]);
+  const removeRow = (i) => setRows(rs => rs.filter((_, idx) => idx !== i));
+  const moveRow = (i, dir) => {
+    setRows(rs => {
+      const next = [...rs];
+      const j = i + dir;
+      if (j < 0 || j >= next.length) return rs;
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
+  };
+  const clearAll = () => {
+    if (!window.confirm("タイムテーブルをすべてクリアしますか？")) return;
+    setRows([]);
+    localStorage.removeItem(ttKey);
+  };
+
+  // テキスト出力
+  const ttText = rows.length === 0 ? "" : [
+    `▼ ${form.name || "イベント"} タイムテーブル`,
+    form.date ? fmtDate(form.date) + (form.day ? `（${form.day}）` : "") : "",
+    "─────────────",
+    ...rows.map(r => `${r.time}　${r.text}`),
+  ].filter(Boolean).join("\n");
+
+  return (
+    <div>
+      {/* テンプレート選択 */}
+      <div style={{marginBottom:"1rem", padding:".75rem 1rem", background:"rgba(201,168,76,0.05)", borderRadius:5, border:"1px solid rgba(201,168,76,0.15)"}}>
+        <div style={{fontSize:".68rem",color:"rgba(201,168,76,0.7)",marginBottom:".5rem",letterSpacing:".1em"}}>📋 テンプレートから読み込み（出演者欄をスラッシュ区切りで分割）</div>
+        <div style={{display:"flex",gap:".4rem",flexWrap:"wrap"}}>
+          {Object.entries(TT_TEMPLATES).map(([k,v]) => (
+            <button key={k} style={S.btn("sm")} onClick={()=>loadTemplate(k)}>{v.label}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* タイムテーブル編集 */}
+      {rows.length === 0 && (
+        <div style={{textAlign:"center",padding:"2rem 1rem",color:"rgba(240,232,208,0.3)",fontSize:".8rem",border:"1px dashed rgba(201,168,76,0.2)",borderRadius:5,marginBottom:"1rem"}}>
+          上のテンプレートから読み込むか、下の「+ 行を追加」でタイムテーブルを作成できます ⏱
+        </div>
+      )}
+
+      {rows.length > 0 && (
+        <div style={{marginBottom:"1rem"}}>
+          {rows.map((r, i) => (
+            <div key={i} style={{display:"grid",gridTemplateColumns:"110px 1fr auto",gap:".4rem",marginBottom:".35rem",alignItems:"center"}}>
+              <input style={{...S.inp,fontSize:".78rem",padding:".4rem .55rem"}} value={r.time} onChange={e=>updateRow(i,"time",e.target.value)} placeholder="19:00"/>
+              <input style={{...S.inp,fontSize:".78rem",padding:".4rem .55rem"}} value={r.text} onChange={e=>updateRow(i,"text",e.target.value)} placeholder="バンドA"/>
+              <div style={{display:"flex",gap:".25rem"}}>
+                <button onClick={()=>moveRow(i,-1)} style={{padding:".25rem .45rem",background:"transparent",border:"1px solid rgba(201,168,76,0.2)",borderRadius:3,color:"#c9a84c",cursor:"pointer",fontSize:".7rem"}}>↑</button>
+                <button onClick={()=>moveRow(i,1)} style={{padding:".25rem .45rem",background:"transparent",border:"1px solid rgba(201,168,76,0.2)",borderRadius:3,color:"#c9a84c",cursor:"pointer",fontSize:".7rem"}}>↓</button>
+                <button onClick={()=>removeRow(i)} style={{padding:".25rem .45rem",background:"transparent",border:"1px solid rgba(226,75,74,0.27)",borderRadius:3,color:"#e24b4a",cursor:"pointer",fontSize:".7rem"}}>✕</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{display:"flex",gap:".5rem",marginBottom:"1.5rem"}}>
+        <button style={S.btn("ghost")} onClick={addRow}>＋ 行を追加</button>
+        {rows.length > 0 && <button style={S.btn("danger")} onClick={clearAll}>クリア</button>}
+      </div>
+
+      {/* テキスト出力プレビュー */}
+      {rows.length > 0 && (
+        <div style={{marginBottom:"1rem"}}>
+          <div style={{fontSize:".68rem",color:"#c9a84c",marginBottom:".4rem",letterSpacing:".15em",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <span>📋 コピー用テキスト</span>
+            <button style={{...S.cpyBtn,position:"static"}} onClick={()=>copyText(ttText,"tt")}>{copied==="tt"?"✓ 完了":"コピー"}</button>
+          </div>
+          <div style={{...S.outTxt,minHeight:"auto"}}>{ttText}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const [view, setView] = useState("list");
+
+  // ブラウザの戻るボタン対応
+  useEffect(() => {
+    const handlePopState = (e) => {
+      if (e.state && e.state.view) setView(e.state.view);
+      else setView("list");
+    };
+    window.addEventListener("popstate", handlePopState);
+    if (!window.history.state || !window.history.state.view) {
+      window.history.replaceState({ view: "list" }, "");
+    }
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  const navigateTo = (newView) => {
+    if (newView !== view) {
+      window.history.pushState({ view: newView }, "");
+      setView(newView);
+    }
+  };
   const [listMode, setListMode] = useState("calendar");
   const [form, setForm] = useState(emptyForm);
   const [editingIdx, setEditingIdx] = useState(null);
@@ -307,7 +509,7 @@ export default function App() {
     setShowTplModal(false);setTplName("");alert("⭐ テンプレートを保存しました");
   };
 
-  const editEvent=(i)=>{if(i<0||i>=events.length)return;setForm(events[i]);setEditingIdx(i);setOutputs(null);setAiError("");setView("form");};
+  const editEvent=(i)=>{if(i<0||i>=events.length)return;setForm(events[i]);setEditingIdx(i);setOutputs(null);setAiError("");navigateTo("form");};
   const deleteEvent=(i)=>{if(!window.confirm("このイベントを削除しますか？"))return;setEvents(ev=>ev.filter((_,idx)=>idx!==i));};
   const deleteTpl=(i)=>{if(!window.confirm("このテンプレートを削除しますか？"))return;setTemplates(t=>t.filter((_,idx)=>idx!==i));};
   const loadTpl=t=>{setForm({...emptyForm,...t});setOutputs(null);setAiError("");};
@@ -338,8 +540,8 @@ export default function App() {
       <div style={S.hdr}>
         <div style={S.logo}>HONEY BEE <small style={S.logoSm}>Event Manager</small></div>
         <div style={{display:"flex",gap:".4rem",alignItems:"center"}}>
-          <button style={S.navTab(view==="list")} onClick={()=>setView("list")}>📋 一覧</button>
-          <button style={S.navTab(view==="form")} onClick={()=>setView("form")}>✦ 新規作成</button>
+          <button style={S.navTab(view==="list")} onClick={()=>navigateTo("list")}>📋 一覧</button>
+          <button style={S.navTab(view==="form")} onClick={()=>navigateTo("form")}>✦ 新規作成</button>
           <button style={{...S.btn("sm"),padding:".35rem .65rem",marginLeft:".5rem"}} onClick={()=>{setTempApiKey(apiKey);setShowApiModal(true);}} title="OpenAI APIキー設定">{apiKey?"🔑":"🔓"}</button>
         </div>
       </div>
@@ -356,7 +558,7 @@ export default function App() {
                 📂 CSVを読み込む
                 <input type="file" accept=".csv" onChange={handleCSV} style={{display:"none"}}/>
               </label>
-              <button style={S.btn("gold")} onClick={()=>{clearForm();setView("form");}}>＋ 新規</button>
+              <button style={S.btn("gold")} onClick={()=>{clearForm();navigateTo("form");}}>＋ 新規</button>
             </div>
           </div>
 
@@ -375,7 +577,7 @@ export default function App() {
                     <div style={{fontSize:".7rem",color:"rgba(240,232,208,0.4)"}}>保存日：{t.savedAt||"–"}</div>
                   </div>
                   <div style={{display:"flex",gap:".4rem"}}>
-                    <button style={S.btn("sm")} onClick={()=>{loadTpl(t);setView("form");}}>読み込み</button>
+                    <button style={S.btn("sm")} onClick={()=>{loadTpl(t);navigateTo("form");}}>読み込み</button>
                     <button style={S.btn("danger")} onClick={()=>deleteTpl(i)}>削除</button>
                   </div>
                 </div>
@@ -455,7 +657,7 @@ export default function App() {
               </div>
               <div style={{display:"flex",gap:".5rem",marginTop:".5rem"}}>
                 <button style={S.btn("sm")} onClick={clearForm}>クリア</button>
-                <button style={S.btn("sm")} onClick={()=>setView("list")}>← 一覧</button>
+                <button style={S.btn("sm")} onClick={()=>navigateTo("list")}>← 一覧</button>
               </div>
             </div>
 
@@ -465,7 +667,7 @@ export default function App() {
                 {OUTPUT_TABS.map(t=>(<button key={t.key} style={S.outTab(activeOut===t.key)} onClick={()=>setActiveOut(t.key)}>{t.label}</button>))}
               </div>
 
-              {!outputs&&<div style={{textAlign:"center",padding:"2.5rem 1rem",color:"rgba(240,232,208,0.2)",fontSize:".8rem"}}>「文章を生成」を押してください 🍯</div>}
+              {!outputs&&activeOut!=="tt"&&<div style={{textAlign:"center",padding:"2.5rem 1rem",color:"rgba(240,232,208,0.2)",fontSize:".8rem"}}>「文章を生成」を押してください 🍯</div>}
 
               {outputs&&activeOut!=="wix"&&activeOut!=="flyer"&&(
                 <div style={{position:"relative"}}>
@@ -490,6 +692,10 @@ export default function App() {
 
               {outputs&&activeOut==="flyer"&&(
                 <FlyerTab outputs={outputs} copied={copied} copyText={copyText}/>
+              )}
+
+              {activeOut==="tt"&&(
+                <TimeTableTab form={form} copyText={copyText} copied={copied}/>
               )}
             </div>
           </div>
