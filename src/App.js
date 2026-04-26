@@ -222,7 +222,7 @@ function FlyerTab({ outputs, copied, copyText }) {
           ② 写真を右クリック →「名前をつけて保存」でダウンロード<br/>
           ③ CanvaにアップロードしてフライヤーにD&D
         </div>
-        <button onClick={()=>window.open("https://www.canva.com/design/create","_blank")} style={{...S.btn("ghost"),color:"#f4a261",borderColor:"rgba(244,162,97,0.35)"}}>
+        <button onClick={()=>window.open("https://www.canva.com/","_blank")} style={{...S.btn("ghost"),color:"#f4a261",borderColor:"rgba(244,162,97,0.35)"}}>
           🎨 Canvaを開く
         </button>
       </div>
