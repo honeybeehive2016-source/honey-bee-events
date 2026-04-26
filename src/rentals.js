@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { db } from "./firebase";
-import { collection, doc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
+import { collection, doc, setDoc, deleteDoc, onSnapshot, getDoc } from "firebase/firestore";
 
 export const RENTAL_STATUSES = [
   { key: "new", label: "未対応", color: "#e24b4a" },
@@ -18,22 +18,27 @@ export const emptyRental = {
   purpose: "", people: "", budget: "",
   food: "", drinks: "", stage: false, sound: false, mic: false,
   contactName: "", phone: "", email: "",
+  customerCompany: "", // 法人/団体名
   status: "new",
   replyStatus: "", quoteStatus: "",
   outcome: "",
   memo: "",
-  // 見積項目
   quoteItems: [], // [{name, qty, unit, price}]
   quoteNo: "",
   invoiceNo: "",
+  quoteSubject: "",   // 見積件名
+  invoiceSubject: "", // 請求件名
+  validityDate: "",   // 見積有効期限
 };
 
-const HALL_RATES = {
-  weekday_am: { label: "平日 10:00〜15:00", price: 50000 },
-  weekday_pm: { label: "平日 15:00〜21:00", price: 80000 },
-  holiday_am: { label: "土日祝 10:00〜15:00", price: 80000 },
-  holiday_pm: { label: "土日祝 15:00〜21:00", price: 150000 },
-};
+// プリセット項目
+const PRESET_ITEMS = [
+  { name: "ホールレンタル料金（平日10:00〜15:00）", price: 50000 },
+  { name: "ホールレンタル料金（平日15:00〜21:00）", price: 80000 },
+  { name: "ホールレンタル料金（土日祝10:00〜15:00）", price: 80000 },
+  { name: "ホールレンタル料金（土日祝15:00〜21:00）", price: 150000 },
+  { name: "予約金", price: 30000 },
+];
 
 const S = {
   card: { background:"#111", border:"1px solid rgba(201,168,76,0.1)", borderRadius:6, padding:"1rem 1.25rem", marginBottom:".75rem", display:"grid", gridTemplateColumns:"1fr auto", gap:".75rem", alignItems:"center" },
@@ -66,6 +71,237 @@ const Field = ({ label, children, full }) => (
     {children}
   </div>
 );
+
+// 連番取得（Firestoreで集中管理）
+async function getNextNumber(type) {
+  const ref = doc(db, "counters", type);
+  const snap = await getDoc(ref);
+  let next = 10001;
+  if (snap.exists()) next = (snap.data().value || 10000) + 1;
+  await setDoc(ref, { value: next });
+  return String(next);
+}
+
+const COMPANY_INFO = {
+  name: "ビーハイブ株式会社",
+  zip: "〒247-0056",
+  address: "鎌倉市大船1-22-19 第2三友ビル3F",
+  tel: "0467-46-5576",
+  hp: "https://www.ofunahoneybee.net",
+  email: "info@beehive2016.com",
+  staff: "西崎",
+  bank: "湘南信用金庫 大船支店",
+  bankNum: "(普) 4225938",
+  bankName: "ビーハイブ カブシキガイシャ",
+};
+
+function buildDocumentHTML(type, rental, items, no, subject) {
+  const isInvoice = type === "invoice";
+  const title = isInvoice ? "御請求書" : "御見積書";
+  const dateLabel = isInvoice ? "請求日" : "見積日";
+  const noLabel = isInvoice ? "請求No." : "見積No.";
+
+  const today = new Date();
+  const dateStr = `${today.getFullYear()}年${today.getMonth()+1}月${today.getDate()}日`;
+
+  const subtotal = items.reduce((s,i)=>s+(Number(i.qty||0)*Number(i.price||0)),0);
+  const tax = Math.round(subtotal * 0.1);
+  const total = subtotal + tax;
+
+  const validityStr = rental.validityDate
+    ? `${new Date(rental.validityDate).getFullYear()}年${new Date(rental.validityDate).getMonth()+1}月${new Date(rental.validityDate).getDate()}日`
+    : "発行日より30日間";
+
+  const customerName = rental.customerCompany || rental.contactName || "";
+
+  // テーブル行（最低15行確保）
+  const minRows = 15;
+  const itemRows = [];
+  for (let i = 0; i < Math.max(minRows, items.length); i++) {
+    const it = items[i];
+    if (it) {
+      itemRows.push(`
+        <tr>
+          <td class="desc">${escapeHtml(it.name||"")}</td>
+          <td class="num">${it.qty||""}</td>
+          <td class="num">${it.unit||""}</td>
+          <td class="num">${it.price?Number(it.price).toLocaleString():""}</td>
+          <td class="num">${it.qty&&it.price?(Number(it.qty)*Number(it.price)).toLocaleString():""}</td>
+        </tr>`);
+    } else {
+      itemRows.push(`<tr><td class="desc">　</td><td></td><td></td><td></td><td></td></tr>`);
+    }
+  }
+
+  return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>${title}</title>
+<style>
+  @page { size: A4; margin: 12mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "游明朝", "Yu Mincho", "ヒラギノ明朝 ProN", serif; color: #000; background: #fff; padding: 0; font-size: 10.5pt; line-height: 1.5; }
+  .doc { max-width: 186mm; margin: 0 auto; position: relative; }
+  h1 { text-align: center; font-size: 22pt; letter-spacing: 1em; padding-left: 1em; font-weight: normal; margin-bottom: 1.5em; }
+  .top { display: grid; grid-template-columns: 1fr 1fr; gap: 1em; margin-bottom: 1em; }
+  .customer { padding-top: .5em; }
+  .customer-name { font-size: 14pt; border-bottom: 1px solid #000; padding: .5em 0 .25em; min-width: 200px; display: inline-block; }
+  .customer-name + span { font-size: 11pt; padding-left: .5em; }
+  .meta { text-align: right; font-size: 10pt; }
+  .meta-row { display: flex; justify-content: flex-end; gap: .5em; margin-bottom: .25em; }
+  .meta-label { width: 60px; }
+  .meta-val { min-width: 100px; border-bottom: 1px solid #000; padding: 0 .3em; text-align: left; }
+  .info-block { display: grid; grid-template-columns: 1fr 1fr; gap: 1em; margin-bottom: 1em; align-items: start; }
+  .left-info { font-size: 10pt; line-height: 1.7; }
+  .left-info .greeting { margin-bottom: .5em; }
+  .left-info .field { margin-bottom: .3em; display: flex; align-items: center; gap: .5em; }
+  .left-info .field-label { white-space: nowrap; }
+  .left-info .field-value { flex: 1; border-bottom: 1px solid #000; padding: 0 .3em; }
+  .company { font-size: 10pt; line-height: 1.7; position: relative; padding-right: 90px; }
+  .stamp { position: absolute; right: 0; top: 5px; width: 75px; height: 75px; opacity: .92; }
+  .total-box { border: 2px solid #000; padding: .6em 1em; margin: .5em 0 1em; display: flex; align-items: center; gap: 1em; }
+  .total-label { font-size: 12pt; font-weight: bold; }
+  .total-value { font-size: 14pt; font-weight: bold; flex: 1; }
+  .tax-note { font-size: 9pt; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { border: 1px solid #000; padding: .35em .5em; font-size: 9.5pt; }
+  th { background: #d0d0d0; font-weight: normal; }
+  .desc { text-align: left; }
+  .num { text-align: right; }
+  .total-row td { font-weight: bold; background: #f5f5f5; }
+  .footer { margin-top: 1em; font-size: 9.5pt; line-height: 1.7; }
+  .footer-grid { display: grid; grid-template-columns: 1fr; gap: .3em; }
+  .bank { display: flex; gap: 1em; }
+  .bank-label { white-space: nowrap; }
+  .memo-box { border: 1px solid #000; padding: .5em; margin-top: 1em; min-height: 50px; }
+  .memo-label { font-size: 9pt; }
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .no-print { display: none; }
+  }
+  .actions { text-align: center; margin: 1em 0; }
+  .btn { padding: .6em 1.5em; font-size: 11pt; cursor: pointer; background: #c9a84c; border: none; color: #000; font-weight: bold; border-radius: 4px; margin: 0 .3em; }
+  .btn-secondary { background: #555; color: #fff; }
+</style>
+</head>
+<body>
+<div class="actions no-print">
+  <button class="btn" onclick="window.print()">🖨 PDFとして保存 / 印刷</button>
+  <button class="btn btn-secondary" onclick="window.close()">閉じる</button>
+</div>
+<div class="doc">
+  <h1>${title}</h1>
+  <div class="top">
+    <div class="customer">
+      <span class="customer-name">${escapeHtml(customerName)}</span><span>様</span>
+    </div>
+    <div class="meta">
+      <div class="meta-row"><span class="meta-label">${noLabel}</span><span class="meta-val">${escapeHtml(no)}</span></div>
+      <div class="meta-row"><span class="meta-label">${dateLabel}</span><span class="meta-val">${dateStr}</span></div>
+    </div>
+  </div>
+
+  <div class="info-block">
+    <div class="left-info">
+      <div class="greeting">下記のとおり、${isInvoice?"御請求":"御見積"}申し上げます。</div>
+      <div class="field">
+        <span class="field-label">件　名：</span>
+        <span class="field-value">${escapeHtml(subject||"")}</span>
+      </div>
+      ${!isInvoice?`<div class="field">
+        <span class="field-label">有効期限：</span>
+        <span class="field-value">${validityStr}</span>
+      </div>`:""}
+    </div>
+    <div class="company">
+      <img src="${window.location.origin}/stamp.png" class="stamp" alt="印"/>
+      <div><strong>${COMPANY_INFO.name}</strong></div>
+      <div>${COMPANY_INFO.zip}</div>
+      <div>${COMPANY_INFO.address}</div>
+      <div>TEL：${COMPANY_INFO.tel}</div>
+      <div>HP：<a href="${COMPANY_INFO.hp}">${COMPANY_INFO.hp.replace("https://","")}</a></div>
+      <div>E-Mail：${COMPANY_INFO.email}</div>
+      <div>担当：${COMPANY_INFO.staff}</div>
+    </div>
+  </div>
+
+  <div class="total-box">
+    <span class="total-label">合計金額</span>
+    <span class="total-value">¥${total.toLocaleString()}</span>
+    <span class="tax-note">（税込）</span>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th class="desc" style="width: 50%;">摘要</th>
+        <th style="width: 10%;">数量</th>
+        <th style="width: 10%;">単位</th>
+        <th style="width: 15%;">単価（税抜）</th>
+        <th style="width: 15%;">金額</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${itemRows.join("")}
+      <tr class="total-row">
+        <td colspan="4" class="num">小計</td>
+        <td class="num">¥${subtotal.toLocaleString()}</td>
+      </tr>
+      <tr class="total-row">
+        <td colspan="4" class="num">消費税（10%）</td>
+        <td class="num">¥${tax.toLocaleString()}</td>
+      </tr>
+      <tr class="total-row">
+        <td colspan="4" class="num">合計</td>
+        <td class="num">¥${total.toLocaleString()}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  ${isInvoice?`
+  <div class="footer">
+    <div class="footer-grid">
+      <div class="bank"><span class="bank-label">振込先</span><span>${COMPANY_INFO.bank}</span></div>
+      <div class="bank"><span class="bank-label">口座番号</span><span>${COMPANY_INFO.bankNum}</span></div>
+      <div class="bank"><span class="bank-label">口座名</span><span>${COMPANY_INFO.bankName}</span></div>
+      <div style="font-size: 9pt; margin-top: .3em;">※振込手数料はお客様にてご負担にてお願い致します。</div>
+    </div>
+  </div>`:""}
+
+  <div class="memo-box">
+    <div class="memo-label">備考</div>
+  </div>
+</div>
+</body>
+</html>`;
+}
+
+function escapeHtml(s) {
+  if (!s) return "";
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+async function openDocumentWindow(type, rental, setRental) {
+  const items = rental.quoteItems || [];
+  if (items.length === 0) {
+    alert("見積項目を1つ以上追加してください");
+    return;
+  }
+  let no = type === "invoice" ? rental.invoiceNo : rental.quoteNo;
+  // 連番がなければ取得
+  if (!no) {
+    no = await getNextNumber(type === "invoice" ? "invoice" : "quote");
+    if (type === "invoice") setRental(r => ({ ...r, invoiceNo: no }));
+    else setRental(r => ({ ...r, quoteNo: no }));
+  }
+  const subject = type === "invoice" ? (rental.invoiceSubject || rental.quoteSubject) : rental.quoteSubject;
+  const html = buildDocumentHTML(type, rental, items, no, subject);
+  const w = window.open("", "_blank", "width=900,height=1200");
+  if (!w) { alert("ポップアップがブロックされました。許可してください。"); return; }
+  w.document.write(html);
+  w.document.close();
+}
 
 // AI返信文生成
 async function generateReplyAI(rental, apiKey, type) {
@@ -288,6 +524,106 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack })
                 <button style={{position:"absolute",top:".6rem",right:".6rem",padding:".25rem .6rem",background:"rgba(201,168,76,0.13)",border:"1px solid rgba(201,168,76,0.27)",borderRadius:3,color:"#c9a84c",fontSize:".6rem",cursor:"pointer"}} onClick={()=>copyText(aiReply,"reply")}>{copied==="reply"?"✓ 完了":"コピー"}</button>
               </div>
             )}
+          </div>
+        </div>
+
+        {/* ===== 見積書・請求書セクション ===== */}
+        <div style={{marginTop:"2rem",padding:"1.25rem",background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.2)",borderRadius:8}}>
+          <div style={{...S.secTitle,marginTop:0,fontSize:".75rem"}}>📄 見積書・請求書</div>
+
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:".7rem",marginBottom:"1rem"}} className="hb-form-grid">
+            <Field label="法人/団体名（顧客名）"><input style={S.inp} value={form.customerCompany||""} onChange={e=>setField("customerCompany",e.target.value)} placeholder="個人の場合は空欄でOK"/></Field>
+            <Field label="件名"><input style={S.inp} value={form.quoteSubject||""} onChange={e=>setField("quoteSubject",e.target.value)} placeholder="例：○月○日ホールレンタル代金として"/></Field>
+            <Field label="見積有効期限"><input type="date" style={S.inp} value={form.validityDate||""} onChange={e=>setField("validityDate",e.target.value)}/></Field>
+          </div>
+
+          {/* 明細 */}
+          <div style={{fontSize:".68rem",color:"rgba(201,168,76,0.7)",marginBottom:".5rem",letterSpacing:".1em"}}>明細</div>
+
+          {/* プリセット追加ボタン */}
+          <div style={{display:"flex",gap:".35rem",flexWrap:"wrap",marginBottom:".75rem"}}>
+            {PRESET_ITEMS.map((p,i)=>(
+              <button key={i} style={{...S.btn("sm"),fontSize:".6rem",padding:".25rem .5rem"}} onClick={()=>{
+                const newItem = { name: p.name, qty: 1, unit: "式", price: p.price };
+                setField("quoteItems", [...(form.quoteItems||[]), newItem]);
+              }}>＋ {p.name.length>20?p.name.slice(0,20)+"...":p.name}</button>
+            ))}
+          </div>
+
+          {/* 明細テーブル */}
+          <div style={{marginBottom:".75rem"}}>
+            <div style={{display:"grid",gridTemplateColumns:"3fr 60px 60px 100px 100px 30px",gap:".35rem",marginBottom:".3rem",fontSize:".62rem",color:"rgba(201,168,76,0.5)",letterSpacing:".05em"}}>
+              <div>摘要</div><div>数量</div><div>単位</div><div>単価(税抜)</div><div>金額</div><div></div>
+            </div>
+            {(form.quoteItems||[]).map((it,i)=>{
+              const total = (Number(it.qty||0) * Number(it.price||0)).toLocaleString();
+              return (
+                <div key={i} style={{display:"grid",gridTemplateColumns:"3fr 60px 60px 100px 100px 30px",gap:".35rem",marginBottom:".3rem",alignItems:"center"}}>
+                  <input style={{...S.inp,padding:".4rem .55rem",fontSize:".78rem"}} value={it.name||""} onChange={e=>{
+                    const arr = [...form.quoteItems];
+                    arr[i] = { ...arr[i], name: e.target.value };
+                    setField("quoteItems", arr);
+                  }}/>
+                  <input type="number" style={{...S.inp,padding:".4rem .55rem",fontSize:".78rem"}} value={it.qty||""} onChange={e=>{
+                    const arr = [...form.quoteItems];
+                    arr[i] = { ...arr[i], qty: e.target.value };
+                    setField("quoteItems", arr);
+                  }}/>
+                  <input style={{...S.inp,padding:".4rem .55rem",fontSize:".78rem"}} value={it.unit||""} onChange={e=>{
+                    const arr = [...form.quoteItems];
+                    arr[i] = { ...arr[i], unit: e.target.value };
+                    setField("quoteItems", arr);
+                  }} placeholder="式"/>
+                  <input type="number" style={{...S.inp,padding:".4rem .55rem",fontSize:".78rem",textAlign:"right"}} value={it.price||""} onChange={e=>{
+                    const arr = [...form.quoteItems];
+                    arr[i] = { ...arr[i], price: e.target.value };
+                    setField("quoteItems", arr);
+                  }}/>
+                  <div style={{padding:".4rem .55rem",fontSize:".78rem",textAlign:"right",color:"rgba(201,168,76,0.7)"}}>¥{total}</div>
+                  <button onClick={()=>{
+                    setField("quoteItems", form.quoteItems.filter((_,idx)=>idx!==i));
+                  }} style={{padding:".25rem .35rem",background:"transparent",border:"1px solid rgba(226,75,74,0.27)",borderRadius:3,color:"#e24b4a",cursor:"pointer",fontSize:".7rem"}}>✕</button>
+                </div>
+              );
+            })}
+            <button style={S.btn("sm")} onClick={()=>setField("quoteItems",[...(form.quoteItems||[]),{name:"",qty:1,unit:"式",price:0}])}>＋ 行を追加</button>
+          </div>
+
+          {/* 合計プレビュー */}
+          {(form.quoteItems||[]).length > 0 && (() => {
+            const sub = (form.quoteItems||[]).reduce((s,i)=>s+(Number(i.qty||0)*Number(i.price||0)),0);
+            const tax = Math.round(sub * 0.1);
+            return (
+              <div style={{padding:".75rem 1rem",background:"#111",borderRadius:5,marginBottom:"1rem",display:"flex",gap:"1.5rem",justifyContent:"flex-end",fontSize:".82rem",alignItems:"baseline",flexWrap:"wrap"}}>
+                <span style={{color:"rgba(240,232,208,0.55)"}}>小計: <strong style={{color:"#f0e8d0"}}>¥{sub.toLocaleString()}</strong></span>
+                <span style={{color:"rgba(240,232,208,0.55)"}}>消費税(10%): <strong style={{color:"#f0e8d0"}}>¥{tax.toLocaleString()}</strong></span>
+                <span style={{color:"#c9a84c"}}>合計: <strong style={{fontSize:"1.05rem"}}>¥{(sub+tax).toLocaleString()}</strong></span>
+              </div>
+            );
+          })()}
+
+          {/* 連番表示 */}
+          <div style={{display:"flex",gap:"1rem",fontSize:".7rem",color:"rgba(240,232,208,0.5)",marginBottom:".75rem"}}>
+            {form.quoteNo && <span>📄 見積No.{form.quoteNo}</span>}
+            {form.invoiceNo && <span>📄 請求No.{form.invoiceNo}</span>}
+          </div>
+
+          {/* PDF出力ボタン */}
+          <div style={{display:"flex",gap:".5rem",flexWrap:"wrap"}}>
+            <button style={S.btn("gold")} onClick={async()=>{
+              if(!(form.quoteItems||[]).length){alert("明細を追加してください");return;}
+              await openDocumentWindow("quote", form, setForm);
+              // 自動保存
+              setTimeout(handleSave, 500);
+            }}>📄 見積書PDF</button>
+            <button style={S.btn("gold")} onClick={async()=>{
+              if(!(form.quoteItems||[]).length){alert("明細を追加してください");return;}
+              await openDocumentWindow("invoice", form, setForm);
+              setTimeout(handleSave, 500);
+            }}>📄 請求書PDF</button>
+          </div>
+          <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.4)",marginTop:".5rem"}}>
+            ※ 新しいウィンドウが開きます。「PDFとして保存」ボタンでPDF出力 or 印刷できます。
           </div>
         </div>
 
