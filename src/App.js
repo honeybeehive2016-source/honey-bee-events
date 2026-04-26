@@ -100,7 +100,8 @@ function parseCSV(text) {
     const defaultPrice = (cols[5] || "").trim();
     const descText = (cols[3] || "").trim();
     const rehearsal = (cols[6] || "").trim();
-    const notes = ((cols[7] || "") + " " + (cols[8] || "")).trim();
+    const poster = (cols[7] || "").trim();
+    const notes = ((cols[8] || "") + " " + (cols[9] || "")).trim();
 
     // イベント名がセル内改行で複数あるか判定
     const nameLines = rawName.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
@@ -110,7 +111,7 @@ function parseCSV(text) {
       results.push({
         date: isoDate, day, name: rawName, perf: descText,
         open: defaultOpen, start: defaultStart, price: defaultPrice,
-        rehearsal, poster: "", timetable: "", desc: "", url: "",
+        rehearsal, poster, timetable: "", desc: "", url: "",
         notes, genre: "", cap: "", reference: "",
         savedAt: new Date().toLocaleDateString("ja-JP"),
       });
@@ -134,7 +135,7 @@ function parseCSV(text) {
           open: open || (idx === nameLines.length - 1 ? defaultOpen : ""),
           start: start || (idx === nameLines.length - 1 ? defaultStart : ""),
           price: price || (idx === nameLines.length - 1 ? defaultPrice : ""),
-          rehearsal, poster: "", timetable: "", desc: "", url: "",
+          rehearsal, poster, timetable: "", desc: "", url: "",
           notes, genre: "", cap: "", reference: "",
           savedAt: new Date().toLocaleDateString("ja-JP"),
         });
