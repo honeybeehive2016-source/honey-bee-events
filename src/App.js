@@ -248,7 +248,13 @@ function CalendarView({events,rentals=[],onEdit,onEditRental}){
   const daysInMonth=new Date(calYear,calMonth+1,0).getDate();
   // イベントと貸切を両方dateMapに入れる
   const dateMap={};
-  events.forEach(e=>{if(!e.date)return;if(!dateMap[e.date])dateMap[e.date]=[];dateMap[e.date].push({_kind:"event",_orig:e,name:e.name});});
+  events.forEach(e=>{
+    if(!e.date)return;
+    // 貸切キーワード入りイベントはカレンダーから除外（貸切モジュールに任せる）
+    if(/貸切|貸し切り/.test(e.name||""))return;
+    if(!dateMap[e.date])dateMap[e.date]=[];
+    dateMap[e.date].push({_kind:"event",_orig:e,name:e.name});
+  });
   // 貸切：成約・仮押さえ・完了のみ表示
   rentals.forEach(r=>{
     if(!r.desiredDate)return;
