@@ -124,20 +124,28 @@ function buildSettlementMemo(settlement, artist) {
 
 export default function SettlementModule({ events = [], navigateBack }) {
   const [settlements, setSettlements] = useState([]);
+  const [allSettlements, setAllSettlements] = useState([]);
   const [view, setView] = useState("list"); // list | edit
   const [form, setForm] = useState(emptySettlement);
   const [editingId, setEditingId] = useState(null);
   const [filter, setFilter] = useState("all"); // all | unpaid | paid
   const [copied, setCopied] = useState("");
+  const [showTrash, setShowTrash] = useState(false);
 
   useEffect(() => {
+    const TRASH_TTL = 30 * 24 * 60 * 60 * 1000;
     const unsub = onSnapshot(collection(db, "settlements"), (snap) => {
       const list = [];
       snap.forEach(d => list.push({ ...d.data(), _id: d.id }));
-      setSettlements(list);
+      setAllSettlements(list);
+      setSettlements(list.filter(s => !s._deleted));
+      // 30日経過したゴミ箱を完全削除
+      list.filter(s => s._deleted && s._deletedAt && (Date.now() - s._deletedAt) > TRASH_TTL)
+        .forEach(s => deleteDoc(doc(db, "settlements", s._id)).catch(()=>{}));
     });
     return () => unsub();
   }, []);
+  const trashSettlements = allSettlements.filter(s => s._deleted);
 
   const setField = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -145,7 +153,6 @@ export default function SettlementModule({ events = [], navigateBack }) {
   const startFromEvent = (eventId) => {
     const ev = events.find(e => e._id === eventId);
     if (!ev) return;
-    // 出演者欄をパースして自動で出演者を作成
     const perfList = (ev.perf || "").split(/[\/／,、]/).map(s => s.trim()).filter(Boolean);
     const artists = perfList.length > 0
       ? perfList.map(name => ({ ...emptyArtist, name, charge: ev.price?.replace(/[¥,円]/g,"").replace(/前売.*?(\d+).*/,"$1") || "" }))
@@ -185,7 +192,26 @@ export default function SettlementModule({ events = [], navigateBack }) {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm("この精算を削除しますか？")) return;
+    if (!window.confirm("この精算をゴミ箱に移動しますか？\n（30日以内なら復元できます）")) return;
+    const target = allSettlements.find(s => s._id === id);
+    if (!target) return;
+    const { _id, ...data } = target;
+    await setDoc(doc(db, "settlements", id), {
+      ...data,
+      _deleted: true,
+      _deletedAt: Date.now(),
+    });
+  };
+
+  const restoreSettlement = async (id) => {
+    const target = allSettlements.find(s => s._id === id);
+    if (!target) return;
+    const { _id, _deleted, _deletedAt, ...data } = target;
+    await setDoc(doc(db, "settlements", id), data);
+  };
+
+  const purgeSettlement = async (id) => {
+    if (!window.confirm("この精算を完全に削除しますか？\nこの操作は取り消せません。")) return;
     await deleteDoc(doc(db, "settlements", id));
   };
 
@@ -410,7 +436,8 @@ export default function SettlementModule({ events = [], navigateBack }) {
     <div style={{padding:"1.5rem 2rem",maxWidth:1100,margin:"0 auto"}} className="hb-view">
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1.25rem",flexWrap:"wrap",gap:".5rem"}}>
         <h2 style={{fontFamily:"Georgia,serif",fontSize:"1.2rem",color:"#c9a84c",letterSpacing:".15em",margin:0}}>💰 アーティスト精算</h2>
-        <div style={{display:"flex",gap:".5rem",flexWrap:"wrap"}}>
+        <div style={{display:"flex",gap:".5rem",flexWrap:"wrap",alignItems:"center"}}>
+          <button style={{...S.btn("sm"),padding:".4rem .8rem"}} onClick={()=>setShowTrash(true)}>🗑 ゴミ箱{trashSettlements.length>0?` (${trashSettlements.length})`:""}</button>
           {eventOptions.length > 0 && (
             <select style={{...S.inp,maxWidth:240}} defaultValue="" onChange={e=>{if(e.target.value)startFromEvent(e.target.value);}}>
               <option value="">＋ イベントから精算作成</option>
@@ -463,6 +490,42 @@ export default function SettlementModule({ events = [], navigateBack }) {
           </div>
         );
       })}
+
+      {/* ゴミ箱モーダル */}
+      {showTrash && (
+        <div style={{position:"fixed",top:0,left:0,width:"100%",height:"100%",background:"rgba(0,0,0,0.85)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}} onClick={()=>setShowTrash(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.27)",borderRadius:8,padding:"1.5rem",maxWidth:600,width:"100%",maxHeight:"85vh",overflowY:"auto"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1rem"}}>
+              <div style={{fontFamily:"Georgia,serif",fontSize:"1rem",color:"#c9a84c",letterSpacing:".15em"}}>🗑 精算のゴミ箱</div>
+              <button style={S.btn("sm")} onClick={()=>setShowTrash(false)}>閉じる</button>
+            </div>
+            <div style={{fontSize:".7rem",color:"rgba(240,232,208,0.5)",marginBottom:"1rem",lineHeight:1.6}}>
+              削除された精算は30日間保持され、その後自動で完全削除されます。
+            </div>
+            {trashSettlements.length === 0 ? (
+              <div style={{textAlign:"center",padding:"2rem",color:"rgba(240,232,208,0.3)",fontSize:".85rem"}}>ゴミ箱は空です</div>
+            ) : trashSettlements.sort((a,b)=>(b._deletedAt||0)-(a._deletedAt||0)).map(s=>{
+              const daysLeft = s._deletedAt ? Math.max(0,Math.ceil(30 - (Date.now()-s._deletedAt)/(24*60*60*1000))) : 30;
+              return (
+                <div key={s._id} style={{padding:".75rem 1rem",background:"#111",borderRadius:5,marginBottom:".5rem",display:"grid",gridTemplateColumns:"1fr auto",gap:".5rem",alignItems:"center"}}>
+                  <div>
+                    <div style={{fontSize:".88rem",marginBottom:".2rem"}}>{s.eventName||"（無題）"}</div>
+                    <div style={{fontSize:".65rem",color:"rgba(240,232,208,0.4)",display:"flex",gap:".75rem",flexWrap:"wrap"}}>
+                      {s.eventDate&&<span>📅 {s.eventDate}</span>}
+                      <span>削除：{s._deletedAt?new Date(s._deletedAt).toLocaleDateString("ja-JP"):""}</span>
+                      <span style={{color:daysLeft<7?"#f4a261":"rgba(240,232,208,0.5)"}}>あと{daysLeft}日</span>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",gap:".4rem"}}>
+                    <button style={{...S.btn("sm"),borderColor:"rgba(126,200,127,0.4)",color:"#7ec87e"}} onClick={()=>restoreSettlement(s._id)}>↩ 復元</button>
+                    <button style={S.btn("danger")} onClick={()=>purgeSettlement(s._id)}>完全削除</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

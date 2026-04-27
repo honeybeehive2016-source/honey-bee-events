@@ -463,14 +463,19 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
   const [aiReply, setAiReply] = useState("");
   const [copied, setCopied] = useState("");
 
+  const [showTrash, setShowTrash] = useState(false);
+  const [allRentals, setAllRentals] = useState([]); // 削除済みも含む
+
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "rentals"), (snap) => {
       const list = [];
       snap.forEach(d => list.push({ ...d.data(), _id: d.id }));
-      setRentals(list);
+      setAllRentals(list);
+      setRentals(list.filter(r => !r._deleted));
     });
     return () => unsub();
   }, []);
+  const trashRentals = allRentals.filter(r => r._deleted);
 
   // initialOpenId が来たら、そのrentalを自動で開く
   useEffect(() => {
@@ -504,7 +509,26 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm("この問い合わせを削除しますか？")) return;
+    if (!window.confirm("この問い合わせをゴミ箱に移動しますか？\n（30日以内なら復元できます）")) return;
+    const target = allRentals.find(r => r._id === id);
+    if (!target) return;
+    const { _id, ...data } = target;
+    await setDoc(doc(db, "rentals", id), {
+      ...data,
+      _deleted: true,
+      _deletedAt: Date.now(),
+    });
+  };
+
+  const restoreRental = async (id) => {
+    const target = allRentals.find(r => r._id === id);
+    if (!target) return;
+    const { _id, _deleted, _deletedAt, ...data } = target;
+    await setDoc(doc(db, "rentals", id), data);
+  };
+
+  const purgeRental = async (id) => {
+    if (!window.confirm("この問い合わせを完全に削除しますか？\nこの操作は取り消せません。")) return;
     await deleteDoc(doc(db, "rentals", id));
   };
 
@@ -835,6 +859,7 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1.25rem",flexWrap:"wrap",gap:".5rem"}}>
         <h2 style={{fontFamily:"Georgia,serif",fontSize:"1.2rem",color:"#c9a84c",letterSpacing:".15em",margin:0}}>🍽 貸切管理</h2>
         <div style={{display:"flex",gap:".5rem",flexWrap:"wrap"}}>
+          <button style={{...S.btn("sm"),padding:".4rem .8rem"}} onClick={()=>setShowTrash(true)}>🗑 ゴミ箱{trashRentals.length>0?` (${trashRentals.length})`:""}</button>
           {onBulkImport && (
             <button style={{...S.btn("ghost"),fontSize:".62rem",padding:".4rem .8rem"}} onClick={onBulkImport}>🔄 既存イベントから取り込み</button>
           )}
@@ -904,6 +929,42 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
           </div>
         </div>
       ))}
+
+      {/* ゴミ箱モーダル */}
+      {showTrash && (
+        <div style={{position:"fixed",top:0,left:0,width:"100%",height:"100%",background:"rgba(0,0,0,0.85)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}} onClick={()=>setShowTrash(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.27)",borderRadius:8,padding:"1.5rem",maxWidth:600,width:"100%",maxHeight:"85vh",overflowY:"auto"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1rem"}}>
+              <div style={{fontFamily:"Georgia,serif",fontSize:"1rem",color:"#c9a84c",letterSpacing:".15em"}}>🗑 貸切のゴミ箱</div>
+              <button style={S.btn("sm")} onClick={()=>setShowTrash(false)}>閉じる</button>
+            </div>
+            <div style={{fontSize:".7rem",color:"rgba(240,232,208,0.5)",marginBottom:"1rem",lineHeight:1.6}}>
+              削除された問い合わせは30日間保持され、その後自動で完全削除されます。
+            </div>
+            {trashRentals.length === 0 ? (
+              <div style={{textAlign:"center",padding:"2rem",color:"rgba(240,232,208,0.3)",fontSize:".85rem"}}>ゴミ箱は空です</div>
+            ) : trashRentals.sort((a,b)=>(b._deletedAt||0)-(a._deletedAt||0)).map(r=>{
+              const daysLeft = r._deletedAt ? Math.max(0,Math.ceil(30 - (Date.now()-r._deletedAt)/(24*60*60*1000))) : 30;
+              return (
+                <div key={r._id} style={{padding:".75rem 1rem",background:"#111",borderRadius:5,marginBottom:".5rem",display:"grid",gridTemplateColumns:"1fr auto",gap:".5rem",alignItems:"center"}}>
+                  <div>
+                    <div style={{fontSize:".88rem",marginBottom:".2rem"}}>{r.contactName||r.customerCompany||"（無題）"}</div>
+                    <div style={{fontSize:".65rem",color:"rgba(240,232,208,0.4)",display:"flex",gap:".75rem",flexWrap:"wrap"}}>
+                      {r.desiredDate&&<span>📅 {r.desiredDate}</span>}
+                      <span>削除：{r._deletedAt?new Date(r._deletedAt).toLocaleDateString("ja-JP"):""}</span>
+                      <span style={{color:daysLeft<7?"#f4a261":"rgba(240,232,208,0.5)"}}>あと{daysLeft}日</span>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",gap:".4rem"}}>
+                    <button style={{...S.btn("sm"),borderColor:"rgba(126,200,127,0.4)",color:"#7ec87e"}} onClick={()=>restoreRental(r._id)}>↩ 復元</button>
+                    <button style={S.btn("danger")} onClick={()=>purgeRental(r._id)}>完全削除</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
