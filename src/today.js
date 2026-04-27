@@ -69,6 +69,14 @@ function getYesterday(dateStr) {
   return dt.toISOString().split("T")[0];
 }
 
+// GoogleドライブのviewリンクをサムネイルURLに変換
+function gdriveDirectUrl(url) {
+  if (!url) return "";
+  const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (!m) return url;
+  return `https://drive.google.com/thumbnail?id=${m[1]}&sz=w1000`;
+}
+
 // ミニカレンダー（申し送り日付ピッカー用）
 function MiniCalendar({ selectedDates = [], onToggle, mode = "multi", rangeStart, rangeEnd, fromDate }) {
   const today = new Date();
@@ -406,6 +414,18 @@ export default function TodayModule({ events = [], navigateBack, onEditEvent }) 
       ) : (
         todayEvents.map((ev, i) => (
           <div key={i} style={{...S.card,padding:"1rem 1.1rem"}}>
+            {/* ポスター（上部に大きく表示） */}
+            {ev.poster && (
+              <a href={ev.poster} target="_blank" rel="noreferrer" style={{display:"block",marginBottom:".75rem",textAlign:"center",background:"#0a0a0a",borderRadius:5,overflow:"hidden",border:"1px solid rgba(201,168,76,0.15)"}}>
+                <img
+                  src={gdriveDirectUrl(ev.poster)}
+                  alt={ev.name+"ポスター"}
+                  style={{maxWidth:"100%",maxHeight:300,display:"block",margin:"0 auto",objectFit:"contain"}}
+                  onError={(e)=>{e.target.style.display="none";e.target.nextSibling.style.display="block";}}
+                />
+                <div style={{display:"none",padding:"1rem",color:"#c9a84c",fontSize:".75rem"}}>🖼 ポスターを開く（プレビュー読み込み失敗）</div>
+              </a>
+            )}
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:".5rem",marginBottom:".5rem",flexWrap:"wrap"}}>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontFamily:"Georgia,serif",fontSize:"1rem",color:"#c9a84c",marginBottom:".25rem"}}>{ev.name}</div>
@@ -417,8 +437,7 @@ export default function TodayModule({ events = [], navigateBack, onEditEvent }) 
                 </div>
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:".3rem"}}>
-                {ev.poster && <a href={ev.poster} target="_blank" rel="noreferrer" style={{...S.btn("sm"),textDecoration:"none",display:"inline-block",textAlign:"center"}}>🖼 ポスター</a>}
-                {onEditEvent && <button style={S.btn("sm")} onClick={()=>onEditEvent(ev._id)}>📝 編集</button>}
+                {onEditEvent && <button type="button" style={S.btn("sm")} onClick={()=>onEditEvent(ev._id)}>📝 編集</button>}
               </div>
             </div>
             {ev.notes && (
