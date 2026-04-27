@@ -231,13 +231,13 @@ function CalendarView({events,rentals=[],onEdit,onEditRental}){
   const daysInMonth=new Date(calYear,calMonth+1,0).getDate();
   // イベントと貸切を両方dateMapに入れる
   const dateMap={};
-  events.forEach(e=>{if(!e.date)return;if(!dateMap[e.date])dateMap[e.date]=[];dateMap[e.date].push({...e,_kind:"event"});});
+  events.forEach(e=>{if(!e.date)return;if(!dateMap[e.date])dateMap[e.date]=[];dateMap[e.date].push({_kind:"event",_orig:e,name:e.name});});
   // 貸切：成約・仮押さえ・完了のみ表示
   rentals.forEach(r=>{
     if(!r.desiredDate)return;
     if(!["hold","won","done"].includes(r.status))return;
     if(!dateMap[r.desiredDate])dateMap[r.desiredDate]=[];
-    dateMap[r.desiredDate].push({...r,_kind:"rental"});
+    dateMap[r.desiredDate].push({_kind:"rental",_orig:r,_id:r._id,customerCompany:r.customerCompany,contactName:r.contactName,purpose:r.purpose});
   });
   const prev=()=>{if(calMonth===0){setCalYear(y=>y-1);setCalMonth(11);}else setCalMonth(m=>m-1);};
   const next=()=>{if(calMonth===11){setCalYear(y=>y+1);setCalMonth(0);}else setCalMonth(m=>m+1);};
@@ -300,7 +300,7 @@ function CalendarView({events,rentals=[],onEdit,onEditRental}){
                     className="hb-cal-event"
                     onClick={()=>{
                       if(isRental){onEditRental&&onEditRental(it._id);}
-                      else{onEdit(events.indexOf(it));}
+                      else{onEdit(events.indexOf(it._orig));}
                     }}
                     style={{
                       fontSize:".55rem",lineHeight:1.3,padding:".15rem .28rem",marginBottom:".12rem",
