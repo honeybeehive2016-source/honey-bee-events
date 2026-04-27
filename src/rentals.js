@@ -452,7 +452,7 @@ async function generateReplyAI(rental, apiKey, type) {
   return data.choices?.[0]?.message?.content || "";
 }
 
-export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, initialOpenId, onConsumeOpenId }) {
+export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, initialOpenId, onConsumeOpenId, events = [], onConvertToEvent, onBulkImport }) {
   const [rentals, setRentals] = useState([]);
   const [view, setView] = useState("list"); // list | edit
   const [form, setForm] = useState(emptyRental);
@@ -815,6 +815,12 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
         <div style={{display:"flex",gap:".5rem",marginTop:"1.5rem",flexWrap:"wrap"}}>
           <button style={{...S.btn("gold"),flex:1,maxWidth:200}} onClick={handleSave}>💾 保存</button>
           <button style={S.btn("ghost")} onClick={()=>setView("list")}>キャンセル</button>
+          {editingId && onConvertToEvent && (
+            <button style={{...S.btn("sm"),padding:".5rem 1rem",fontSize:".7rem",borderColor:"rgba(201,168,76,0.4)"}} onClick={async()=>{
+              const ok = await onConvertToEvent(form, editingId);
+              if (ok === "deleted") setView("list");
+            }}>🎵 イベントに変換</button>
+          )}
           {editingId && (
             <button style={{...S.btn("danger"),marginLeft:"auto"}} onClick={async()=>{await handleDelete(editingId);setView("list");}}>🗑 削除</button>
           )}
@@ -828,7 +834,12 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
     <div style={{padding:"1.5rem 2rem",maxWidth:1100,margin:"0 auto"}} className="hb-view">
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1.25rem",flexWrap:"wrap",gap:".5rem"}}>
         <h2 style={{fontFamily:"Georgia,serif",fontSize:"1.2rem",color:"#c9a84c",letterSpacing:".15em",margin:0}}>🍽 貸切管理</h2>
-        <button style={S.btn("gold")} onClick={startNew}>＋ 新規問い合わせ</button>
+        <div style={{display:"flex",gap:".5rem",flexWrap:"wrap"}}>
+          {onBulkImport && (
+            <button style={{...S.btn("ghost"),fontSize:".62rem",padding:".4rem .8rem"}} onClick={onBulkImport}>🔄 既存イベントから取り込み</button>
+          )}
+          <button style={S.btn("gold")} onClick={startNew}>＋ 新規問い合わせ</button>
+        </div>
       </div>
 
       {/* ステータス別件数 */}
