@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { db } from "./firebase";
-import { collection, doc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
+import { collection, doc, setDoc, deleteDoc, onSnapshot, updateDoc } from "firebase/firestore";
 
 // 業務チェックリストのテンプレート
 const CHECKLIST_TEMPLATE = {
@@ -72,21 +72,33 @@ function getYesterday(dateStr) {
 export default function TodayModule({ events = [], navigateBack, onEditEvent }) {
   const today = new Date().toISOString().split("T")[0];
   const [selectedDate, setSelectedDate] = useState(today);
-  const [dayData, setDayData] = useState({});  // 当日のデータ
-  const [yesterdayData, setYesterdayData] = useState({}); // 前日のデータ
-  const [allDays, setAllDays] = useState([]); // 全日付のデータ
+  const [dayData, setDayData] = useState({});
+  const [yesterdayData, setYesterdayData] = useState({});
+  const [allDays, setAllDays] = useState([]);
+  const [allHandovers, setAllHandovers] = useState([]);
   const [expandedSection, setExpandedSection] = useState("prep");
   const [newHandoverItem, setNewHandoverItem] = useState("");
+  const [newHandoverNote, setNewHandoverNote] = useState("");
   const [showHistory, setShowHistory] = useState(false);
+  const [handoverMode, setHandoverMode] = useState("nextday"); // nextday | single | multi | range
+  const [handoverDate, setHandoverDate] = useState("");
+  const [handoverDates, setHandoverDates] = useState([]); // multi
+  const [handoverRangeStart, setHandoverRangeStart] = useState("");
+  const [handoverRangeEnd, setHandoverRangeEnd] = useState("");
 
-  // Firestore同期
+  // Firestore同期：daily + handovers
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "daily"), (snap) => {
+    const unsub1 = onSnapshot(collection(db, "daily"), (snap) => {
       const list = [];
       snap.forEach(d => list.push({ ...d.data(), _id: d.id }));
       setAllDays(list);
     });
-    return () => unsub();
+    const unsub2 = onSnapshot(collection(db, "handovers"), (snap) => {
+      const list = [];
+      snap.forEach(d => list.push({ ...d.data(), _id: d.id }));
+      setAllHandovers(list);
+    });
+    return () => { unsub1(); unsub2(); };
   }, []);
 
   // 選択日が変わったらデータを切り替え
@@ -97,45 +109,141 @@ export default function TodayModule({ events = [], navigateBack, onEditEvent }) 
     setYesterdayData(y || {});
   }, [selectedDate, allDays]);
 
-  // 保存
+  // 保存（フィールド全体上書き用）
   const save = async (updates) => {
     const merged = { ...dayData, ...updates };
     setDayData(merged);
     const { _id, ...data } = merged;
-    await setDoc(doc(db, "daily", selectedDate), { ...data, savedAt: new Date().toLocaleString("ja-JP") });
+    await setDoc(doc(db, "daily", selectedDate), { ...data, savedAt: new Date().toLocaleString("ja-JP") }, { merge: true });
   };
 
-  // チェック切替
-  const toggleCheck = (category, idx) => {
+  // 個別フィールド更新（並列編集に強い：自分が変えたところだけ上書き）
+  const updateField = async (path, value) => {
+    try {
+      // ドキュメントが存在しなければ作る
+      const docRef = doc(db, "daily", selectedDate);
+      await setDoc(docRef, { [path]: value, savedAt: new Date().toLocaleString("ja-JP") }, { merge: true });
+    } catch (e) {
+      // 存在しない場合は新規作成
+      await setDoc(doc(db, "daily", selectedDate), { [path]: value, savedAt: new Date().toLocaleString("ja-JP") });
+    }
+  };
+
+  // チェック切替（並列編集対応）
+  const toggleCheck = async (category, idx) => {
     const checks = dayData.checks || {};
-    const catChecks = checks[category] || [];
-    const newCatChecks = [...catChecks];
-    newCatChecks[idx] = !newCatChecks[idx];
-    save({ checks: { ...checks, [category]: newCatChecks } });
+    const catChecks = [...(checks[category] || [])];
+    catChecks[idx] = !catChecks[idx];
+    // ドット記法でその位置だけ更新（他のスタッフのチェックを上書きしない）
+    await updateField(`checks.${category}.${idx}`, catChecks[idx]);
   };
 
-  // 申し送り：個別項目チェック切替
-  const toggleHandoverItem = (idx) => {
-    const items = [...(dayData.handoverItems || [])];
-    if (!items[idx]) return;
-    items[idx] = { ...items[idx], done: !items[idx].done };
-    save({ handoverItems: items });
+  // 申し送り：個別項目チェック切替（並列編集対応）
+  const toggleHandoverItem = async (handoverId, currentDone) => {
+    await updateField_handover(handoverId, "done", !currentDone);
   };
 
-  // 申し送り：個別項目追加
-  const addHandoverItem = () => {
+  // 申し送り共通：updateField
+  const updateField_handover = async (id, field, value) => {
+    await setDoc(doc(db, "handovers", id), { [field]: value, updatedAt: Date.now() }, { merge: true });
+  };
+
+  // 申し送り：個別項目追加（モードに応じて対象日を設定）
+  const addHandoverItem = async () => {
     if (!newHandoverItem.trim()) return;
-    const items = [...(dayData.handoverItems || [])];
-    items.push({ text: newHandoverItem.trim(), done: false, createdAt: Date.now() });
-    save({ handoverItems: items });
+    const targetDates = computeTargetDates();
+    if (targetDates === null) return;
+    if (targetDates.length === 0) {
+      alert("送り先の日付を指定してください");
+      return;
+    }
+    const id = `ho_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,6)}`;
+    await setDoc(doc(db, "handovers", id), {
+      type: "item",
+      text: newHandoverItem.trim(),
+      done: false,
+      sourceDate: selectedDate,
+      targetDates,
+      createdAt: Date.now(),
+    });
     setNewHandoverItem("");
   };
 
-  // 申し送り：個別項目削除
-  const removeHandoverItem = (idx) => {
-    const items = (dayData.handoverItems || []).filter((_, i) => i !== idx);
-    save({ handoverItems: items });
+  // 申し送り：自由記述追加
+  const addHandoverNote = async () => {
+    if (!newHandoverNote.trim()) return;
+    const targetDates = computeTargetDates();
+    if (targetDates === null) return;
+    if (targetDates.length === 0) {
+      alert("送り先の日付を指定してください");
+      return;
+    }
+    const id = `ho_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,6)}`;
+    await setDoc(doc(db, "handovers", id), {
+      type: "note",
+      text: newHandoverNote.trim(),
+      sourceDate: selectedDate,
+      targetDates,
+      createdAt: Date.now(),
+    });
+    setNewHandoverNote("");
   };
+
+  // 申し送り：削除
+  const removeHandoverItem = async (id) => {
+    if (!window.confirm("この申し送りを削除しますか？")) return;
+    await deleteDoc(doc(db, "handovers", id));
+  };
+
+  // モードに応じて targetDates を計算
+  const computeTargetDates = () => {
+    if (handoverMode === "nextday") {
+      const next = new Date(selectedDate + "T00:00:00");
+      next.setDate(next.getDate() + 1);
+      return [next.toISOString().split("T")[0]];
+    }
+    if (handoverMode === "single") {
+      if (!handoverDate) return [];
+      return [handoverDate];
+    }
+    if (handoverMode === "multi") {
+      return [...handoverDates];
+    }
+    if (handoverMode === "range") {
+      if (!handoverRangeStart || !handoverRangeEnd) return [];
+      const start = new Date(handoverRangeStart + "T00:00:00");
+      const end = new Date(handoverRangeEnd + "T00:00:00");
+      if (end < start) { alert("終了日が開始日より前になっています"); return null; }
+      const dates = [];
+      const cur = new Date(start);
+      while (cur <= end) {
+        dates.push(cur.toISOString().split("T")[0]);
+        cur.setDate(cur.getDate() + 1);
+      }
+      return dates;
+    }
+    return [];
+  };
+
+  // multi: 日付追加/削除
+  const toggleMultiDate = (date) => {
+    if (handoverDates.includes(date)) {
+      setHandoverDates(handoverDates.filter(d => d !== date));
+    } else {
+      setHandoverDates([...handoverDates, date].sort());
+    }
+  };
+  const addMultiDateInput = (e) => {
+    if (e.target.value && !handoverDates.includes(e.target.value)) {
+      setHandoverDates([...handoverDates, e.target.value].sort());
+    }
+    e.target.value = "";
+  };
+
+  // 当日に届く申し送り
+  const incomingHandovers = allHandovers.filter(h => (h.targetDates || []).includes(selectedDate));
+  // 自分が当日に発行した申し送り
+  const outgoingHandovers = allHandovers.filter(h => h.sourceDate === selectedDate);
 
   // 日付ナビ
   const prevDay = () => {
@@ -154,44 +262,63 @@ export default function TodayModule({ events = [], navigateBack, onEditEvent }) 
   // 当日のイベント
   const todayEvents = events.filter(e => e.date === selectedDate);
 
-  // 過去の申し送り
-  const handoverHistory = allDays
-    .filter(d => d._id < selectedDate && (d.handoverNote || (d.handoverItems||[]).length > 0))
-    .sort((a, b) => b._id.localeCompare(a._id))
-    .slice(0, 14);
+  // 過去の申し送り履歴（過去14日に発行されたもの）
+  const handoverHistory = allHandovers
+    .filter(h => h.sourceDate && h.sourceDate < selectedDate)
+    .sort((a, b) => (b.sourceDate || "").localeCompare(a.sourceDate || ""))
+    .slice(0, 50);
 
   return (
     <div style={{padding:"1rem .85rem",maxWidth:720,margin:"0 auto"}} className="hb-view">
       {/* ヘッダー：日付選択 */}
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:".5rem",marginBottom:"1rem"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:".5rem",marginBottom:"1rem",flexWrap:"wrap"}}>
         <button onClick={prevDay} style={{...S.btn("sm"),padding:".4rem .7rem"}}>◀</button>
-        <div style={{flex:1,textAlign:"center"}}>
-          <div style={{fontFamily:"Georgia,serif",fontSize:"1rem",color:"#c9a84c",letterSpacing:".1em"}}>
+        <div style={{flex:1,textAlign:"center",minWidth:200}}>
+          <input
+            type="date"
+            value={selectedDate}
+            onChange={e=>e.target.value && setSelectedDate(e.target.value)}
+            style={{...S.inp,fontFamily:"Georgia,serif",fontSize:"1rem",color:"#c9a84c",letterSpacing:".05em",textAlign:"center",cursor:"pointer",padding:".4rem .65rem",width:"auto",minWidth:160,display:"inline-block"}}
+          />
+          <div style={{fontSize:".68rem",color:"rgba(240,232,208,0.55)",marginTop:".2rem"}}>
             {fmtDate(selectedDate)}
-          </div>
-          <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.4)",marginTop:".15rem"}}>
-            {isToday ? "本日" : isToday===false && selectedDate < today ? "過去" : "未来"}
+            <span style={{marginLeft:".5rem",color:"rgba(240,232,208,0.4)"}}>
+              {isToday ? "（本日）" : selectedDate < today ? "（過去）" : "（未来）"}
+            </span>
             {!isToday && <button style={{...S.btn("sm"),padding:".15rem .5rem",fontSize:".55rem",marginLeft:".5rem"}} onClick={goToday}>今日へ</button>}
           </div>
         </div>
         <button onClick={nextDay} style={{...S.btn("sm"),padding:".4rem .7rem"}}>▶</button>
       </div>
 
-      {/* 前日からの申し送り */}
-      {(yesterdayData.handoverNote || (yesterdayData.handoverItems||[]).filter(i=>!i.done).length > 0) && (
+      {/* 当日に届く申し送り */}
+      {incomingHandovers.length > 0 && (
         <div style={{padding:"1rem 1.1rem",marginBottom:"1.25rem",background:"rgba(244,162,97,0.08)",border:"1px solid rgba(244,162,97,0.3)",borderRadius:8}}>
-          <div style={{fontSize:".7rem",letterSpacing:".15em",color:"#f4a261",marginBottom:".75rem",fontWeight:600}}>📋 前日からの申し送り</div>
-          {yesterdayData.handoverNote && (
-            <div style={{fontSize:".82rem",color:"rgba(240,232,208,0.85)",lineHeight:1.7,whiteSpace:"pre-wrap",marginBottom:(yesterdayData.handoverItems||[]).length>0?".75rem":0}}>
-              {yesterdayData.handoverNote}
-            </div>
-          )}
-          {(yesterdayData.handoverItems||[]).filter(i=>!i.done).map((item,i)=>(
-            <div key={i} style={{display:"flex",alignItems:"center",gap:".5rem",padding:".4rem .55rem",background:"rgba(244,162,97,0.08)",borderRadius:4,marginBottom:".25rem",fontSize:".82rem",color:"rgba(240,232,208,0.85)"}}>
-              <span style={{color:"#f4a261"}}>•</span>
-              {item.text}
-            </div>
-          ))}
+          <div style={{fontSize:".7rem",letterSpacing:".15em",color:"#f4a261",marginBottom:".75rem",fontWeight:600}}>📋 申し送り</div>
+          {incomingHandovers.map(h => {
+            const isFromPast = h.sourceDate && h.sourceDate < selectedDate;
+            const fromLabel = h.sourceDate === selectedDate
+              ? "本日"
+              : fmtDate(h.sourceDate || "").replace(/^\d+年/,"") + " から";
+            return (
+              <div key={h._id} style={{padding:".55rem .7rem",background:h.done?"rgba(126,200,127,0.08)":"rgba(244,162,97,0.04)",borderRadius:5,marginBottom:".4rem",display:"flex",alignItems:"flex-start",gap:".5rem"}}>
+                {h.type === "item" && (
+                  <input type="checkbox" checked={!!h.done} onChange={()=>toggleHandoverItem(h._id, h.done)} style={{accentColor:"#7ec87e",width:18,height:18,marginTop:"3px",flexShrink:0}}/>
+                )}
+                {h.type === "note" && <span style={{color:"#f4a261",marginTop:"2px"}}>•</span>}
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:".82rem",color:h.done?"rgba(126,200,127,0.6)":"rgba(240,232,208,0.85)",textDecoration:h.done?"line-through":"none",lineHeight:1.6,whiteSpace:"pre-wrap",wordBreak:"break-word"}}>
+                    {h.text}
+                  </div>
+                  <div style={{fontSize:".58rem",color:"rgba(240,232,208,0.4)",marginTop:".15rem",letterSpacing:".05em"}}>
+                    {fromLabel}
+                    {(h.targetDates||[]).length > 1 && ` / 計${h.targetDates.length}日`}
+                  </div>
+                </div>
+                <button onClick={()=>removeHandoverItem(h._id)} style={{padding:".15rem .35rem",background:"transparent",border:"none",color:"rgba(226,75,74,0.5)",cursor:"pointer",fontSize:".7rem"}}>✕</button>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -233,7 +360,10 @@ export default function TodayModule({ events = [], navigateBack, onEditEvent }) 
       <textarea
         style={{...S.inp,resize:"vertical",lineHeight:1.6,minHeight:80}}
         value={dayData.staffNote || ""}
-        onChange={e=>save({staffNote:e.target.value})}
+        onChange={e=>{
+          setDayData({...dayData, staffNote: e.target.value});
+          updateField("staffNote", e.target.value);
+        }}
         placeholder="例：佐藤様アレルギー対応 / VIP予約 / 急なシフト変更 など"
       />
 
@@ -291,63 +421,145 @@ export default function TodayModule({ events = [], navigateBack, onEditEvent }) 
         );
       })}
 
-      {/* 申し送り（次の日に伝える） */}
-      <div style={S.secTitle}>📋 申し送り（明日に伝える）</div>
+      {/* 申し送り作成 */}
+      <div style={S.secTitle}>📋 申し送りを送る</div>
+
+      {/* 送り先の選択 */}
+      <div style={{padding:".75rem .9rem",background:"#0d0d0d",border:"1px solid rgba(244,162,97,0.15)",borderRadius:5,marginBottom:".75rem"}}>
+        <div style={{fontSize:".62rem",color:"rgba(244,162,97,0.7)",marginBottom:".5rem",letterSpacing:".1em"}}>📅 送り先</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:".4rem",marginBottom:".5rem"}}>
+          {[
+            {k:"nextday",l:"明日"},
+            {k:"single",l:"日付指定"},
+            {k:"multi",l:"複数日"},
+            {k:"range",l:"期間"},
+          ].map(m => (
+            <button key={m.k} onClick={()=>setHandoverMode(m.k)} style={{padding:".3rem .7rem",borderRadius:3,border:"1px solid "+(handoverMode===m.k?"#f4a261":"rgba(244,162,97,0.2)"),background:handoverMode===m.k?"#f4a261":"transparent",color:handoverMode===m.k?"#0a0a0a":"rgba(244,162,97,0.7)",fontSize:".65rem",cursor:"pointer",fontFamily:"inherit",letterSpacing:".05em"}}>{m.l}</button>
+          ))}
+        </div>
+
+        {handoverMode === "nextday" && (
+          <div style={{fontSize:".7rem",color:"rgba(240,232,208,0.6)"}}>
+            → 翌日（{(() => { const n = new Date(selectedDate+"T00:00:00"); n.setDate(n.getDate()+1); return fmtDate(n.toISOString().split("T")[0]); })()}）に表示
+          </div>
+        )}
+
+        {handoverMode === "single" && (
+          <div style={{display:"flex",gap:".4rem",alignItems:"center"}}>
+            <input type="date" value={handoverDate} onChange={e=>setHandoverDate(e.target.value)} style={{...S.inp,maxWidth:180}}/>
+            {handoverDate && <span style={{fontSize:".7rem",color:"rgba(240,232,208,0.6)"}}>{fmtDate(handoverDate)}</span>}
+          </div>
+        )}
+
+        {handoverMode === "multi" && (
+          <div>
+            <input type="date" onChange={addMultiDateInput} style={{...S.inp,maxWidth:180,marginBottom:".4rem"}}/>
+            <div style={{display:"flex",flexWrap:"wrap",gap:".3rem"}}>
+              {handoverDates.map(d => (
+                <span key={d} style={{padding:".2rem .5rem",background:"rgba(244,162,97,0.13)",borderRadius:3,fontSize:".7rem",color:"#f4a261",display:"inline-flex",alignItems:"center",gap:".3rem"}}>
+                  {d}
+                  <button onClick={()=>toggleMultiDate(d)} style={{background:"transparent",border:"none",color:"#f4a261",cursor:"pointer",padding:0,fontSize:".7rem"}}>✕</button>
+                </span>
+              ))}
+            </div>
+            {handoverDates.length === 0 && <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.4)"}}>日付を追加してください</div>}
+          </div>
+        )}
+
+        {handoverMode === "range" && (
+          <div style={{display:"flex",gap:".4rem",alignItems:"center",flexWrap:"wrap"}}>
+            <input type="date" value={handoverRangeStart} onChange={e=>setHandoverRangeStart(e.target.value)} style={{...S.inp,maxWidth:160}} placeholder="開始"/>
+            <span style={{color:"rgba(240,232,208,0.5)"}}>〜</span>
+            <input type="date" value={handoverRangeEnd} onChange={e=>setHandoverRangeEnd(e.target.value)} style={{...S.inp,maxWidth:160}} placeholder="終了"/>
+            {handoverRangeStart && handoverRangeEnd && (
+              <span style={{fontSize:".62rem",color:"rgba(240,232,208,0.5)"}}>
+                {(() => {
+                  const s = new Date(handoverRangeStart+"T00:00:00");
+                  const e = new Date(handoverRangeEnd+"T00:00:00");
+                  return Math.round((e-s)/(86400000))+1 + "日間";
+                })()}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* 自由記述欄 */}
-      <textarea
-        style={{...S.inp,resize:"vertical",lineHeight:1.6,minHeight:80,marginBottom:".75rem"}}
-        value={dayData.handoverNote || ""}
-        onChange={e=>save({handoverNote:e.target.value})}
-        placeholder="自由記述：今日あった特記事項・全体的な共有事項など"
-      />
+      <div style={{display:"flex",gap:".4rem",marginBottom:".5rem"}}>
+        <textarea
+          style={{...S.inp,resize:"vertical",lineHeight:1.6,minHeight:60,flex:1}}
+          value={newHandoverNote}
+          onChange={e=>setNewHandoverNote(e.target.value)}
+          placeholder="自由記述で送る（共有事項・特記など）"
+        />
+        <button style={{...S.btn("gold"),alignSelf:"flex-end"}} onClick={addHandoverNote}>送信</button>
+      </div>
 
-      {/* 個別項目 */}
-      <div style={{fontSize:".68rem",color:"rgba(201,168,76,0.6)",marginBottom:".5rem",letterSpacing:".1em"}}>個別チェック項目</div>
-      {(dayData.handoverItems || []).map((item, i) => (
-        <div key={i} style={{display:"flex",alignItems:"center",gap:".5rem",padding:".5rem .7rem",background:item.done?"rgba(126,200,127,0.08)":"#0d0d0d",border:"1px solid rgba(201,168,76,0.08)",borderRadius:4,marginBottom:".25rem"}}>
-          <input type="checkbox" checked={!!item.done} onChange={()=>toggleHandoverItem(i)} style={{accentColor:"#7ec87e",width:18,height:18}}/>
-          <span style={{flex:1,fontSize:".82rem",color:item.done?"rgba(126,200,127,0.7)":"rgba(240,232,208,0.85)",textDecoration:item.done?"line-through":"none",wordBreak:"break-word"}}>{item.text}</span>
-          <button onClick={()=>removeHandoverItem(i)} style={{padding:".25rem .4rem",background:"transparent",border:"none",color:"rgba(226,75,74,0.6)",cursor:"pointer",fontSize:".8rem"}}>✕</button>
-        </div>
-      ))}
-
-      <div style={{display:"flex",gap:".4rem",marginBottom:"1rem"}}>
+      {/* 個別チェック項目 */}
+      <div style={{display:"flex",gap:".4rem",marginBottom:".75rem"}}>
         <input
           style={{...S.inp,flex:1}}
           value={newHandoverItem}
           onChange={e=>setNewHandoverItem(e.target.value)}
           onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();addHandoverItem();}}}
-          placeholder="例：冷蔵庫の野菜を確認"
+          placeholder="チェック項目で送る（例：ケーキ用意 / 冷蔵庫確認）"
         />
-        <button style={S.btn("gold")} onClick={addHandoverItem}>追加</button>
+        <button style={S.btn("gold")} onClick={addHandoverItem}>送信</button>
       </div>
+
+      {/* 自分が今日送った申し送り */}
+      {outgoingHandovers.length > 0 && (
+        <div style={{marginBottom:"1rem"}}>
+          <div style={{fontSize:".62rem",color:"rgba(201,168,76,0.5)",marginBottom:".4rem",letterSpacing:".1em"}}>📤 本日送信した申し送り（{outgoingHandovers.length}件）</div>
+          {outgoingHandovers.map(h => (
+            <div key={h._id} style={{padding:".4rem .65rem",background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.08)",borderRadius:4,marginBottom:".25rem",display:"flex",alignItems:"center",gap:".5rem"}}>
+              <span style={{fontSize:".55rem",padding:".1rem .4rem",borderRadius:2,background:h.type==="item"?"rgba(126,200,127,0.13)":"rgba(126,200,227,0.13)",color:h.type==="item"?"#7ec87e":"#7ec8e3",letterSpacing:".05em"}}>
+                {h.type === "item" ? "☑" : "📝"}
+              </span>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:".75rem",color:"rgba(240,232,208,0.7)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.text}</div>
+                <div style={{fontSize:".58rem",color:"rgba(240,232,208,0.4)"}}>
+                  {(h.targetDates||[]).length === 1 ? `→ ${h.targetDates[0]}` : `→ ${(h.targetDates||[]).length}日に送信`}
+                </div>
+              </div>
+              <button onClick={()=>removeHandoverItem(h._id)} style={{padding:".2rem .4rem",background:"transparent",border:"none",color:"rgba(226,75,74,0.5)",cursor:"pointer",fontSize:".7rem"}}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* 過去の申し送り */}
       <button
         style={{...S.btn("ghost"),width:"100%",fontSize:".7rem"}}
         onClick={()=>setShowHistory(!showHistory)}
       >
-        {showHistory ? "▲ 過去の申し送りを隠す" : "▼ 過去の申し送りを見る"}
+        {showHistory ? "▲ 過去に発行された申し送りを隠す" : "▼ 過去に発行された申し送りを見る"}
       </button>
 
       {showHistory && (
         <div style={{marginTop:".75rem"}}>
           {handoverHistory.length === 0 ? (
             <div style={{textAlign:"center",padding:"1rem",color:"rgba(240,232,208,0.3)",fontSize:".8rem"}}>過去の申し送りはありません</div>
-          ) : handoverHistory.map(d => (
-            <div key={d._id} style={{padding:".75rem 1rem",background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.08)",borderRadius:5,marginBottom:".5rem"}}>
-              <div style={{fontSize:".68rem",color:"rgba(201,168,76,0.6)",marginBottom:".4rem",letterSpacing:".1em"}}>{fmtDate(d._id)}</div>
-              {d.handoverNote && (
-                <div style={{fontSize:".78rem",color:"rgba(240,232,208,0.7)",lineHeight:1.6,whiteSpace:"pre-wrap",marginBottom:(d.handoverItems||[]).length>0?".4rem":0}}>{d.handoverNote}</div>
-              )}
-              {(d.handoverItems||[]).map((item,i)=>(
-                <div key={i} style={{fontSize:".75rem",color:item.done?"rgba(126,200,127,0.5)":"rgba(240,232,208,0.7)",textDecoration:item.done?"line-through":"none",paddingLeft:".5rem"}}>
-                  {item.done?"✓":"•"} {item.text}
+          ) : (
+            (() => {
+              const grouped = {};
+              handoverHistory.forEach(h => {
+                if (!grouped[h.sourceDate]) grouped[h.sourceDate] = [];
+                grouped[h.sourceDate].push(h);
+              });
+              return Object.keys(grouped).sort((a,b)=>b.localeCompare(a)).map(date => (
+                <div key={date} style={{padding:".75rem 1rem",background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.08)",borderRadius:5,marginBottom:".5rem"}}>
+                  <div style={{fontSize:".68rem",color:"rgba(201,168,76,0.6)",marginBottom:".4rem",letterSpacing:".1em"}}>{fmtDate(date)} 発行</div>
+                  {grouped[date].map(h => (
+                    <div key={h._id} style={{fontSize:".75rem",color:h.done?"rgba(126,200,127,0.5)":"rgba(240,232,208,0.7)",textDecoration:h.done&&h.type==="item"?"line-through":"none",paddingLeft:".5rem",marginBottom:".15rem"}}>
+                      {h.type === "item" ? (h.done?"✓":"☐") : "📝"} {h.text}
+                      <span style={{fontSize:".58rem",color:"rgba(240,232,208,0.35)",marginLeft:".5rem"}}>→ {(h.targetDates||[]).length}日</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          ))}
+              ));
+            })()
+          )}
         </div>
       )}
     </div>
