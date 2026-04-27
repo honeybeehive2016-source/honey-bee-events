@@ -69,6 +69,77 @@ function getYesterday(dateStr) {
   return dt.toISOString().split("T")[0];
 }
 
+// ミニカレンダー（申し送り日付ピッカー用）
+function MiniCalendar({ selectedDates = [], onToggle, mode = "multi", rangeStart, rangeEnd, fromDate }) {
+  const today = new Date();
+  const [calYear, setCalYear] = useState(today.getFullYear());
+  const [calMonth, setCalMonth] = useState(today.getMonth());
+  const firstDay = new Date(calYear, calMonth, 1).getDay();
+  const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+  const prev = () => { if (calMonth === 0) { setCalYear(y=>y-1); setCalMonth(11); } else setCalMonth(m=>m-1); };
+  const next = () => { if (calMonth === 11) { setCalYear(y=>y+1); setCalMonth(0); } else setCalMonth(m=>m+1); };
+  const todayStr = today.toISOString().split("T")[0];
+
+  const isInRange = (dateStr) => {
+    if (mode !== "range") return false;
+    if (!rangeStart || !rangeEnd) return false;
+    return dateStr >= rangeStart && dateStr <= rangeEnd;
+  };
+
+  const cells = [];
+  for (let i = 0; i < firstDay; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  return (
+    <div style={{background:"#0a0a0a",border:"1px solid rgba(244,162,97,0.2)",borderRadius:5,padding:".6rem",marginTop:".4rem"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:".5rem"}}>
+        <button type="button" onClick={prev} style={{padding:".2rem .55rem",background:"transparent",border:"1px solid rgba(244,162,97,0.27)",borderRadius:3,color:"#f4a261",cursor:"pointer",fontSize:".65rem"}}>◀</button>
+        <span style={{fontFamily:"Georgia,serif",fontSize:".82rem",color:"#f4a261",letterSpacing:".05em"}}>{calYear}年{calMonth+1}月</span>
+        <button type="button" onClick={next} style={{padding:".2rem .55rem",background:"transparent",border:"1px solid rgba(244,162,97,0.27)",borderRadius:3,color:"#f4a261",cursor:"pointer",fontSize:".65rem"}}>▶</button>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1,marginBottom:1}}>
+        {["日","月","火","水","木","金","土"].map((d,i)=>(
+          <div key={d} style={{textAlign:"center",fontSize:".58rem",padding:".2rem 0",color:i===0?"#e24b4a":i===6?"#7ec8e3":"rgba(240,232,208,0.4)"}}>{d}</div>
+        ))}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}}>
+        {cells.map((day, idx) => {
+          if (!day) return <div key={"e"+idx}/>;
+          const dateStr = `${calYear}-${String(calMonth+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+          const isSelected = selectedDates.includes(dateStr);
+          const isToday = dateStr === todayStr;
+          const isRangeBetween = isInRange(dateStr);
+          const isPast = fromDate && dateStr < fromDate;
+          const dow = (firstDay + day - 1) % 7;
+          let bg = "transparent";
+          if (isSelected) bg = "#f4a261";
+          else if (isRangeBetween) bg = "rgba(244,162,97,0.25)";
+          else if (isToday) bg = "rgba(201,168,76,0.15)";
+          return (
+            <button
+              key={idx}
+              type="button"
+              onClick={()=>!isPast && onToggle(dateStr)}
+              disabled={isPast}
+              style={{
+                padding:".35rem 0",fontSize:".68rem",
+                background: bg,
+                border: isToday && !isSelected ? "1px solid rgba(201,168,76,0.5)" : "1px solid transparent",
+                borderRadius:3,
+                color: isSelected ? "#0a0a0a" : isPast ? "rgba(240,232,208,0.2)" : isRangeBetween ? "#f4a261" : (dow===0?"#e24b4a":dow===6?"#7ec8e3":"#f0e8d0"),
+                cursor: isPast ? "not-allowed" : "pointer",
+                fontFamily:"inherit",
+                fontWeight: isSelected ? 600 : 400,
+                opacity: isPast ? 0.4 : 1,
+              }}
+            >{day}</button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function TodayModule({ events = [], navigateBack, onEditEvent }) {
   const today = new Date().toISOString().split("T")[0];
   const [selectedDate, setSelectedDate] = useState(today);
@@ -76,7 +147,7 @@ export default function TodayModule({ events = [], navigateBack, onEditEvent }) 
   const [yesterdayData, setYesterdayData] = useState({});
   const [allDays, setAllDays] = useState([]);
   const [allHandovers, setAllHandovers] = useState([]);
-  const [expandedSection, setExpandedSection] = useState("prep");
+  const [expandedSection, setExpandedSection] = useState("");
   const [newHandoverItem, setNewHandoverItem] = useState("");
   const [newHandoverNote, setNewHandoverNote] = useState("");
   const [showHistory, setShowHistory] = useState(false);
@@ -247,14 +318,18 @@ export default function TodayModule({ events = [], navigateBack, onEditEvent }) 
 
   // 日付ナビ
   const prevDay = () => {
-    const dt = new Date(selectedDate + "T00:00:00");
-    dt.setDate(dt.getDate() - 1);
-    setSelectedDate(dt.toISOString().split("T")[0]);
+    setSelectedDate(prev => {
+      const dt = new Date(prev + "T00:00:00");
+      dt.setDate(dt.getDate() - 1);
+      return dt.toISOString().split("T")[0];
+    });
   };
   const nextDay = () => {
-    const dt = new Date(selectedDate + "T00:00:00");
-    dt.setDate(dt.getDate() + 1);
-    setSelectedDate(dt.toISOString().split("T")[0]);
+    setSelectedDate(prev => {
+      const dt = new Date(prev + "T00:00:00");
+      dt.setDate(dt.getDate() + 1);
+      return dt.toISOString().split("T")[0];
+    });
   };
   const goToday = () => setSelectedDate(today);
   const isToday = selectedDate === today;
@@ -272,7 +347,7 @@ export default function TodayModule({ events = [], navigateBack, onEditEvent }) 
     <div style={{padding:"1rem .85rem",maxWidth:720,margin:"0 auto"}} className="hb-view">
       {/* ヘッダー：日付選択 */}
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:".5rem",marginBottom:"1rem",flexWrap:"wrap"}}>
-        <button onClick={prevDay} style={{...S.btn("sm"),padding:".4rem .7rem"}}>◀</button>
+        <button type="button" onClick={prevDay} style={{...S.btn("sm"),padding:".4rem .7rem"}}>◀</button>
         <div style={{flex:1,textAlign:"center",minWidth:200}}>
           <input
             type="date"
@@ -285,10 +360,10 @@ export default function TodayModule({ events = [], navigateBack, onEditEvent }) 
             <span style={{marginLeft:".5rem",color:"rgba(240,232,208,0.4)"}}>
               {isToday ? "（本日）" : selectedDate < today ? "（過去）" : "（未来）"}
             </span>
-            {!isToday && <button style={{...S.btn("sm"),padding:".15rem .5rem",fontSize:".55rem",marginLeft:".5rem"}} onClick={goToday}>今日へ</button>}
+            {!isToday && <button type="button" style={{...S.btn("sm"),padding:".15rem .5rem",fontSize:".55rem",marginLeft:".5rem"}} onClick={goToday}>今日へ</button>}
           </div>
         </div>
-        <button onClick={nextDay} style={{...S.btn("sm"),padding:".4rem .7rem"}}>▶</button>
+        <button type="button" onClick={nextDay} style={{...S.btn("sm"),padding:".4rem .7rem"}}>▶</button>
       </div>
 
       {/* 当日に届く申し送り */}
@@ -445,42 +520,79 @@ export default function TodayModule({ events = [], navigateBack, onEditEvent }) 
         )}
 
         {handoverMode === "single" && (
-          <div style={{display:"flex",gap:".4rem",alignItems:"center"}}>
-            <input type="date" value={handoverDate} onChange={e=>setHandoverDate(e.target.value)} style={{...S.inp,maxWidth:180}}/>
-            {handoverDate && <span style={{fontSize:".7rem",color:"rgba(240,232,208,0.6)"}}>{fmtDate(handoverDate)}</span>}
-          </div>
+          <>
+            <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.5)",marginBottom:".25rem"}}>
+              {handoverDate ? `→ ${fmtDate(handoverDate)} に表示` : "カレンダーから日付を選択"}
+            </div>
+            <MiniCalendar
+              selectedDates={handoverDate ? [handoverDate] : []}
+              onToggle={(d)=>setHandoverDate(d===handoverDate?"":d)}
+              mode="single"
+              fromDate={selectedDate}
+            />
+          </>
         )}
 
         {handoverMode === "multi" && (
-          <div>
-            <input type="date" onChange={addMultiDateInput} style={{...S.inp,maxWidth:180,marginBottom:".4rem"}}/>
-            <div style={{display:"flex",flexWrap:"wrap",gap:".3rem"}}>
-              {handoverDates.map(d => (
-                <span key={d} style={{padding:".2rem .5rem",background:"rgba(244,162,97,0.13)",borderRadius:3,fontSize:".7rem",color:"#f4a261",display:"inline-flex",alignItems:"center",gap:".3rem"}}>
-                  {d}
-                  <button onClick={()=>toggleMultiDate(d)} style={{background:"transparent",border:"none",color:"#f4a261",cursor:"pointer",padding:0,fontSize:".7rem"}}>✕</button>
-                </span>
-              ))}
+          <>
+            <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.5)",marginBottom:".25rem"}}>
+              {handoverDates.length === 0 ? "カレンダーから複数の日付を選択" : `${handoverDates.length}日間に表示`}
             </div>
-            {handoverDates.length === 0 && <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.4)"}}>日付を追加してください</div>}
-          </div>
+            <MiniCalendar
+              selectedDates={handoverDates}
+              onToggle={toggleMultiDate}
+              mode="multi"
+              fromDate={selectedDate}
+            />
+            {handoverDates.length > 0 && (
+              <div style={{display:"flex",flexWrap:"wrap",gap:".3rem",marginTop:".4rem"}}>
+                {handoverDates.map(d => (
+                  <span key={d} style={{padding:".15rem .45rem",background:"rgba(244,162,97,0.13)",borderRadius:3,fontSize:".62rem",color:"#f4a261",display:"inline-flex",alignItems:"center",gap:".25rem"}}>
+                    {d.slice(5)}
+                    <button type="button" onClick={()=>toggleMultiDate(d)} style={{background:"transparent",border:"none",color:"#f4a261",cursor:"pointer",padding:0,fontSize:".62rem"}}>✕</button>
+                  </span>
+                ))}
+                <button type="button" onClick={()=>setHandoverDates([])} style={{...S.btn("sm"),padding:".1rem .4rem",fontSize:".55rem"}}>クリア</button>
+              </div>
+            )}
+          </>
         )}
 
         {handoverMode === "range" && (
-          <div style={{display:"flex",gap:".4rem",alignItems:"center",flexWrap:"wrap"}}>
-            <input type="date" value={handoverRangeStart} onChange={e=>setHandoverRangeStart(e.target.value)} style={{...S.inp,maxWidth:160}} placeholder="開始"/>
-            <span style={{color:"rgba(240,232,208,0.5)"}}>〜</span>
-            <input type="date" value={handoverRangeEnd} onChange={e=>setHandoverRangeEnd(e.target.value)} style={{...S.inp,maxWidth:160}} placeholder="終了"/>
-            {handoverRangeStart && handoverRangeEnd && (
-              <span style={{fontSize:".62rem",color:"rgba(240,232,208,0.5)"}}>
-                {(() => {
-                  const s = new Date(handoverRangeStart+"T00:00:00");
-                  const e = new Date(handoverRangeEnd+"T00:00:00");
-                  return Math.round((e-s)/(86400000))+1 + "日間";
-                })()}
-              </span>
+          <>
+            <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.5)",marginBottom:".25rem"}}>
+              {!handoverRangeStart ? "開始日をタップ" : !handoverRangeEnd ? "終了日をタップ" : (() => {
+                const s = new Date(handoverRangeStart+"T00:00:00");
+                const e = new Date(handoverRangeEnd+"T00:00:00");
+                return `${handoverRangeStart} 〜 ${handoverRangeEnd} （${Math.round((e-s)/86400000)+1}日間）`;
+              })()}
+            </div>
+            <MiniCalendar
+              selectedDates={[handoverRangeStart, handoverRangeEnd].filter(Boolean)}
+              onToggle={(d)=>{
+                if (!handoverRangeStart || (handoverRangeStart && handoverRangeEnd)) {
+                  setHandoverRangeStart(d);
+                  setHandoverRangeEnd("");
+                } else {
+                  if (d < handoverRangeStart) {
+                    setHandoverRangeEnd(handoverRangeStart);
+                    setHandoverRangeStart(d);
+                  } else if (d === handoverRangeStart) {
+                    setHandoverRangeStart("");
+                  } else {
+                    setHandoverRangeEnd(d);
+                  }
+                }
+              }}
+              mode="range"
+              rangeStart={handoverRangeStart}
+              rangeEnd={handoverRangeEnd}
+              fromDate={selectedDate}
+            />
+            {(handoverRangeStart || handoverRangeEnd) && (
+              <button type="button" onClick={()=>{setHandoverRangeStart("");setHandoverRangeEnd("");}} style={{...S.btn("sm"),padding:".15rem .5rem",fontSize:".58rem",marginTop:".4rem"}}>リセット</button>
             )}
-          </div>
+          </>
         )}
       </div>
 
