@@ -215,7 +215,7 @@ const S={
 
 function Field({label,children,full}){return(<div style={{gridColumn:full?"1/-1":undefined,display:"flex",flexDirection:"column"}}><label style={S.lbl}>{label}</label>{children}</div>);}
 
-function CalendarView({events,onEdit}){
+function CalendarView({events,rentals=[],onEdit,onEditRental}){
   const today=new Date();
   const [calYear,setCalYear]=useState(()=>{
     const saved=localStorage.getItem("hb-cal-year");
@@ -228,8 +228,16 @@ function CalendarView({events,onEdit}){
   useEffect(()=>{localStorage.setItem("hb-cal-year",calYear);localStorage.setItem("hb-cal-month",calMonth);},[calYear,calMonth]);
   const firstDay=new Date(calYear,calMonth,1).getDay();
   const daysInMonth=new Date(calYear,calMonth+1,0).getDate();
-  const eventMap={};
-  events.forEach(e=>{if(!e.date)return;if(!eventMap[e.date])eventMap[e.date]=[];eventMap[e.date].push(e);});
+  // イベントと貸切を両方dateMapに入れる
+  const dateMap={};
+  events.forEach(e=>{if(!e.date)return;if(!dateMap[e.date])dateMap[e.date]=[];dateMap[e.date].push({...e,_kind:"event"});});
+  // 貸切：成約・仮押さえ・完了のみ表示
+  rentals.forEach(r=>{
+    if(!r.desiredDate)return;
+    if(!["hold","won","done"].includes(r.status))return;
+    if(!dateMap[r.desiredDate])dateMap[r.desiredDate]=[];
+    dateMap[r.desiredDate].push({...r,_kind:"rental"});
+  });
   const prev=()=>{if(calMonth===0){setCalYear(y=>y-1);setCalMonth(11);}else setCalMonth(m=>m-1);};
   const next=()=>{if(calMonth===11){setCalYear(y=>y+1);setCalMonth(0);}else setCalMonth(m=>m+1);};
   const goToday=()=>{setCalYear(today.getFullYear());setCalMonth(today.getMonth());};
@@ -237,7 +245,6 @@ function CalendarView({events,onEdit}){
     const [y,m]=e.target.value.split("-").map(Number);
     setCalYear(y);setCalMonth(m);
   };
-  // 前後12ヶ月分の選択肢を生成
   const jumpOptions=[];
   const baseY=today.getFullYear(),baseM=today.getMonth();
   for(let i=-6;i<=18;i++){
@@ -254,13 +261,18 @@ function CalendarView({events,onEdit}){
   const todayStr=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
   return(
     <div>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:".5rem",marginBottom:"1.25rem",flexWrap:"wrap"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:".5rem",marginBottom:".75rem",flexWrap:"wrap"}}>
         <button style={S.btn("sm")} onClick={prev}>◀</button>
         <select value={currentVal} onChange={handleJump} style={{...S.inp,width:"auto",minWidth:140,padding:".4rem .65rem",fontFamily:"Georgia,serif",fontSize:"1rem",color:"#c9a84c",letterSpacing:".05em",textAlign:"center",cursor:"pointer"}}>
           {jumpOptions.map(o=>(<option key={o.val} value={o.val}>{o.label}</option>))}
         </select>
         <button style={S.btn("sm")} onClick={next}>▶</button>
         {!isCurrentMonth&&<button style={{...S.btn("ghost"),padding:".3rem .7rem",fontSize:".62rem"}} onClick={goToday}>今月</button>}
+      </div>
+      {/* 凡例 */}
+      <div style={{display:"flex",justifyContent:"center",gap:"1rem",marginBottom:".75rem",fontSize:".62rem",color:"rgba(240,232,208,0.5)"}}>
+        <span style={{display:"flex",alignItems:"center",gap:".3rem"}}><span style={{display:"inline-block",width:10,height:10,background:"rgba(201,168,76,0.3)",borderLeft:"2px solid #c9a84c",borderRadius:1}}/>イベント</span>
+        <span style={{display:"flex",alignItems:"center",gap:".3rem"}}><span style={{display:"inline-block",width:10,height:10,background:"rgba(126,200,227,0.2)",borderLeft:"2px solid #7ec8e3",borderRadius:1}}/>貸切</span>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(7,minmax(0,1fr))",gap:2,marginBottom:2}}>
         {["日","月","火","水","木","金","土"].map((d,i)=>(
@@ -271,15 +283,35 @@ function CalendarView({events,onEdit}){
         {cells.map((day,idx)=>{
           if(!day)return<div key={"e"+idx}/>;
           const dateKey=`${calYear}-${String(calMonth+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
-          const evs=eventMap[dateKey]||[];
+          const items=dateMap[dateKey]||[];
           const isToday=dateKey===todayStr;
           const dow=(firstDay+day-1)%7;
           return(
             <div key={idx} className="hb-cal-cell" style={{background:isToday?"rgba(201,168,76,0.12)":"#111",border:isToday?"1px solid rgba(201,168,76,0.5)":"1px solid rgba(255,255,255,0.04)",borderRadius:4,padding:".3rem .25rem",minHeight:58,minWidth:0,overflow:"hidden"}}>
               <div className="hb-cal-day-num" style={{fontSize:".72rem",fontWeight:500,marginBottom:".2rem",color:isToday?"#c9a84c":dow===0?"#e24b4a":dow===6?"#7ec8e3":"rgba(240,232,208,0.55)"}}>{day}</div>
-              {evs.map((ev,ei)=>(
-                <div key={ei} className="hb-cal-event" onClick={()=>onEdit(events.indexOf(ev))} style={{fontSize:".55rem",lineHeight:1.3,padding:".15rem .28rem",marginBottom:".12rem",background:"rgba(201,168,76,0.15)",borderLeft:"2px solid #c9a84c",borderRadius:2,cursor:"pointer",color:"#f0e8d0cc",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}} title={ev.name}>{ev.name}</div>
-              ))}
+              {items.map((it,ei)=>{
+                const isRental=it._kind==="rental";
+                const label=isRental
+                  ? `🍽 ${it.customerCompany||it.contactName||"貸切"}`
+                  : it.name;
+                return (
+                  <div key={ei}
+                    className="hb-cal-event"
+                    onClick={()=>{
+                      if(isRental){onEditRental&&onEditRental(it._id);}
+                      else{onEdit(events.indexOf(it));}
+                    }}
+                    style={{
+                      fontSize:".55rem",lineHeight:1.3,padding:".15rem .28rem",marginBottom:".12rem",
+                      background:isRental?"rgba(126,200,227,0.18)":"rgba(201,168,76,0.15)",
+                      borderLeft:isRental?"2px solid #7ec8e3":"2px solid #c9a84c",
+                      borderRadius:2,cursor:"pointer",color:"#f0e8d0cc",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"
+                    }}
+                    title={isRental?`貸切: ${it.contactName||""}（${it.purpose||""}）`:it.name}>
+                    {label}
+                  </div>
+                );
+              })}
             </div>
           );
         })}
@@ -622,6 +654,8 @@ export default function App() {
   const [apiKey, setApiKey] = useState(() => localStorage.getItem("hb-openai-key") || "");
   const [showApiModal, setShowApiModal] = useState(false);
   const [tempApiKey, setTempApiKey] = useState("");
+  const [rentalsList, setRentalsList] = useState([]);
+  const [rentalToOpen, setRentalToOpen] = useState(null);
 
   // Firestore リアルタイム同期
   useEffect(() => {
@@ -636,8 +670,19 @@ export default function App() {
       snap.forEach(d => list.push({ ...d.data(), _id: d.id }));
       setTemplates(list);
     }, (err) => { console.error("templates sync error:", err); });
-    return () => { unsubE(); unsubT(); };
+    const unsubR = onSnapshot(collection(db, "rentals"), (snap) => {
+      const list = [];
+      snap.forEach(d => list.push({ ...d.data(), _id: d.id }));
+      setRentalsList(list);
+    }, (err) => { console.error("rentals sync error:", err); });
+    return () => { unsubE(); unsubT(); unsubR(); };
   }, []);
+
+  // 貸切クリックハンドラ：rentalsモジュールへ遷移＋ID指定
+  const handleEditRental = (rentalId) => {
+    setRentalToOpen(rentalId);
+    navigateTo("rentals");
+  };
 
   const setField=(k,v)=>setForm(f=>{
     const next={...f,[k]:v};
@@ -862,6 +907,8 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
           apiKey={apiKey}
           onRequireApiKey={()=>{setTempApiKey("");setShowApiModal(true);}}
           navigateBack={navigateBack}
+          initialOpenId={rentalToOpen}
+          onConsumeOpenId={()=>setRentalToOpen(null)}
         />
       )}
 
@@ -883,7 +930,7 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
 
           {csvMsg&&<div style={{marginBottom:"1rem",padding:".6rem 1rem",borderRadius:5,background:csvMsg.startsWith("✅")?"rgba(100,200,100,0.1)":"rgba(226,75,74,0.1)",border:`1px solid ${csvMsg.startsWith("✅")?"rgba(100,200,100,0.3)":"rgba(226,75,74,0.3)"}`,fontSize:".8rem",color:csvMsg.startsWith("✅")?"#7ec87e":"#e24b4a"}}>{csvMsg}</div>}
 
-          {listMode==="calendar"&&<CalendarView events={sortedEvents} onEdit={i=>{const ev=sortedEvents[i];editEvent(events.indexOf(ev));}}/>}
+          {listMode==="calendar"&&<CalendarView events={sortedEvents} rentals={rentalsList} onEdit={i=>{const ev=sortedEvents[i];editEvent(events.indexOf(ev));}} onEditRental={handleEditRental}/>}
 
           {listMode==="list"&&(
             <>

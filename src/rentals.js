@@ -16,7 +16,7 @@ export const RENTAL_STATUSES = [
 export const emptyRental = {
   inquiryDate: "", desiredDate: "", desiredTime: "",
   purpose: "", people: "", budget: "",
-  food: "", drinks: "", stage: false, sound: false, mic: false,
+  food: "", drinks: "", stage: false, sound: false, mic: false, projector: false,
   contactName: "", phone: "", email: "",
   customerCompany: "",
   status: "new",
@@ -30,14 +30,12 @@ export const emptyRental = {
   invoiceSubject: "",
   validityDate: "",
   // 予約金管理
-  depositPolicy: "required",   // "required"=もらう / "waived"=もらわない
-  depositReceived: false,      // 受領済みかどうか
-  depositDate: "",             // 受領日
-  depositAmount: "30000",      // 金額（デフォルト3万円）
+  depositPolicy: "required",
+  depositReceived: false,
+  depositDate: "",
+  depositAmount: "30000",
   depositMemo: "",
-  // 担当者
   staff: "",
-  // 発行履歴：[{type, no, date, items, subject, snapshot}]
   documentHistory: [],
 };
 
@@ -114,6 +112,7 @@ const COMPANY_INFO = {
   bank: "湘南信用金庫 大船支店",
   bankNum: "(普) 4225938",
   bankName: "ビーハイブ カブシキガイシャ",
+  invoiceRegNo: "T9021001059544",
 };
 
 function buildDocumentHTMLFromSnapshot(snap) {
@@ -245,6 +244,7 @@ function buildDocumentHTMLFromSnapshot(snap) {
       <div>HP：<a href="${COMPANY_INFO.hp}">${COMPANY_INFO.hp.replace("https://","")}</a></div>
       <div>E-Mail：${COMPANY_INFO.email}</div>
       <div>担当：${COMPANY_INFO.staff}</div>
+      <div style="font-size: 9pt; margin-top: .25em;">登録番号：${COMPANY_INFO.invoiceRegNo}</div>
     </div>
   </div>
 
@@ -393,7 +393,7 @@ async function generateReplyAI(rental, apiKey, type) {
 人数：${rental.people || "未定"}名
 利用目的：${rental.purpose || "未記入"}
 予算：${rental.budget || "未記入"}
-ご希望オプション：${[rental.food && "料理", rental.drinks && "飲み放題", rental.stage && "ステージ", rental.sound && "音響", rental.mic && "マイク"].filter(Boolean).join("、") || "なし"}
+ご希望オプション：${[rental.food && "料理", rental.drinks && "飲み放題", rental.stage && "ステージ", rental.sound && "音響", rental.mic && "マイク", rental.projector && "プロジェクター"].filter(Boolean).join("、") || "なし"}
 備考：${rental.memo || "なし"}
 
 【HONEY BEEの貸切情報（必ず参考にしてください）】
@@ -452,7 +452,7 @@ async function generateReplyAI(rental, apiKey, type) {
   return data.choices?.[0]?.message?.content || "";
 }
 
-export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack }) {
+export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, initialOpenId, onConsumeOpenId }) {
   const [rentals, setRentals] = useState([]);
   const [view, setView] = useState("list"); // list | edit
   const [form, setForm] = useState(emptyRental);
@@ -471,6 +471,20 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack })
     });
     return () => unsub();
   }, []);
+
+  // initialOpenId が来たら、そのrentalを自動で開く
+  useEffect(() => {
+    if (initialOpenId && rentals.length > 0) {
+      const target = rentals.find(r => r._id === initialOpenId);
+      if (target) {
+        setForm({ ...emptyRental, ...target });
+        setEditingId(target._id);
+        setAiReply("");
+        setView("edit");
+        if (onConsumeOpenId) onConsumeOpenId();
+      }
+    }
+  }, [initialOpenId, rentals, onConsumeOpenId]);
 
   const setField = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -577,7 +591,7 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack })
               <Field label="料理希望"><input style={S.inp} value={form.food} onChange={e=>setField("food",e.target.value)} placeholder="例：コース料理"/></Field>
               <Field label="飲み放題希望"><input style={S.inp} value={form.drinks} onChange={e=>setField("drinks",e.target.value)} placeholder="例：2時間"/></Field>
               <Field full><div style={{display:"flex",gap:"1rem",flexWrap:"wrap",marginTop:".25rem"}}>
-                {[{k:"stage",l:"ステージ使用"},{k:"sound",l:"音響使用"},{k:"mic",l:"マイク使用"}].map(o=>(
+                {[{k:"stage",l:"ステージ使用"},{k:"sound",l:"音響使用"},{k:"mic",l:"マイク使用"},{k:"projector",l:"プロジェクター使用"}].map(o=>(
                   <label key={o.k} style={{display:"flex",alignItems:"center",gap:".4rem",cursor:"pointer",fontSize:".85rem",color:form[o.k]?"#c9a84c":"rgba(240,232,208,0.55)"}}>
                     <input type="checkbox" checked={!!form[o.k]} onChange={e=>setField(o.k,e.target.checked)} style={{accentColor:"#c9a84c"}}/>
                     {o.l}
