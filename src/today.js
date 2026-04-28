@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { db } from "./firebase";
 import { collection, doc, setDoc, deleteDoc, onSnapshot, updateDoc } from "firebase/firestore";
+import { getShiftForDate, getRoleColor, getRoleLabel, isManager } from "./shift";
 
 // 業務チェックリストのテンプレート
 const CHECKLIST_TEMPLATE = {
@@ -157,7 +158,7 @@ function MiniCalendar({ selectedDates = [], onToggle, mode = "multi", rangeStart
   );
 }
 
-export default function TodayModule({ events = [], rentals = [], navigateBack, onEditEvent }) {
+export default function TodayModule({ events = [], rentals = [], shifts = [], navigateBack, onEditEvent }) {
   const today = (() => {
     const d = new Date();
     const yy = d.getFullYear();
@@ -597,6 +598,58 @@ export default function TodayModule({ events = [], rentals = [], navigateBack, o
           </div>
         ))
       )}
+
+      {/* 本日の出勤者 */}
+      {(() => {
+        const todayShifts = getShiftForDate(shifts, selectedDate);
+        if (todayShifts.length === 0) return null;
+        const workers = todayShifts.filter(s => !s.isPerformer);
+        const performers = todayShifts.filter(s => s.isPerformer);
+        return (
+          <>
+            <div style={S.secTitle}>👥 本日の出勤者{workers.length>0?`（${workers.length}名）`:""}</div>
+            <div style={{...S.card,padding:"1rem 1.1rem"}}>
+              {workers.length === 0 && performers.length === 0 ? (
+                <div style={{fontSize:".8rem",color:"rgba(240,232,208,0.4)"}}>出勤者の登録がありません</div>
+              ) : (
+                <>
+                  {workers.length > 0 && (
+                    <div style={{display:"flex",flexDirection:"column",gap:".4rem"}}>
+                      {workers.map((w, i) => {
+                        const color = getRoleColor(w.role);
+                        const isMng = isManager(w.name);
+                        return (
+                          <div key={i} style={{display:"flex",alignItems:"center",gap:".55rem",flexWrap:"wrap"}}>
+                            <span style={{fontSize:".88rem",color:"#f0e8d0",minWidth:90}}>{w.name}</span>
+                            {!isMng && w.time && (
+                              <span style={{fontSize:".75rem",color:"rgba(240,232,208,0.7)"}}>{w.time}〜</span>
+                            )}
+                            <span style={{padding:".15rem .5rem",borderRadius:3,background:color+"22",color:color,border:`1px solid ${color}55`,fontSize:".62rem",letterSpacing:".05em",fontWeight:600}}>
+                              {getRoleLabel(w.role)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {performers.length > 0 && (
+                    <div style={{marginTop: workers.length>0 ? ".75rem" : 0, paddingTop: workers.length>0 ? ".5rem" : 0, borderTop: workers.length>0 ? "1px dashed rgba(201,168,76,0.15)" : "none"}}>
+                      <div style={{fontSize:".62rem",color:"rgba(181,140,209,0.7)",marginBottom:".3rem",letterSpacing:".1em"}}>🎤 出演として参加</div>
+                      <div style={{display:"flex",gap:".4rem",flexWrap:"wrap"}}>
+                        {performers.map((p,i) => (
+                          <span key={i} style={{padding:".15rem .55rem",borderRadius:3,background:"rgba(181,140,209,0.13)",color:"#b58cd1",border:"1px solid rgba(181,140,209,0.3)",fontSize:".7rem"}}>
+                            {p.name}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </>
+        );
+      })()}
 
       {/* スタッフ向け注意事項 */}
       <div style={S.secTitle}>📝 スタッフ向け注意事項</div>
