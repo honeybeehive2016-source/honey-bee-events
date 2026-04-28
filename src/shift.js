@@ -171,6 +171,9 @@ export function parseShiftCSV(csvText) {
 
   // 日付別出勤者マップ
   const shiftByDate = {}; // "YYYY-MM-DD" -> [{name, time, role, isPerformer, raw}]
+  // スタッフの登場順序を記録（CSVの上から順）
+  const staffOrder = [];
+  const staffSeen = new Set();
 
   for (const block of blocks) {
     for (let r = block.dataStart; r < block.dataEnd; r++) {
@@ -187,6 +190,12 @@ export function parseShiftCSV(csvText) {
       if (!name) continue;
       if (SKIP_NAMES.includes(name)) continue;
       const isPerformerOnlyRow = PERFORMER_ONLY_NAMES.includes(name);
+
+      // スタッフ順序を記録
+      if (!staffSeen.has(name)) {
+        staffOrder.push(name);
+        staffSeen.add(name);
+      }
 
       // 各列をチェック
       for (const colStr in block.dateMap) {
@@ -211,7 +220,7 @@ export function parseShiftCSV(csvText) {
     }
   }
 
-  return { year, month, shiftByDate };
+  return { year, month, shiftByDate, staffOrder };
 }
 
 // ===== シフトモジュール =====
@@ -262,6 +271,7 @@ export default function ShiftModule({ navigateBack }) {
           month: result.month,
           monthLabel: `${result.year}年${result.month}月`,
           shiftByDate: result.shiftByDate,
+          staffOrder: result.staffOrder || [],
           importedAt: new Date().toLocaleString("ja-JP"),
         });
         const totalDates = Object.keys(result.shiftByDate).length;
@@ -531,4 +541,37 @@ export function getShiftForDate(shifts, dateKey) {
   const monthData = shifts.find(s => s._id === monthId);
   if (!monthData) return [];
   return (monthData.shiftByDate || {})[dateKey] || [];
+}
+
+// ===== 全シフトから順序付きスタッフ一覧を取得 =====
+// CSVの上から順、ただし社長など PERFORMER_ONLY は最後
+export function getOrderedStaffNames(shifts) {
+  const order = [];
+  const seen = new Set();
+  // 最新の月から順番に取り込み（順序の起点を最新にする）
+  const sortedShifts = [...shifts].sort((a,b)=>(b._id||"").localeCompare(a._id||""));
+  for (const monthData of sortedShifts) {
+    const list = monthData.staffOrder || [];
+    for (const name of list) {
+      if (!seen.has(name)) {
+        order.push(name);
+        seen.add(name);
+      }
+    }
+    // 後方互換：staffOrderがないデータからは shiftByDate から拾う
+    if ((!monthData.staffOrder || monthData.staffOrder.length === 0) && monthData.shiftByDate) {
+      Object.values(monthData.shiftByDate).forEach(entries => {
+        (entries || []).forEach(e => {
+          if (e.name && !seen.has(e.name)) {
+            order.push(e.name);
+            seen.add(e.name);
+          }
+        });
+      });
+    }
+  }
+  // 社長など PERFORMER_ONLY を最後に
+  const performerOnly = order.filter(n => PERFORMER_ONLY_NAMES.includes(n));
+  const others = order.filter(n => !PERFORMER_ONLY_NAMES.includes(n));
+  return [...others, ...performerOnly];
 }

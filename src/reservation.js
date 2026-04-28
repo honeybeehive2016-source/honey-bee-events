@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { db } from "./firebase";
 import { collection, doc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
+import { getOrderedStaffNames } from "./shift";
 
 const S = {
   card: { background:"#111", border:"1px solid rgba(201,168,76,0.1)", borderRadius:6, padding:"1rem 1.25rem", marginBottom:".75rem" },
@@ -70,19 +71,8 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   const [showTrash, setShowTrash] = useState(false);
   const [allReservations, setAllReservations] = useState([]);
 
-  // シフトデータからスタッフ名を抽出（重複排除）
-  const staffNames = (() => {
-    const set = new Set();
-    shifts.forEach(monthData => {
-      const sd = monthData.shiftByDate || {};
-      Object.values(sd).forEach(entries => {
-        (entries || []).forEach(e => {
-          if (e.name) set.add(e.name);
-        });
-      });
-    });
-    return [...set].sort();
-  })();
+  // シフトデータからスタッフ名を抽出（CSV順、社長は最後）
+  const staffNames = getOrderedStaffNames(shifts);
 
   useEffect(() => {
     const TRASH_TTL = 30 * 24 * 60 * 60 * 1000;
@@ -501,9 +491,13 @@ export function CustomerReservationForm({ events = [] }) {
     return (
       <div style={{minHeight:"100vh",background:"#0a0a0a",color:"#f0e8d0",fontFamily:"'Hiragino Mincho ProN','Yu Mincho','游明朝',serif",padding:"2rem 1rem",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
         <div style={{maxWidth:500,width:"100%",textAlign:"center",padding:"2rem"}}>
-          <div style={{fontSize:"3rem",marginBottom:"1rem"}}>🐝</div>
-          <h1 style={{fontFamily:"Georgia,serif",fontSize:"1.4rem",color:"#c9a84c",letterSpacing:".15em",marginBottom:"1rem"}}>HONEY BEE</h1>
-          <div style={{fontSize:"1rem",color:"#7ec87e",marginBottom:"1.5rem",lineHeight:1.7}}>
+          <img
+            src="/honeybee_logo.png"
+            alt="HONEY BEE"
+            style={{maxWidth:140,height:"auto",margin:"0 auto",display:"block",marginBottom:"1rem"}}
+            onError={(e)=>{e.target.style.display="none";}}
+          />
+          <div style={{fontSize:"1rem",color:"#7ec87e",marginBottom:"1.5rem",lineHeight:1.7,marginTop:"1rem"}}>
             ✓ 予約を承りました<br/>
             <span style={{fontSize:".82rem",color:"rgba(240,232,208,0.7)"}}>ご予約ありがとうございます。当日お会いできることを楽しみにしております。</span>
           </div>
@@ -525,22 +519,44 @@ export function CustomerReservationForm({ events = [] }) {
     <div style={{minHeight:"100vh",background:"#0a0a0a",color:"#f0e8d0",fontFamily:"'Hiragino Mincho ProN','Yu Mincho','游明朝',serif",padding:"2rem 1rem"}}>
       <div style={{maxWidth:600,margin:"0 auto"}}>
         <div style={{textAlign:"center",marginBottom:"2rem"}}>
-          <div style={{fontSize:"2.5rem",marginBottom:".5rem"}}>🐝</div>
-          <h1 style={{fontFamily:"Georgia,serif",fontSize:"1.5rem",color:"#c9a84c",letterSpacing:".15em",margin:0}}>HONEY BEE</h1>
-          <div style={{fontSize:".82rem",color:"rgba(240,232,208,0.6)",letterSpacing:".15em",marginTop:".25rem"}}>RESERVATION</div>
+          <img
+            src="/honeybee_logo.png"
+            alt="HONEY BEE"
+            style={{maxWidth:160,height:"auto",margin:"0 auto",display:"block",marginBottom:".5rem"}}
+            onError={(e)=>{e.target.style.display="none";}}
+          />
+          <div style={{fontFamily:"Georgia, 'Times New Roman', serif",fontSize:".8rem",color:"rgba(201,168,76,0.7)",letterSpacing:".4em",marginTop:".5rem",fontWeight:300}}>RESERVATION</div>
         </div>
 
         <div style={{padding:"1.5rem",background:"#111",borderRadius:8,border:"1px solid rgba(201,168,76,0.15)"}}>
           {/* 日付選択 */}
           <Field label="日付" required>
-            <select style={S.inp} value={form.date} onChange={e=>handleDateChange(e.target.value)}>
-              <option value="">-- 日付を選択 --</option>
-              {sortedDates.map(d=>(
-                <option key={d} value={d}>{fmtDate(d)}</option>
-              ))}
-            </select>
+            <input
+              type="date"
+              style={S.inp}
+              value={form.date}
+              onChange={e=>handleDateChange(e.target.value)}
+              min={today}
+              list="event-dates"
+            />
+            <datalist id="event-dates">
+              {sortedDates.map(d=>(<option key={d} value={d}/>))}
+            </datalist>
+            {form.date && !eventsByDate[form.date] && (
+              <div style={{fontSize:".7rem",color:"#f4a261",marginTop:".3rem"}}>
+                ⚠️ この日にはイベントの予定がありません。
+              </div>
+            )}
             {sortedDates.length === 0 && (
               <div style={{fontSize:".7rem",color:"#f4a261",marginTop:".3rem"}}>現在受付中のイベントはありません</div>
+            )}
+            {sortedDates.length > 0 && !form.date && (
+              <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.45)",marginTop:".3rem"}}>
+                予定があるのは：{sortedDates.slice(0,5).map(d => {
+                  const dt = new Date(d+"T00:00:00");
+                  return `${dt.getMonth()+1}/${dt.getDate()}`;
+                }).join("、")}{sortedDates.length>5?` ...他${sortedDates.length-5}日`:""}
+              </div>
             )}
           </Field>
 
@@ -651,6 +667,16 @@ export function CustomerReservationForm({ events = [] }) {
           <div>● OPEN・STARTの時間につきましては都合により変更になる場合がございます</div>
           <div>● ご予約のキャンセルは必ず前日までにご連絡ください。</div>
           <div style={{paddingLeft:"1em",marginTop:".15rem"}}>当日キャンセルや無断キャンセルの場合は、今後のご予約をお断りするほか、状況によりキャンセル料を頂戴する場合がございます。</div>
+        </div>
+
+        {/* 個人情報の取り扱いについて */}
+        <div style={{marginTop:"1rem",padding:"1rem 1.1rem",background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.1)",borderRadius:6,fontSize:".7rem",color:"rgba(240,232,208,0.65)",lineHeight:1.8}}>
+          <div style={{fontSize:".68rem",letterSpacing:".15em",color:"#c9a84c",marginBottom:".5rem"}}>🔒 個人情報の取り扱いについて</div>
+          <div>
+            ご記入いただいた個人情報は、ご予約管理および店舗からのご連絡にのみ使用いたします。
+            その他の目的では使用せず、第三者へ提供することは一切ございません。
+            お客様の個人情報の取扱いには細心の注意を払い、適切に管理いたします。
+          </div>
         </div>
 
         <div style={{textAlign:"center",marginTop:"2rem",fontSize:".7rem",color:"rgba(240,232,208,0.4)",letterSpacing:".05em",lineHeight:1.7}}>
