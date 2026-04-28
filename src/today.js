@@ -326,17 +326,23 @@ export default function TodayModule({ events = [], navigateBack, onEditEvent }) 
 
   // 日付ナビ
   const prevDay = () => {
+    console.log("[勝山日付] ◀ pressed. current:", selectedDate);
     setSelectedDate(prev => {
       const dt = new Date(prev + "T00:00:00");
       dt.setDate(dt.getDate() - 1);
-      return dt.toISOString().split("T")[0];
+      const newDate = dt.toISOString().split("T")[0];
+      console.log("[勝山日付] ◀ new date:", newDate);
+      return newDate;
     });
   };
   const nextDay = () => {
+    console.log("[勝山日付] ▶ pressed. current:", selectedDate);
     setSelectedDate(prev => {
       const dt = new Date(prev + "T00:00:00");
       dt.setDate(dt.getDate() + 1);
-      return dt.toISOString().split("T")[0];
+      const newDate = dt.toISOString().split("T")[0];
+      console.log("[勝山日付] ▶ new date:", newDate);
+      return newDate;
     });
   };
   const goToday = () => setSelectedDate(today);
