@@ -63,11 +63,11 @@ export function parseShiftCell(cellStr, isManager = false) {
 
 export function getRoleColor(role) {
   switch(role){
-    case "pa": return "#7ec8e3";
-    case "kitchen": return "#f4a261";
-    case "mc": return "#b58cd1";
-    case "midnight": return "#666666";
-    default: return "#c9a84c"; // hall
+    case "pa": return "#4fc3f7";       // 鮮やかな水色
+    case "kitchen": return "#ff8a3d";  // 鮮やかなオレンジ
+    case "mc": return "#b58cd1";       // 紫
+    case "midnight": return "#999999"; // グレー
+    default: return "#ffd54f";          // 鮮やかな黄色（ホール）
   }
 }
 
@@ -404,21 +404,31 @@ export default function ShiftModule({ navigateBack }) {
                 {/* 全員の名前を表示 */}
                 {workers.map((w,i)=>{
                   const color = getRoleColor(w.role);
+                  const isMng = isManager(w.name);
+                  const showTime = !isMng && w.time;
                   return (
                     <div key={i} style={{
-                      fontSize:".5rem",lineHeight:1.3,padding:".08rem .22rem",marginBottom:".08rem",
-                      background:color+"22",borderLeft:`2px solid ${color}`,borderRadius:2,
-                      color:"#f0e8d0cc",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis",
+                      fontSize:".5rem",lineHeight:1.25,padding:".1rem .25rem",marginBottom:".1rem",
+                      background:color+"33",
+                      borderLeft:`3px solid ${color}`,
+                      borderRadius:2,
+                      color:"#f0e8d0",
+                      overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis",
+                      display:"flex",justifyContent:"space-between",gap:".15rem",
                     }}>
-                      {w.name}
+                      <span style={{overflow:"hidden",textOverflow:"ellipsis",minWidth:0}}>{w.name}</span>
+                      {showTime && <span style={{color:color,fontWeight:600,fontSize:".48rem",flexShrink:0}}>{w.time}</span>}
                     </div>
                   );
                 })}
                 {performers.length > 0 && performers.map((p,i)=>(
                   <div key={"p"+i} style={{
-                    fontSize:".5rem",lineHeight:1.3,padding:".08rem .22rem",marginBottom:".08rem",
-                    background:"rgba(181,140,209,0.13)",borderLeft:"2px solid #b58cd1",borderRadius:2,
-                    color:"#b58cd1",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis",
+                    fontSize:".5rem",lineHeight:1.25,padding:".1rem .25rem",marginBottom:".1rem",
+                    background:"rgba(181,140,209,0.25)",
+                    borderLeft:"3px solid #b58cd1",
+                    borderRadius:2,
+                    color:"#dcc4ee",
+                    overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis",
                   }}>
                     🎤 {p.name}
                   </div>
