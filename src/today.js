@@ -211,25 +211,39 @@ export default function TodayModule({ events = [], navigateBack, onEditEvent }) 
     await setDoc(doc(db, "daily", selectedDate), { ...data, savedAt: new Date().toLocaleString("ja-JP") }, { merge: true });
   };
 
-  // 個別フィールド更新（並列編集に強い：自分が変えたところだけ上書き）
+  // 個別フィールド更新（並列編集に強い）
   const updateField = async (path, value) => {
+    const docRef = doc(db, "daily", selectedDate);
     try {
-      // ドキュメントが存在しなければ作る
-      const docRef = doc(db, "daily", selectedDate);
-      await setDoc(docRef, { [path]: value, savedAt: new Date().toLocaleString("ja-JP") }, { merge: true });
+      // updateDoc はドキュメントが存在しないと失敗する
+      await updateDoc(docRef, { [path]: value, savedAt: new Date().toLocaleString("ja-JP") });
     } catch (e) {
-      // 存在しない場合は新規作成
-      await setDoc(doc(db, "daily", selectedDate), { [path]: value, savedAt: new Date().toLocaleString("ja-JP") });
+      // 無ければ作る（最初の保存）
+      await setDoc(docRef, { [path]: value, savedAt: new Date().toLocaleString("ja-JP") });
     }
   };
 
   // チェック切替（並列編集対応）
+  // checks をオブジェクト型 ({ "0": true, "1": false, ... }) で持つことで、
+  // 個別の項目だけドット記法で更新できる（他のスタッフのチェックを上書きしない）
   const toggleCheck = async (category, idx) => {
     const checks = dayData.checks || {};
-    const catChecks = [...(checks[category] || [])];
-    catChecks[idx] = !catChecks[idx];
-    // ドット記法でその位置だけ更新（他のスタッフのチェックを上書きしない）
-    await updateField(`checks.${category}.${idx}`, catChecks[idx]);
+    const catChecks = checks[category] || {};
+    // 配列形式だった古いデータも対応
+    const isArr = Array.isArray(catChecks);
+    const cur = isArr ? !!catChecks[idx] : !!catChecks[String(idx)];
+    const newVal = !cur;
+    // 楽観的更新：UIを即座に反映
+    const newCatChecks = isArr
+      ? (() => { const a = [...catChecks]; a[idx] = newVal; return a; })()
+      : { ...catChecks, [String(idx)]: newVal };
+    setDayData({ ...dayData, checks: { ...checks, [category]: newCatChecks } });
+    // Firestore: 配列の場合は category 全体を上書き、オブジェクトの場合はドット記法で個別更新
+    if (isArr) {
+      await updateField(`checks.${category}`, newCatChecks);
+    } else {
+      await updateField(`checks.${category}.${idx}`, newVal);
+    }
   };
 
   // 申し送り：個別項目チェック切替（並列編集対応）
@@ -310,9 +324,6 @@ export default function TodayModule({ events = [], navigateBack, onEditEvent }) 
         dates.push(cur);
         cur = shiftDate(cur, 1);
       }
-      return dates;
-    }
-    return [];
       return dates;
     }
     return [];
@@ -479,14 +490,22 @@ export default function TodayModule({ events = [], navigateBack, onEditEvent }) 
       {/* 業務チェックリスト */}
       <div style={S.secTitle}>✅ 業務チェックリスト</div>
       {Object.entries(CHECKLIST_TEMPLATE).map(([key, cat]) => {
-        const checks = (dayData.checks || {})[key] || [];
+        const checksRaw = (dayData.checks || {})[key];
+        // 配列でもオブジェクトでも対応
+        const isCheckedAt = (idx) => {
+          if (!checksRaw) return false;
+          if (Array.isArray(checksRaw)) return !!checksRaw[idx];
+          return !!checksRaw[String(idx)];
+        };
         const total = cat.items.length;
-        const done = checks.filter(Boolean).length;
+        let done = 0;
+        for (let i = 0; i < total; i++) if (isCheckedAt(i)) done++;
         const pct = Math.round((done/total)*100);
         const isExpanded = expandedSection === key;
         return (
           <div key={key} style={{marginBottom:".5rem",border:"1px solid rgba(201,168,76,0.1)",borderRadius:6,overflow:"hidden"}}>
             <button
+              type="button"
               onClick={()=>setExpandedSection(isExpanded ? "" : key)}
               style={{
                 width:"100%",padding:".75rem 1rem",background: done===total?"rgba(126,200,127,0.08)":"#111",
@@ -511,7 +530,7 @@ export default function TodayModule({ events = [], navigateBack, onEditEvent }) 
             {isExpanded && (
               <div style={{padding:".5rem"}}>
                 {cat.items.map((item, idx) => {
-                  const checked = !!checks[idx];
+                  const checked = isCheckedAt(idx);
                   return (
                     <label key={idx} style={{display:"flex",alignItems:"center",gap:".75rem",padding:".7rem .8rem",cursor:"pointer",borderRadius:4,marginBottom:".15rem",background:checked?"rgba(126,200,127,0.05)":"transparent"}}>
                       <input
