@@ -399,7 +399,7 @@ export default function ShiftModule({ navigateBack }) {
                 }}>
                 <div className="hb-cal-day-num" style={{fontSize:".72rem",fontWeight:500,marginBottom:".15rem",color:isToday?"#c9a84c":dow===0?"#e24b4a":dow===6?"#7ec8e3":"rgba(240,232,208,0.55)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <span>{day}</span>
-                  {entries.length > 0 && <span style={{fontSize:".55rem",color:"rgba(240,232,208,0.4)",fontWeight:400}}>{workers.length}名</span>}
+                  {entries.length > 0 && <span style={{fontSize:".55rem",color:"rgba(240,232,208,0.4)",fontWeight:400}}>{entries.length}名</span>}
                 </div>
                 {/* 全員の名前を表示 */}
                 {workers.map((w,i)=>{
@@ -414,11 +414,15 @@ export default function ShiftModule({ navigateBack }) {
                     </div>
                   );
                 })}
-                {performers.length > 0 && (
-                  <div style={{fontSize:".5rem",color:"#b58cd1",padding:".05rem .22rem",background:"rgba(181,140,209,0.13)",borderRadius:2,marginTop:".05rem",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>
-                    🎤 {performers.length}名
+                {performers.length > 0 && performers.map((p,i)=>(
+                  <div key={"p"+i} style={{
+                    fontSize:".5rem",lineHeight:1.3,padding:".08rem .22rem",marginBottom:".08rem",
+                    background:"rgba(181,140,209,0.13)",borderLeft:"2px solid #b58cd1",borderRadius:2,
+                    color:"#b58cd1",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis",
+                  }}>
+                    🎤 {p.name}
                   </div>
-                )}
+                ))}
               </div>
             );
           })}

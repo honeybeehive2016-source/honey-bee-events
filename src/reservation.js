@@ -531,32 +531,14 @@ export function CustomerReservationForm({ events = [] }) {
         <div style={{padding:"1.5rem",background:"#111",borderRadius:8,border:"1px solid rgba(201,168,76,0.15)"}}>
           {/* 日付選択 */}
           <Field label="日付" required>
-            <input
-              type="date"
-              style={S.inp}
-              value={form.date}
-              onChange={e=>handleDateChange(e.target.value)}
-              min={today}
-              list="event-dates"
-            />
-            <datalist id="event-dates">
-              {sortedDates.map(d=>(<option key={d} value={d}/>))}
-            </datalist>
-            {form.date && !eventsByDate[form.date] && (
-              <div style={{fontSize:".7rem",color:"#f4a261",marginTop:".3rem"}}>
-                ⚠️ この日にはイベントの予定がありません。
-              </div>
-            )}
+            <select style={S.inp} value={form.date} onChange={e=>handleDateChange(e.target.value)}>
+              <option value="">-- 日付を選択 --</option>
+              {sortedDates.map(d=>(
+                <option key={d} value={d}>{fmtDate(d)}</option>
+              ))}
+            </select>
             {sortedDates.length === 0 && (
               <div style={{fontSize:".7rem",color:"#f4a261",marginTop:".3rem"}}>現在受付中のイベントはありません</div>
-            )}
-            {sortedDates.length > 0 && !form.date && (
-              <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.45)",marginTop:".3rem"}}>
-                予定があるのは：{sortedDates.slice(0,5).map(d => {
-                  const dt = new Date(d+"T00:00:00");
-                  return `${dt.getMonth()+1}/${dt.getDate()}`;
-                }).join("、")}{sortedDates.length>5?` ...他${sortedDates.length-5}日`:""}
-              </div>
             )}
           </Field>
 
