@@ -229,6 +229,19 @@ export default function ShiftModule({ navigateBack }) {
       const list = [];
       snap.forEach(d => list.push({ ...d.data(), _id: d.id }));
       setShifts(list);
+      // 当月のデータがあればそれを表示
+      const currentMonthId = (() => {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+      })();
+      const hasCurrentMonth = list.some(s => s._id === currentMonthId);
+      if (hasCurrentMonth) {
+        setViewMonth(currentMonthId);
+      } else if (list.length > 0) {
+        // 当月がなければ最新の月
+        const sorted = [...list].sort((a,b)=>(b._id||"").localeCompare(a._id||""));
+        setViewMonth(sorted[0]._id);
+      }
     });
     return () => unsub();
   }, []);
@@ -378,8 +391,8 @@ export default function ShiftModule({ navigateBack }) {
                   <span>{day}</span>
                   {entries.length > 0 && <span style={{fontSize:".55rem",color:"rgba(240,232,208,0.4)",fontWeight:400}}>{workers.length}名</span>}
                 </div>
-                {/* 名前を最大3名 + その他 */}
-                {workers.slice(0,3).map((w,i)=>{
+                {/* 全員の名前を表示 */}
+                {workers.map((w,i)=>{
                   const color = getRoleColor(w.role);
                   return (
                     <div key={i} style={{
@@ -391,9 +404,6 @@ export default function ShiftModule({ navigateBack }) {
                     </div>
                   );
                 })}
-                {workers.length > 3 && (
-                  <div style={{fontSize:".5rem",color:"rgba(240,232,208,0.4)",padding:".05rem .2rem"}}>+{workers.length-3}</div>
-                )}
                 {performers.length > 0 && (
                   <div style={{fontSize:".5rem",color:"#b58cd1",padding:".05rem .22rem",background:"rgba(181,140,209,0.13)",borderRadius:2,marginTop:".05rem",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>
                     🎤 {performers.length}名
