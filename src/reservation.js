@@ -31,6 +31,19 @@ function fmtDate(d) {
   return `${dt.getFullYear()}年${dt.getMonth()+1}月${dt.getDate()}日（${DAYS_JP[dt.getDay()]}）`;
 }
 
+// 予約経路リスト（並び順）
+export const SOURCE_OPTIONS = [
+  { value: "phone", label: "📞 電話", icon: "📞" },
+  { value: "form", label: "📝 フォーム", icon: "📝" },
+  { value: "walkin", label: "🚶 直接来店", icon: "🚶" },
+  { value: "performer", label: "🤝 出演者経由", icon: "🤝" },
+  { value: "email", label: "📧 メール", icon: "📧" },
+  { value: "line", label: "💬 LINE", icon: "💬" },
+  { value: "other", label: "✏️ その他", icon: "✏️" },
+];
+export const sourceIcon = (source) => SOURCE_OPTIONS.find(s => s.value === source)?.icon || "📞";
+export const sourceLabel = (source) => SOURCE_OPTIONS.find(s => s.value === source)?.label || source;
+
 const emptyReservation = {
   eventName: "",
   date: "",
@@ -39,21 +52,37 @@ const emptyReservation = {
   phone: "",
   email: "",
   note: "",
-  source: "phone", // "form" | "phone" | "manual"
+  source: "phone",
+  sourceDetail: "", // 「その他」の場合の詳細
+  staff: "", // 受付担当者
   arrived: false,
   arrivedAt: "",
-  seatNumber: "", // 後で席指定
+  seatNumber: "",
 };
 
-export default function ReservationModule({ events = [], navigateBack }) {
+export default function ReservationModule({ events = [], shifts = [], navigateBack }) {
   const [reservations, setReservations] = useState([]);
-  const [view, setView] = useState("list"); // list | edit
+  const [view, setView] = useState("list");
   const [form, setForm] = useState(emptyReservation);
   const [editingId, setEditingId] = useState(null);
-  const [filter, setFilter] = useState("upcoming"); // all | today | upcoming | past
-  const [dateFilter, setDateFilter] = useState(""); // 特定日付
+  const [filter, setFilter] = useState("upcoming");
+  const [dateFilter, setDateFilter] = useState("");
   const [showTrash, setShowTrash] = useState(false);
   const [allReservations, setAllReservations] = useState([]);
+
+  // シフトデータからスタッフ名を抽出（重複排除）
+  const staffNames = (() => {
+    const set = new Set();
+    shifts.forEach(monthData => {
+      const sd = monthData.shiftByDate || {};
+      Object.values(sd).forEach(entries => {
+        (entries || []).forEach(e => {
+          if (e.name) set.add(e.name);
+        });
+      });
+    });
+    return [...set].sort();
+  })();
 
   useEffect(() => {
     const TRASH_TTL = 30 * 24 * 60 * 60 * 1000;
@@ -160,7 +189,7 @@ export default function ReservationModule({ events = [], navigateBack }) {
 
   // ===== 編集画面 =====
   if (view === "edit") {
-    // イベント名候補（その日付のイベント）
+    // 選択日のイベント候補
     const candidateEvents = events.filter(e => e.date === form.date);
     return (
       <div style={{padding:"1.5rem 2rem",maxWidth:800,margin:"0 auto"}} className="hb-view">
@@ -173,36 +202,49 @@ export default function ReservationModule({ events = [], navigateBack }) {
 
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:".7rem"}} className="hb-form-grid">
           <Field label="日付" required>
-            <input type="date" style={S.inp} value={form.date} onChange={e=>setField("date",e.target.value)}/>
+            <input type="date" style={S.inp} value={form.date} onChange={e=>{
+              const newDate = e.target.value;
+              setField("date", newDate);
+              // 日付選択でイベント名を自動入力
+              const evs = events.filter(ev => ev.date === newDate);
+              if (evs.length === 1) {
+                setField("eventName", evs[0].name);
+              } else if (evs.length === 0) {
+                setField("eventName", "");
+              }
+            }}/>
           </Field>
           <Field label="予約経路">
             <select style={S.inp} value={form.source} onChange={e=>setField("source",e.target.value)}>
-              <option value="phone">📞 電話</option>
-              <option value="form">📝 フォーム</option>
-              <option value="manual">✍️ 手動</option>
-              <option value="walkin">🚶 直接来店</option>
+              {SOURCE_OPTIONS.map(s => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
             </select>
           </Field>
+          {form.source === "other" && (
+            <Field label="経路詳細" full>
+              <input style={S.inp} value={form.sourceDetail||""} onChange={e=>setField("sourceDetail",e.target.value)} placeholder="例：知人紹介 / Twitter DM など"/>
+            </Field>
+          )}
           <Field label="イベント名" full>
-            {candidateEvents.length > 0 ? (
-              <>
-                <select style={S.inp} value={form.eventName} onChange={e=>setField("eventName",e.target.value)}>
-                  <option value="">（イベントを選択 or 手動入力）</option>
-                  {candidateEvents.map(e=>(
-                    <option key={e._id} value={e.name}>{e.name}</option>
-                  ))}
-                </select>
-                <input style={{...S.inp,marginTop:".3rem"}} value={form.eventName} onChange={e=>setField("eventName",e.target.value)} placeholder="イベント名"/>
-              </>
+            {candidateEvents.length > 1 ? (
+              <select style={S.inp} value={form.eventName} onChange={e=>setField("eventName",e.target.value)}>
+                <option value="">-- イベントを選択 --</option>
+                {candidateEvents.map(e=>(
+                  <option key={e._id} value={e.name}>{e.name}{e.start?` (${e.start}〜)`:""}</option>
+                ))}
+              </select>
             ) : (
-              <input style={S.inp} value={form.eventName} onChange={e=>setField("eventName",e.target.value)} placeholder="イベント名"/>
+              <input style={S.inp} value={form.eventName} onChange={e=>setField("eventName",e.target.value)} placeholder={candidateEvents.length===0?"日付を選んでください or 手動入力":"イベント名"}/>
             )}
           </Field>
           <Field label="お名前" required>
             <input style={S.inp} value={form.customerName} onChange={e=>setField("customerName",e.target.value)} placeholder="例：山田太郎"/>
           </Field>
           <Field label="人数" required>
-            <input type="number" min={1} style={S.inp} value={form.people} onChange={e=>setField("people",e.target.value)}/>
+            <select style={S.inp} value={form.people} onChange={e=>setField("people",e.target.value)}>
+              {[1,2,3,4,5,6,7,8,9,10,11,12,15,20].map(n=><option key={n} value={n}>{n}名</option>)}
+            </select>
           </Field>
           <Field label="電話番号">
             <input style={S.inp} value={form.phone} onChange={e=>setField("phone",e.target.value)} placeholder="090-..."/>
@@ -210,7 +252,15 @@ export default function ReservationModule({ events = [], navigateBack }) {
           <Field label="メールアドレス">
             <input type="email" style={S.inp} value={form.email} onChange={e=>setField("email",e.target.value)} placeholder="@..."/>
           </Field>
-          <Field label="席（手動入力）" full>
+          <Field label="受付担当者">
+            <select style={S.inp} value={form.staff||""} onChange={e=>setField("staff",e.target.value)}>
+              <option value="">未設定</option>
+              {staffNames.map(n => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="席（手動入力）">
             <input style={S.inp} value={form.seatNumber||""} onChange={e=>setField("seatNumber",e.target.value)} placeholder="例：A1, B2-3, カウンター席など"/>
           </Field>
           <Field label="備考（席希望など）" full>
@@ -296,7 +346,6 @@ export default function ReservationModule({ events = [], navigateBack }) {
               </span>
             </div>
             {dayReservations.map(r => {
-              const sourceIcon = r.source === "form" ? "📝" : r.source === "walkin" ? "🚶" : r.source === "manual" ? "✍️" : "📞";
               return (
                 <div key={r._id} style={{...S.card,padding:".75rem 1rem",display:"grid",gridTemplateColumns:"auto 1fr auto",gap:".75rem",alignItems:"center",borderLeft:r.arrived?"3px solid #7ec87e":"3px solid rgba(244,162,97,0.3)"}}>
                   <button onClick={()=>toggleArrived(r._id)} style={{
@@ -312,10 +361,11 @@ export default function ReservationModule({ events = [], navigateBack }) {
                   </button>
                   <div onClick={()=>startEdit(r)} style={{cursor:"pointer",minWidth:0}}>
                     <div style={{display:"flex",alignItems:"center",gap:".5rem",marginBottom:".2rem",flexWrap:"wrap"}}>
-                      <span style={{fontSize:".55rem",color:"rgba(240,232,208,0.5)"}}>{sourceIcon}</span>
+                      <span style={{fontSize:".7rem"}}>{sourceIcon(r.source)}</span>
                       <span style={{fontFamily:"Georgia,serif",fontSize:".95rem"}}>{r.customerName||"（無名）"}</span>
                       <span style={{padding:".1rem .4rem",background:"rgba(201,168,76,0.13)",borderRadius:2,fontSize:".62rem",color:"#c9a84c"}}>{r.people}名</span>
                       {r.seatNumber && <span style={{padding:".1rem .4rem",background:"rgba(126,200,227,0.13)",borderRadius:2,fontSize:".62rem",color:"#7ec8e3"}}>🪑 {r.seatNumber}</span>}
+                      {r.staff && <span style={{padding:".1rem .4rem",background:"rgba(201,168,76,0.08)",borderRadius:2,fontSize:".58rem",color:"rgba(201,168,76,0.7)"}}>担当:{r.staff}</span>}
                     </div>
                     <div style={{fontSize:".68rem",color:"rgba(240,232,208,0.55)",display:"flex",gap:".75rem",flexWrap:"wrap"}}>
                       {r.eventName && <span>🎵 {r.eventName}</span>}
@@ -384,7 +434,7 @@ export function CustomerReservationForm({ events = [] }) {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  // 今日以降のイベントを日付別にグループ化
+  // 今日以降のイベントを日付別にグループ化（貸切除外）
   const today = new Date().toISOString().split("T")[0];
   const upcomingEvents = events.filter(e => e.date && e.date >= today && !/貸切|貸し切り/.test(e.name||""));
   const eventsByDate = {};
@@ -395,6 +445,27 @@ export function CustomerReservationForm({ events = [] }) {
   const sortedDates = Object.keys(eventsByDate).sort();
 
   const setField = (k,v) => setForm(f => ({...f, [k]: v}));
+
+  // 日付選択時：イベント名を自動入力
+  const handleDateChange = (newDate) => {
+    setField("date", newDate);
+    const evs = eventsByDate[newDate] || [];
+    if (evs.length === 1) {
+      setField("eventName", evs[0].name);
+    } else if (evs.length > 1) {
+      // 複数あったら最初のイベントを自動選択（後で変更可能）
+      setField("eventName", evs[0].name);
+    } else {
+      setField("eventName", "");
+    }
+  };
+
+  // 選択中のイベント情報を取得
+  const selectedEvent = (() => {
+    if (!form.date || !form.eventName) return null;
+    const evs = eventsByDate[form.date] || [];
+    return evs.find(e => e.name === form.eventName);
+  })();
 
   const submit = async () => {
     if (!form.date) { setError("日付を選択してください"); return; }
@@ -411,6 +482,8 @@ export function CustomerReservationForm({ events = [] }) {
         ...form,
         people: Number(form.people),
         source: "form",
+        sourceDetail: "",
+        staff: "",
         arrived: false,
         arrivedAt: "",
         seatNumber: "",
@@ -460,7 +533,7 @@ export function CustomerReservationForm({ events = [] }) {
         <div style={{padding:"1.5rem",background:"#111",borderRadius:8,border:"1px solid rgba(201,168,76,0.15)"}}>
           {/* 日付選択 */}
           <Field label="日付" required>
-            <select style={S.inp} value={form.date} onChange={e=>{setField("date",e.target.value);setField("eventName","");}}>
+            <select style={S.inp} value={form.date} onChange={e=>handleDateChange(e.target.value)}>
               <option value="">-- 日付を選択 --</option>
               {sortedDates.map(d=>(
                 <option key={d} value={d}>{fmtDate(d)}</option>
@@ -471,16 +544,45 @@ export function CustomerReservationForm({ events = [] }) {
             )}
           </Field>
 
-          {/* イベント選択 */}
-          {form.date && (
-            <Field label="イベント" required>
-              <select style={S.inp} value={form.eventName} onChange={e=>setField("eventName",e.target.value)}>
-                <option value="">-- イベントを選択 --</option>
-                {(eventsByDate[form.date]||[]).map((e,i)=>(
-                  <option key={i} value={e.name}>{e.name} {e.start?`(${e.start}〜)`:""}</option>
-                ))}
-              </select>
-            </Field>
+          {/* イベント表示（自動入力、複数あれば選択） */}
+          {form.date && eventsByDate[form.date] && (
+            eventsByDate[form.date].length === 1 ? (
+              <Field label="イベント">
+                <div style={{padding:".7rem .75rem",background:"#0a0a0a",border:"1px solid rgba(201,168,76,0.14)",borderRadius:4,fontSize:".88rem",color:"#c9a84c"}}>
+                  🎵 {form.eventName}
+                  {eventsByDate[form.date][0].start && (
+                    <span style={{color:"rgba(240,232,208,0.55)",fontSize:".75rem",marginLeft:".5rem"}}>
+                      {eventsByDate[form.date][0].open && `開場 ${eventsByDate[form.date][0].open}`}
+                      {eventsByDate[form.date][0].start && ` / 開演 ${eventsByDate[form.date][0].start}`}
+                    </span>
+                  )}
+                </div>
+              </Field>
+            ) : (
+              <Field label="イベント" required>
+                <select style={S.inp} value={form.eventName} onChange={e=>setField("eventName",e.target.value)}>
+                  {eventsByDate[form.date].map((e,i)=>(
+                    <option key={i} value={e.name}>{e.name}{e.start?` (${e.start}〜)`:""}</option>
+                  ))}
+                </select>
+              </Field>
+            )
+          )}
+
+          {/* イベント別の注意事項 */}
+          {selectedEvent && (selectedEvent.seatable === false || selectedEvent.reserveNotes) && (
+            <div style={{padding:".75rem 1rem",background:"rgba(244,162,97,0.08)",border:"1px solid rgba(244,162,97,0.3)",borderRadius:5,marginBottom:".75rem",fontSize:".78rem",color:"#f4a261",lineHeight:1.6}}>
+              {selectedEvent.seatable === false && (
+                <div style={{marginBottom: selectedEvent.reserveNotes ? ".4rem" : 0}}>
+                  ⚠️ <strong>このイベントは席指定をお受けできません。お席は先着順となります。</strong>
+                </div>
+              )}
+              {selectedEvent.reserveNotes && (
+                <div style={{whiteSpace:"pre-wrap"}}>
+                  📌 {selectedEvent.reserveNotes}
+                </div>
+              )}
+            </div>
           )}
 
           <Field label="お名前" required>
@@ -501,10 +603,20 @@ export function CustomerReservationForm({ events = [] }) {
             <input type="email" style={S.inp} value={form.email} onChange={e=>setField("email",e.target.value)} placeholder="example@example.com"/>
           </Field>
 
-          <Field label="備考（席の希望など）" full>
-            <textarea style={{...S.inp,resize:"vertical",lineHeight:1.5}} rows={3} value={form.note} onChange={e=>setField("note",e.target.value)} placeholder="ステージ正面希望・お子様連れ・アレルギー対応など"/>
-            <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.45)",marginTop:".25rem"}}>
-              ※ 席の希望に沿えない場合は店舗よりご連絡いたします。
+          <Field label="備考" full>
+            <textarea
+              style={{...S.inp,resize:"vertical",lineHeight:1.5}}
+              rows={3}
+              value={form.note}
+              onChange={e=>setField("note",e.target.value)}
+              placeholder={selectedEvent && selectedEvent.seatable === false ? "ご要望があればこちらにご記入ください" : "席の希望がある場合は備考欄にご記入ください"}
+            />
+            <div style={{fontSize:".65rem",color:"rgba(240,232,208,0.5)",marginTop:".3rem",lineHeight:1.6}}>
+              {selectedEvent && selectedEvent.seatable === false ? (
+                <>※ このイベントはお席を先着順とさせていただきます。席のご指定はお受けできませんのでご了承ください。</>
+              ) : (
+                <>席の希望がある場合は備考欄にご記入ください。ご希望に沿えない場合は店舗よりご連絡いたします。</>
+              )}
             </div>
           </Field>
 
@@ -529,6 +641,16 @@ export function CustomerReservationForm({ events = [] }) {
           >
             {submitting ? "送信中..." : "予約する"}
           </button>
+        </div>
+
+        {/* 共通の注意事項 */}
+        <div style={{marginTop:"1.25rem",padding:"1rem 1.1rem",background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.1)",borderRadius:6,fontSize:".72rem",color:"rgba(240,232,208,0.7)",lineHeight:1.9}}>
+          <div style={{fontSize:".68rem",letterSpacing:".15em",color:"#c9a84c",marginBottom:".5rem"}}>📌 ご予約に際してのご案内</div>
+          <div>● イベント時はご飲食代に別途、Music Chargeがかかります</div>
+          <div>● お一人様につき1フード・1ドリンクのオーダーをお願いしております</div>
+          <div>● OPEN・STARTの時間につきましては都合により変更になる場合がございます</div>
+          <div>● ご予約のキャンセルは必ず前日までにご連絡ください。</div>
+          <div style={{paddingLeft:"1em",marginTop:".15rem"}}>当日キャンセルや無断キャンセルの場合は、今後のご予約をお断りするほか、状況によりキャンセル料を頂戴する場合がございます。</div>
         </div>
 
         <div style={{textAlign:"center",marginTop:"2rem",fontSize:".7rem",color:"rgba(240,232,208,0.4)",letterSpacing:".05em",lineHeight:1.7}}>
