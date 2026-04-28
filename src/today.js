@@ -64,9 +64,13 @@ function fmtDate(d) {
 }
 
 function getYesterday(dateStr) {
-  const dt = new Date(dateStr + "T00:00:00");
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dt = new Date(y, m-1, d);
   dt.setDate(dt.getDate() - 1);
-  return dt.toISOString().split("T")[0];
+  const yy = dt.getFullYear();
+  const mm = String(dt.getMonth()+1).padStart(2, "0");
+  const dd = String(dt.getDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
 }
 
 // GoogleドライブのviewリンクをサムネイルURLに変換
@@ -86,7 +90,12 @@ function MiniCalendar({ selectedDates = [], onToggle, mode = "multi", rangeStart
   const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
   const prev = () => { if (calMonth === 0) { setCalYear(y=>y-1); setCalMonth(11); } else setCalMonth(m=>m-1); };
   const next = () => { if (calMonth === 11) { setCalYear(y=>y+1); setCalMonth(0); } else setCalMonth(m=>m+1); };
-  const todayStr = today.toISOString().split("T")[0];
+  const todayStr = (() => {
+    const yy = today.getFullYear();
+    const mm = String(today.getMonth()+1).padStart(2, "0");
+    const dd = String(today.getDate()).padStart(2, "0");
+    return `${yy}-${mm}-${dd}`;
+  })();
 
   const isInRange = (dateStr) => {
     if (mode !== "range") return false;
@@ -149,7 +158,13 @@ function MiniCalendar({ selectedDates = [], onToggle, mode = "multi", rangeStart
 }
 
 export default function TodayModule({ events = [], navigateBack, onEditEvent }) {
-  const today = new Date().toISOString().split("T")[0];
+  const today = (() => {
+    const d = new Date();
+    const yy = d.getFullYear();
+    const mm = String(d.getMonth()+1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yy}-${mm}-${dd}`;
+  })();
   const [selectedDate, setSelectedDate] = useState(today);
   const [dayData, setDayData] = useState({});
   const [yesterdayData, setYesterdayData] = useState({});
@@ -277,9 +292,7 @@ export default function TodayModule({ events = [], navigateBack, onEditEvent }) 
   // モードに応じて targetDates を計算
   const computeTargetDates = () => {
     if (handoverMode === "nextday") {
-      const next = new Date(selectedDate + "T00:00:00");
-      next.setDate(next.getDate() + 1);
-      return [next.toISOString().split("T")[0]];
+      return [shiftDate(selectedDate, 1)];
     }
     if (handoverMode === "single") {
       if (!handoverDate) return [];
@@ -290,15 +303,16 @@ export default function TodayModule({ events = [], navigateBack, onEditEvent }) 
     }
     if (handoverMode === "range") {
       if (!handoverRangeStart || !handoverRangeEnd) return [];
-      const start = new Date(handoverRangeStart + "T00:00:00");
-      const end = new Date(handoverRangeEnd + "T00:00:00");
-      if (end < start) { alert("終了日が開始日より前になっています"); return null; }
+      if (handoverRangeEnd < handoverRangeStart) { alert("終了日が開始日より前になっています"); return null; }
       const dates = [];
-      const cur = new Date(start);
-      while (cur <= end) {
-        dates.push(cur.toISOString().split("T")[0]);
-        cur.setDate(cur.getDate() + 1);
+      let cur = handoverRangeStart;
+      while (cur <= handoverRangeEnd) {
+        dates.push(cur);
+        cur = shiftDate(cur, 1);
       }
+      return dates;
+    }
+    return [];
       return dates;
     }
     return [];
@@ -324,26 +338,21 @@ export default function TodayModule({ events = [], navigateBack, onEditEvent }) 
   // 自分が当日に発行した申し送り
   const outgoingHandovers = allHandovers.filter(h => h.sourceDate === selectedDate);
 
-  // 日付ナビ
+  // 日付ナビ（タイムゾーン対応：toISOString は UTC を返すので文字列を直接いじる）
+  const shiftDate = (dateStr, days) => {
+    const [y, m, d] = dateStr.split("-").map(Number);
+    const dt = new Date(y, m-1, d); // ローカル日付として作る
+    dt.setDate(dt.getDate() + days);
+    const yy = dt.getFullYear();
+    const mm = String(dt.getMonth()+1).padStart(2, "0");
+    const dd = String(dt.getDate()).padStart(2, "0");
+    return `${yy}-${mm}-${dd}`;
+  };
   const prevDay = () => {
-    console.log("[勝山日付] ◀ pressed. current:", selectedDate);
-    setSelectedDate(prev => {
-      const dt = new Date(prev + "T00:00:00");
-      dt.setDate(dt.getDate() - 1);
-      const newDate = dt.toISOString().split("T")[0];
-      console.log("[勝山日付] ◀ new date:", newDate);
-      return newDate;
-    });
+    setSelectedDate(prev => shiftDate(prev, -1));
   };
   const nextDay = () => {
-    console.log("[勝山日付] ▶ pressed. current:", selectedDate);
-    setSelectedDate(prev => {
-      const dt = new Date(prev + "T00:00:00");
-      dt.setDate(dt.getDate() + 1);
-      const newDate = dt.toISOString().split("T")[0];
-      console.log("[勝山日付] ▶ new date:", newDate);
-      return newDate;
-    });
+    setSelectedDate(prev => shiftDate(prev, +1));
   };
   const goToday = () => setSelectedDate(today);
   const isToday = selectedDate === today;
@@ -540,7 +549,7 @@ export default function TodayModule({ events = [], navigateBack, onEditEvent }) 
 
         {handoverMode === "nextday" && (
           <div style={{fontSize:".7rem",color:"rgba(240,232,208,0.6)"}}>
-            → 翌日（{(() => { const n = new Date(selectedDate+"T00:00:00"); n.setDate(n.getDate()+1); return fmtDate(n.toISOString().split("T")[0]); })()}）に表示
+            → 翌日（{fmtDate(shiftDate(selectedDate, 1))}）に表示
           </div>
         )}
 
