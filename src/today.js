@@ -157,7 +157,7 @@ function MiniCalendar({ selectedDates = [], onToggle, mode = "multi", rangeStart
   );
 }
 
-export default function TodayModule({ events = [], navigateBack, onEditEvent }) {
+export default function TodayModule({ events = [], rentals = [], navigateBack, onEditEvent }) {
   const today = (() => {
     const d = new Date();
     const yy = d.getFullYear();
@@ -371,6 +371,101 @@ export default function TodayModule({ events = [], navigateBack, onEditEvent }) 
   // 当日のイベント
   const todayEvents = events.filter(e => e.date === selectedDate);
 
+  // 当日の貸切（仮押さえ・成約・完了のみ）
+  const todayRentals = rentals.filter(r =>
+    r.desiredDate === selectedDate && ["hold","won","done"].includes(r.status)
+  );
+
+  // 現在時刻（1分ごとに更新）
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 60 * 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  // 当日の最も早い開場時間を取得（イベント・貸切から）
+  const getEarliestOpen = () => {
+    const times = [];
+    todayEvents.forEach(e => {
+      if (e.open) times.push(e.open);
+      else if (e.start) times.push(e.start);
+    });
+    todayRentals.forEach(r => {
+      // desiredTime から HH:MM を抽出
+      const m = (r.desiredTime || "").match(/(\d{1,2}:\d{2})/);
+      if (m) times.push(m[1]);
+    });
+    if (times.length === 0) return null;
+    // HH:MM をソート（文字列比較で OK）
+    times.sort();
+    return times[0];
+  };
+
+  // 警告判定
+  const computeAlerts = () => {
+    // 当日 OR 「昨日の日付を朝5時前に見ている」場合（深夜の閉店業務確認）
+    const isViewingToday = selectedDate === today;
+    const isViewingYesterdayInEarlyMorning = (() => {
+      if (selectedDate >= today) return false;
+      // 昨日の日付を見ていて、現在時刻が朝5時前なら閉店警告だけ出す
+      const nowMin = now.getHours() * 60 + now.getMinutes();
+      if (nowMin >= 5 * 60) return false;
+      // 1日だけ前か確認
+      const prev = shiftDate(today, -1);
+      return selectedDate === prev;
+    })();
+    if (!isViewingToday && !isViewingYesterdayInEarlyMorning) return [];
+    if (todayEvents.length === 0 && todayRentals.length === 0) return []; // 店休日
+    const alerts = [];
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    const parseMin = (hhmm) => {
+      const [h, m] = hhmm.split(":").map(Number);
+      return h * 60 + (m || 0);
+    };
+
+    const collectUndone = (catKey) => {
+      const cat = CHECKLIST_TEMPLATE[catKey];
+      const checksRaw = (dayData.checks || {})[catKey];
+      const isCheckedAt = (idx) => {
+        if (!checksRaw) return false;
+        if (Array.isArray(checksRaw)) return !!checksRaw[idx];
+        return !!checksRaw[String(idx)];
+      };
+      const undone = [];
+      cat.items.forEach((it, i) => { if (!isCheckedAt(i)) undone.push(it); });
+      return undone;
+    };
+
+    if (isViewingToday) {
+      // 開店前：イベントの開場時間を過ぎても未完了
+      const earliestOpen = getEarliestOpen();
+      if (earliestOpen) {
+        const openMin = parseMin(earliestOpen);
+        if (nowMin >= openMin) {
+          const undone = collectUndone("prep");
+          if (undone.length > 0) alerts.push({ key: "prep", label: "開店前", undone, since: earliestOpen });
+        }
+      }
+      // 終演後：22:00 を過ぎても未完了
+      if (nowMin >= 22 * 60) {
+        const undone = collectUndone("after");
+        if (undone.length > 0) alerts.push({ key: "after", label: "終演後", undone, since: "22:00" });
+      }
+      // 閉店：23:00 以降に未完了をリマインド（実際の閉店は24:30）
+      if (nowMin >= 23 * 60) {
+        const undone = collectUndone("close");
+        if (undone.length > 0) alerts.push({ key: "close", label: "閉店", undone, since: "23:00" });
+      }
+    } else if (isViewingYesterdayInEarlyMorning) {
+      // 深夜：昨日の閉店チェックの未完了のみ警告
+      const undone = collectUndone("close");
+      if (undone.length > 0) alerts.push({ key: "close", label: "閉店（前日）", undone, since: "閉店業務" });
+    }
+    return alerts;
+  };
+
+  const alerts = computeAlerts();
+
   // 過去の申し送り履歴（過去14日に発行されたもの）
   const handoverHistory = allHandovers
     .filter(h => h.sourceDate && h.sourceDate < selectedDate)
@@ -399,6 +494,34 @@ export default function TodayModule({ events = [], navigateBack, onEditEvent }) 
         </div>
         <button type="button" onClick={nextDay} style={{...S.btn("sm"),padding:".4rem .7rem"}}>▶</button>
       </div>
+
+      {/* チェックリスト未完了アラート */}
+      {alerts.length > 0 && (
+        <div style={{padding:"1rem 1.1rem",marginBottom:"1.25rem",background:"rgba(226,75,74,0.1)",border:"2px solid #e24b4a",borderRadius:8,boxShadow:"0 0 12px rgba(226,75,74,0.25)"}}>
+          <div style={{fontSize:".8rem",letterSpacing:".15em",color:"#ff6b6a",marginBottom:".75rem",fontWeight:700,display:"flex",alignItems:"center",gap:".4rem"}}>
+            <span style={{fontSize:"1.1rem"}}>⚠️</span>
+            チェックリスト未完了 — 残り{alerts.reduce((s,a)=>s+a.undone.length,0)}件
+          </div>
+          {alerts.map(alert => (
+            <div key={alert.key} style={{marginBottom:".75rem",padding:".7rem .85rem",background:"rgba(0,0,0,0.3)",borderRadius:5,borderLeft:"3px solid #e24b4a"}}>
+              <div style={{fontSize:".75rem",color:"#ff8e8d",marginBottom:".4rem",fontWeight:600,display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:".3rem"}}>
+                <span>{CHECKLIST_TEMPLATE[alert.key]?.icon || "📋"} {alert.label}（{alert.undone.length}件）</span>
+                <span style={{fontSize:".6rem",color:"rgba(255,142,141,0.6)",fontWeight:400}}>{alert.since} 過ぎ</span>
+              </div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:".3rem"}}>
+                {alert.undone.map((item,i) => (
+                  <span key={i} style={{padding:".2rem .55rem",background:"rgba(226,75,74,0.15)",border:"1px solid rgba(226,75,74,0.3)",borderRadius:3,fontSize:".7rem",color:"#ffafae"}}>
+                    □ {item}
+                  </span>
+                ))}
+              </div>
+              <button type="button" onClick={()=>setExpandedSection(alert.key)} style={{marginTop:".5rem",padding:".3rem .7rem",background:"transparent",border:"1px solid rgba(255,142,141,0.4)",borderRadius:3,color:"#ff8e8d",fontSize:".62rem",letterSpacing:".1em",cursor:"pointer",fontFamily:"inherit"}}>
+                ↓ チェックリストを開く
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* 当日に届く申し送り */}
       {incomingHandovers.length > 0 && (
