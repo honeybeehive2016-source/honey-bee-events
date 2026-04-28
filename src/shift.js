@@ -83,8 +83,10 @@ export function getRoleLabel(role) {
 
 // マネージャー（時間表示しない人）リスト
 const MANAGER_NAMES = ["渡辺佑樹"];
-// 表示しない行
-const SKIP_NAMES = ["社長", "バンド", "日", "曜"];
+// 完全にスキップする行
+const SKIP_NAMES = ["バンド", "日", "曜"];
+// 「出演」だけ拾う行（出勤としては扱わない）
+const PERFORMER_ONLY_NAMES = ["社長"];
 
 export function isManager(name) {
   return MANAGER_NAMES.includes(name);
@@ -184,6 +186,7 @@ export function parseShiftCSV(csvText) {
       }
       if (!name) continue;
       if (SKIP_NAMES.includes(name)) continue;
+      const isPerformerOnlyRow = PERFORMER_ONLY_NAMES.includes(name);
 
       // 各列をチェック
       for (const colStr in block.dateMap) {
@@ -193,6 +196,8 @@ export function parseShiftCSV(csvText) {
         if (!cellVal) continue;
         const parsed = parseShiftCell(cellVal, isManager(name));
         if (!parsed) continue;
+        // 「出演者だけ拾う行」は出演以外は無視
+        if (isPerformerOnlyRow && !parsed.isPerformer) continue;
         const dateKey = `${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
         if (!shiftByDate[dateKey]) shiftByDate[dateKey] = [];
         shiftByDate[dateKey].push({
@@ -211,8 +216,9 @@ export function parseShiftCSV(csvText) {
 
 // ===== シフトモジュール =====
 export default function ShiftModule({ navigateBack }) {
-  const [shifts, setShifts] = useState([]); // { _id: "YYYY-MM", monthLabel, shiftByDate, importedAt }
+  const [shifts, setShifts] = useState([]);
   const [csvMsg, setCsvMsg] = useState("");
+  const [viewMode, setViewMode] = useState("calendar"); // calendar | list
   const [viewMonth, setViewMonth] = useState(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
@@ -267,8 +273,8 @@ export default function ShiftModule({ navigateBack }) {
   const sortedShifts = [...shifts].sort((a,b)=>(b._id||"").localeCompare(a._id||""));
   const currentShift = shifts.find(s => s._id === viewMonth);
 
-  // 月別の日付一覧
-  const renderMonthCalendar = () => {
+  // 月別の日付一覧（リスト表示）
+  const renderMonthList = () => {
     if (!currentShift) return null;
     const sd = currentShift.shiftByDate || {};
     const dates = Object.keys(sd).sort();
@@ -325,6 +331,127 @@ export default function ShiftModule({ navigateBack }) {
     );
   };
 
+  // 月別カレンダー表示
+  const [expandedDate, setExpandedDate] = useState("");
+  const renderMonthCalendar = () => {
+    if (!currentShift) return null;
+    const sd = currentShift.shiftByDate || {};
+    const year = currentShift.year;
+    const month = currentShift.month;
+    const firstDay = new Date(year, month-1, 1).getDay();
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const cells = [];
+    for (let i = 0; i < firstDay; i++) cells.push(null);
+    for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
+
+    return (
+      <div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,minmax(0,1fr))",gap:2,marginBottom:2}}>
+          {DAYS_JP.map((d,i)=>(
+            <div key={d} style={{textAlign:"center",fontSize:".65rem",padding:".3rem 0",color:i===0?"#e24b4a":i===6?"#7ec8e3":"rgba(240,232,208,0.4)"}}>{d}</div>
+          ))}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,minmax(0,1fr))",gap:2}}>
+          {cells.map((day, idx) => {
+            if (!day) return <div key={"e"+idx}/>;
+            const dateKey = `${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+            const entries = sd[dateKey] || [];
+            const workers = entries.filter(e => !e.isPerformer);
+            const performers = entries.filter(e => e.isPerformer);
+            const isToday = dateKey === todayStr;
+            const dow = (firstDay + day - 1) % 7;
+            const isExpanded = expandedDate === dateKey;
+            return (
+              <div key={idx}
+                onClick={()=>setExpandedDate(isExpanded ? "" : dateKey)}
+                className="hb-cal-cell"
+                style={{
+                  background:isToday?"rgba(201,168,76,0.12)":"#111",
+                  border:isToday?"1px solid rgba(201,168,76,0.5)":"1px solid rgba(255,255,255,0.04)",
+                  borderRadius:4,padding:".3rem .25rem",minHeight:64,minWidth:0,
+                  overflow:"hidden",cursor:entries.length>0?"pointer":"default",
+                  position:"relative",
+                }}>
+                <div className="hb-cal-day-num" style={{fontSize:".72rem",fontWeight:500,marginBottom:".15rem",color:isToday?"#c9a84c":dow===0?"#e24b4a":dow===6?"#7ec8e3":"rgba(240,232,208,0.55)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span>{day}</span>
+                  {entries.length > 0 && <span style={{fontSize:".55rem",color:"rgba(240,232,208,0.4)",fontWeight:400}}>{workers.length}名</span>}
+                </div>
+                {/* 名前を最大3名 + その他 */}
+                {workers.slice(0,3).map((w,i)=>{
+                  const color = getRoleColor(w.role);
+                  return (
+                    <div key={i} style={{
+                      fontSize:".5rem",lineHeight:1.3,padding:".08rem .22rem",marginBottom:".08rem",
+                      background:color+"22",borderLeft:`2px solid ${color}`,borderRadius:2,
+                      color:"#f0e8d0cc",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis",
+                    }}>
+                      {w.name}
+                    </div>
+                  );
+                })}
+                {workers.length > 3 && (
+                  <div style={{fontSize:".5rem",color:"rgba(240,232,208,0.4)",padding:".05rem .2rem"}}>+{workers.length-3}</div>
+                )}
+                {performers.length > 0 && (
+                  <div style={{fontSize:".5rem",color:"#b58cd1",padding:".05rem .22rem",background:"rgba(181,140,209,0.13)",borderRadius:2,marginTop:".05rem",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>
+                    🎤 {performers.length}名
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* 展開された詳細 */}
+        {expandedDate && sd[expandedDate] && sd[expandedDate].length > 0 && (
+          <div style={{marginTop:"1rem",padding:"1rem 1.1rem",background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.27)",borderRadius:6}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:".5rem"}}>
+              <div style={{fontFamily:"Georgia,serif",fontSize:".95rem",color:"#c9a84c"}}>
+                {(() => {
+                  const dt = new Date(expandedDate+"T00:00:00");
+                  return `${dt.getMonth()+1}/${dt.getDate()}（${DAYS_JP[dt.getDay()]}）`;
+                })()}
+              </div>
+              <button onClick={()=>setExpandedDate("")} style={{...S.btn("sm"),padding:".2rem .6rem",fontSize:".58rem"}}>閉じる</button>
+            </div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:".4rem"}}>
+              {sd[expandedDate].map((e,i)=>{
+                const isMng = isManager(e.name);
+                const color = getRoleColor(e.role);
+                return (
+                  <div key={i} style={{
+                    padding:".25rem .5rem",
+                    background: e.isPerformer ? "rgba(181,140,209,0.13)" : color+"22",
+                    border: `1px solid ${e.isPerformer ? "#b58cd1" : color}55`,
+                    borderRadius: 3,
+                    fontSize: ".75rem",
+                    color: e.isPerformer ? "#b58cd1" : "#f0e8d0",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: ".3rem",
+                  }}>
+                    <span>{e.name}</span>
+                    {!e.isPerformer && !isMng && e.time && <span style={{color:"rgba(240,232,208,0.6)",fontSize:".65rem"}}>{e.time}〜</span>}
+                    {!e.isPerformer && (
+                      <span style={{padding:".05rem .3rem",borderRadius:2,background:color+"33",color:color,fontSize:".58rem",fontWeight:600}}>
+                        {getRoleLabel(e.role)}
+                      </span>
+                    )}
+                    {e.isPerformer && (
+                      <span style={{padding:".05rem .3rem",borderRadius:2,background:"#b58cd133",color:"#b58cd1",fontSize:".58rem",fontWeight:600}}>出演</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div style={{padding:"1.5rem 2rem",maxWidth:1100,margin:"0 auto"}} className="hb-view">
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1.25rem",flexWrap:"wrap",gap:".5rem"}}>
@@ -373,7 +500,16 @@ export default function ShiftModule({ navigateBack }) {
         </div>
       )}
 
-      {currentShift && renderMonthCalendar()}
+      {currentShift && (
+        <>
+          {/* 表示切替 */}
+          <div style={{display:"flex",gap:".4rem",marginBottom:"1rem"}}>
+            <button onClick={()=>setViewMode("calendar")} style={{padding:".4rem .9rem",borderRadius:3,border:"1px solid "+(viewMode==="calendar"?"#c9a84c":"rgba(201,168,76,0.2)"),background:viewMode==="calendar"?"#c9a84c":"transparent",color:viewMode==="calendar"?"#0a0a0a":"rgba(201,168,76,0.7)",fontSize:".7rem",cursor:"pointer",fontFamily:"inherit",letterSpacing:".05em"}}>📅 カレンダー</button>
+            <button onClick={()=>setViewMode("list")} style={{padding:".4rem .9rem",borderRadius:3,border:"1px solid "+(viewMode==="list"?"#c9a84c":"rgba(201,168,76,0.2)"),background:viewMode==="list"?"#c9a84c":"transparent",color:viewMode==="list"?"#0a0a0a":"rgba(201,168,76,0.7)",fontSize:".7rem",cursor:"pointer",fontFamily:"inherit",letterSpacing:".05em"}}>📋 リスト</button>
+          </div>
+          {viewMode === "calendar" ? renderMonthCalendar() : renderMonthList()}
+        </>
+      )}
     </div>
   );
 }
