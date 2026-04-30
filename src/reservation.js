@@ -3,6 +3,7 @@ import { db } from "./firebase";
 import { collection, doc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
 import { getOrderedStaffNames } from "./shift";
 import { sendReservationEmails } from "./email";
+import { SeatPicker } from "./seatLayout";
 
 const S = {
   card: { background:"#111", border:"1px solid rgba(201,168,76,0.1)", borderRadius:6, padding:"1rem 1.25rem", marginBottom:".75rem" },
@@ -62,7 +63,7 @@ const emptyReservation = {
   seatNumber: "",
 };
 
-export default function ReservationModule({ events = [], shifts = [], navigateBack }) {
+export default function ReservationModule({ events = [], shifts = [], navigateBack, onGoSeatLayout }) {
   const [reservations, setReservations] = useState([]);
   const [view, setView] = useState("list");
   const [form, setForm] = useState(emptyReservation);
@@ -74,6 +75,8 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
 
   // シフトデータからスタッフ名を抽出（CSV順、社長は最後）
   const staffNames = getOrderedStaffNames(shifts);
+  // 席選択ポップアップ
+  const [showSeatPicker, setShowSeatPicker] = useState(false);
 
   useEffect(() => {
     const TRASH_TTL = 30 * 24 * 60 * 60 * 1000;
@@ -270,8 +273,11 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
               ))}
             </select>
           </Field>
-          <Field label="席（手動入力）">
-            <input style={S.inp} value={form.seatNumber||""} onChange={e=>setField("seatNumber",e.target.value)} placeholder="例：A1, B2-3, カウンター席など"/>
+          <Field label="席（手動入力 or レイアウトから選択）">
+            <div style={{display:"flex",gap:".4rem"}}>
+              <input style={{...S.inp,flex:1}} value={form.seatNumber||""} onChange={e=>setField("seatNumber",e.target.value)} placeholder="例：A1, B2-3, カウンター席"/>
+              <button type="button" style={{...S.btn("ghost"),padding:".4rem .7rem",whiteSpace:"nowrap"}} onClick={()=>setShowSeatPicker(true)}>🪑 レイアウトから</button>
+            </div>
           </Field>
           <Field label="備考（席希望など）" full>
             <textarea style={{...S.inp,resize:"vertical",lineHeight:1.5}} rows={3} value={form.note} onChange={e=>setField("note",e.target.value)} placeholder="席の希望・アレルギー対応など"/>
@@ -306,6 +312,16 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
             <button style={{...S.btn("danger"),marginLeft:"auto"}} onClick={async()=>{await handleDelete(editingId);setView("list");}}>🗑 削除</button>
           )}
         </div>
+
+        {showSeatPicker && (
+          <SeatPicker
+            reservations={allReservations}
+            currentDate={form.date}
+            currentReservationId={editingId}
+            onSelect={(seatNumber)=>setField("seatNumber", seatNumber)}
+            onClose={()=>setShowSeatPicker(false)}
+          />
+        )}
       </div>
     );
   }
@@ -316,6 +332,9 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1.25rem",flexWrap:"wrap",gap:".5rem"}}>
         <h2 style={{fontFamily:"Georgia,serif",fontSize:"1.2rem",color:"#c9a84c",letterSpacing:".15em",margin:0}}>📞 予約管理</h2>
         <div style={{display:"flex",gap:".5rem",flexWrap:"wrap"}}>
+          {onGoSeatLayout && (
+            <button style={{...S.btn("sm"),padding:".4rem .8rem"}} onClick={onGoSeatLayout}>🪑 席レイアウト</button>
+          )}
           <button style={{...S.btn("sm"),padding:".4rem .8rem"}} onClick={()=>setShowTrash(true)}>🗑 ゴミ箱{trashReservations.length>0?` (${trashReservations.length})`:""}</button>
           <button style={S.btn("gold")} onClick={startNew}>＋ 電話予約を追加</button>
         </div>
