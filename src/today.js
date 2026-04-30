@@ -630,7 +630,7 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                 </div>
               )}
               {onGoReservations && (
-                <button type="button" style={{...S.btn("ghost"),width:"100%",marginTop:".75rem",fontSize:".68rem"}} onClick={onGoReservations}>
+                <button type="button" style={{...S.btn("ghost"),width:"100%",marginTop:".75rem",fontSize:".68rem"}} onClick={()=>onGoReservations(selectedDate)}>
                   📞 予約管理画面へ（受付チェック・編集{isEmpty?"・電話予約追加":""}）
                 </button>
               )}

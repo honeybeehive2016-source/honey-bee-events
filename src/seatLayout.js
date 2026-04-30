@@ -534,12 +534,6 @@ export function DayLayoutView({ reservations, dateKey, layouts, selectedLayoutId
   (layout.seats||[]).forEach(s => {
     seatStates[s.number] = getSeatStateForDate(s.number, reservations, dateKey);
   });
-  const total = (layout.seats||[]).length;
-  let reserved = 0, arrived = 0;
-  Object.values(seatStates).forEach(st => {
-    if (st.state === "reserved") reserved++;
-    else if (st.state === "arrived") arrived++;
-  });
 
   return (
     <div>
@@ -558,9 +552,6 @@ export function DayLayoutView({ reservations, dateKey, layouts, selectedLayoutId
             <option key={l._id} value={l._id}>{l.name}{isDefaultLayout(l)?" ⭐":""}</option>
           ))}
         </select>
-        <span style={{fontSize:".62rem",color:"rgba(240,232,208,0.55)"}}>
-          全{total}席 / 🟢空 {total-reserved-arrived} / 🟡予約 {reserved} / 🔵来店 {arrived}
-        </span>
       </div>
 
       {/* キャンバス（読み取り専用） */}
@@ -608,11 +599,10 @@ export function DayLayoutView({ reservations, dateKey, layouts, selectedLayoutId
                 )}
                 {stateInfo.reservation && (
                   <>
-                    <div style={{fontSize:".5rem",lineHeight:1,opacity:0.55,marginBottom:"1px"}}>{seat.number}</div>
                     <div style={{
-                      fontSize:".78rem",
+                      fontSize:".82rem",
                       fontWeight:700,
-                      lineHeight:1.1,
+                      lineHeight:1.15,
                       overflow:"hidden",
                       textOverflow:"ellipsis",
                       whiteSpace:"nowrap",
@@ -621,7 +611,7 @@ export function DayLayoutView({ reservations, dateKey, layouts, selectedLayoutId
                     }}>
                       {stateInfo.reservation.customerName}
                     </div>
-                    <div style={{fontSize:".55rem",lineHeight:1.1,marginTop:"1px",opacity:0.85}}>{stateInfo.reservation.people}名</div>
+                    <div style={{fontSize:".68rem",lineHeight:1.1,marginTop:"2px",opacity:0.9}}>{stateInfo.reservation.people}名</div>
                   </>
                 )}
               </div>

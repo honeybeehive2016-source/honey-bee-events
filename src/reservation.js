@@ -63,23 +63,30 @@ const emptyReservation = {
   seatNumber: "",
 };
 
-export default function ReservationModule({ events = [], shifts = [], navigateBack, onGoSeatLayout, initialFilter }) {
+export default function ReservationModule({ events = [], shifts = [], navigateBack, onGoSeatLayout, initialDate }) {
   const [reservations, setReservations] = useState([]);
   // メインビュー: list（一覧）/ calendar（カレンダー＆日付詳細）/ edit（編集）
   const [view, setView] = useState("calendar");
   const [form, setForm] = useState(emptyReservation);
   const [editingId, setEditingId] = useState(null);
-  const [filter, setFilter] = useState(initialFilter || "upcoming");
+  const [filter, setFilter] = useState("upcoming");
   const [dateFilter, setDateFilter] = useState("");
   const [showTrash, setShowTrash] = useState(false);
   const [allReservations, setAllReservations] = useState([]);
   const [layouts, setLayouts] = useState([]);
   const [dayLayoutMap, setDayLayoutMap] = useState({}); // dateKey -> layoutId
-  // カレンダーで選択中の日付（詳細表示用）
-  const [calSelectedDate, setCalSelectedDate] = useState(new Date().toISOString().split("T")[0]);
-  // カレンダーの月（年月）
-  const [calYearMonth, setCalYearMonth] = useState(() => {
+  // カレンダーで選択中の日付（詳細表示用）— ローカルタイムゾーンで今日を取得
+  const todayLocal = (() => {
     const d = new Date();
+    const yy = d.getFullYear();
+    const mm = String(d.getMonth()+1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yy}-${mm}-${dd}`;
+  })();
+  const [calSelectedDate, setCalSelectedDate] = useState(initialDate || todayLocal);
+  // カレンダーの月（年月）— initialDate があればその月を表示
+  const [calYearMonth, setCalYearMonth] = useState(() => {
+    const d = initialDate ? new Date(initialDate + "T00:00:00") : new Date();
     return { year: d.getFullYear(), month: d.getMonth() };
   });
 
@@ -128,20 +135,22 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
     }
   };
 
-  // initialFilter が "today" などの時は list view に切り替え
+  // initialDate（本日の営業から飛んできた時）はカレンダー表示でその日付を選択
   useEffect(() => {
-    if (initialFilter) {
-      setFilter(initialFilter);
-      setView("list");
+    if (initialDate) {
+      setCalSelectedDate(initialDate);
+      const d = new Date(initialDate + "T00:00:00");
+      setCalYearMonth({ year: d.getFullYear(), month: d.getMonth() });
+      setView("calendar");
     }
-  }, [initialFilter]);
+  }, [initialDate]);
 
   const trashReservations = allReservations.filter(r => r._deleted);
 
   const setField = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   const startNew = () => {
-    setForm({ ...emptyReservation, source: "phone", date: dateFilter || new Date().toISOString().split("T")[0] });
+    setForm({ ...emptyReservation, source: "phone", date: dateFilter || calSelectedDate || todayLocal });
     setEditingId(null);
     setView("edit");
   };
@@ -210,7 +219,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   };
 
   // フィルター
-  const today = new Date().toISOString().split("T")[0];
+  const today = todayLocal;
   const filtered = reservations.filter(r => {
     if (dateFilter) return r.date === dateFilter;
     if (filter === "today") return r.date === today;
@@ -429,7 +438,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
       const fillColor = r ? (r.arrived ? "#dbe9f4" : "#fde9d4") : "#ffffff";
       const borderColor = r ? (r.arrived ? "#5a8eae" : "#c47e3a") : "#888";
       const inner = r
-        ? `<div style="font-size:9px;color:#666">${s.number}</div><div style="font-size:13px;font-weight:700;line-height:1.1">${r.customerName||""}</div><div style="font-size:9px">${r.people||""}名</div>`
+        ? `<div style="font-size:14px;font-weight:700;line-height:1.15">${r.customerName||""}</div><div style="font-size:11px;margin-top:2px">${r.people||""}名</div>`
         : `<div style="font-size:13px">${s.number}</div>`;
       return `<div style="position:absolute;left:${s.x}px;top:${s.y}px;width:${s.width||50}px;height:${s.height||50}px;background:${fillColor};border:2px solid ${borderColor};border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#000;text-align:center;overflow:hidden">${inner}</div>`;
     }).join("");
@@ -788,8 +797,14 @@ export function CustomerReservationForm({ events = [] }) {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  // 今日以降のイベントを日付別にグループ化（貸切除外）
-  const today = new Date().toISOString().split("T")[0];
+  // 今日以降のイベントを日付別にグループ化（貸切除外）— ローカルタイムゾーン
+  const today = (() => {
+    const d = new Date();
+    const yy = d.getFullYear();
+    const mm = String(d.getMonth()+1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yy}-${mm}-${dd}`;
+  })();
   const upcomingEvents = events.filter(e => e.date && e.date >= today && !/貸切|貸し切り/.test(e.name||""));
   const eventsByDate = {};
   upcomingEvents.forEach(e => {
