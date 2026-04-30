@@ -216,7 +216,14 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
             }}/>
           </Field>
           <Field label="予約経路">
-            <select style={S.inp} value={form.source} onChange={e=>setField("source",e.target.value)}>
+            <select style={S.inp} value={form.source} onChange={e=>{
+              const newSource = e.target.value;
+              setField("source", newSource);
+              if (newSource === "phone") {
+                setField("email", "");
+                setField("sendEmail", false);
+              }
+            }}>
               {SOURCE_OPTIONS.map(s => (
                 <option key={s.value} value={s.value}>{s.label}</option>
               ))}
@@ -250,9 +257,11 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
           <Field label="電話番号">
             <input style={S.inp} value={form.phone} onChange={e=>setField("phone",e.target.value)} placeholder="090-..."/>
           </Field>
-          <Field label="メールアドレス">
-            <input type="email" style={S.inp} value={form.email} onChange={e=>setField("email",e.target.value)} placeholder="@..."/>
-          </Field>
+          {form.source !== "phone" && (
+            <Field label="メールアドレス">
+              <input type="email" style={S.inp} value={form.email} onChange={e=>setField("email",e.target.value)} placeholder="@..."/>
+            </Field>
+          )}
           <Field label="受付担当者">
             <select style={S.inp} value={form.staff||""} onChange={e=>setField("staff",e.target.value)}>
               <option value="">未設定</option>
@@ -277,7 +286,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
               {form.arrived?`✓ 来店済み（${form.arrivedAt}）`:"未来店"}
             </label>
           </Field>
-          {!editingId && form.email && (
+          {!editingId && form.email && form.source !== "phone" && (
             <Field label="📧 メール通知" full>
               <label style={{display:"flex",alignItems:"center",gap:".5rem",cursor:"pointer",fontSize:".82rem",padding:".4rem 0",color:form.sendEmail?"#7ec8e3":"rgba(240,232,208,0.55)"}}>
                 <input type="checkbox" checked={!!form.sendEmail} onChange={e=>setField("sendEmail",e.target.checked)} style={{accentColor:"#7ec8e3",width:18,height:18}}/>

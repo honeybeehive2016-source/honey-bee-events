@@ -686,6 +686,7 @@ export default function App() {
   const [trashEvents, setTrashEvents] = useState([]);
   const [showEventTrash, setShowEventTrash] = useState(false);
   const [shiftsList, setShiftsList] = useState([]);
+  const [reservationsList, setReservationsList] = useState([]);
 
   // Firestore リアルタイム同期
   useEffect(() => {
@@ -725,7 +726,12 @@ export default function App() {
       snap.forEach(d => list.push({ ...d.data(), _id: d.id }));
       setShiftsList(list);
     }, (err) => { console.error("shifts sync error:", err); });
-    return () => { unsubE(); unsubT(); unsubR(); unsubS(); };
+    const unsubRes = onSnapshot(collection(db, "reservations"), (snap) => {
+      const list = [];
+      snap.forEach(d => list.push({ ...d.data(), _id: d.id }));
+      setReservationsList(list.filter(r => !r._deleted));
+    }, (err) => { console.error("reservations sync error:", err); });
+    return () => { unsubE(); unsubT(); unsubR(); unsubS(); unsubRes(); };
   }, []);
 
   // 既存イベントから貸切を一括取り込み
@@ -1236,11 +1242,13 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
           events={events}
           rentals={rentalsList}
           shifts={shiftsList}
+          reservations={reservationsList}
           navigateBack={navigateBack}
           onEditEvent={(eventId)=>{
             const idx = events.findIndex(e => e._id === eventId);
             if (idx >= 0) editEvent(idx);
           }}
+          onGoReservations={()=>navigateTo("reservation")}
         />
       )}
 
