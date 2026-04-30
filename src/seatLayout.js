@@ -54,6 +54,17 @@ function getSeatStateForDate(seatNumber, reservations, dateKey) {
   return { state: r.arrived ? "arrived" : "reserved", reservation: r };
 }
 
+// 「通常」を含むレイアウトを基本レイアウトとして判定
+export function isDefaultLayout(layout) {
+  if (!layout || !layout.name) return false;
+  return layout.name.includes("通常");
+}
+
+// 「通常」を含む最初のレイアウトを取得
+export function getDefaultLayout(layouts) {
+  return layouts.find(l => isDefaultLayout(l)) || layouts[0] || null;
+}
+
 // レイアウトの新規作成
 function newLayout(name = "新規レイアウト") {
   return {
@@ -298,7 +309,7 @@ export default function SeatLayoutModule({ navigateBack, reservations = [], onBa
             ) : (
               <select style={{...S.inp,maxWidth:240,padding:".4rem .6rem"}} value={selectedLayoutId} onChange={e=>setSelectedLayoutId(e.target.value)}>
                 {layouts.map(l => (
-                  <option key={l._id} value={l._id}>{l.name}（{(l.seats||[]).length}席）</option>
+                  <option key={l._id} value={l._id}>{l.name}</option>
                 ))}
               </select>
             )}
@@ -415,14 +426,28 @@ export default function SeatLayoutModule({ navigateBack, reservations = [], onBa
                     transition: editMode ? "none" : "all 0.15s",
                   }}
                 >
-                  <div style={{fontSize:".82rem",lineHeight:1}}>{seat.number}</div>
-                  {stateInfo.reservation && (
-                    <div style={{fontSize:".55rem",lineHeight:1.1,marginTop:"2px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"90%"}}>
-                      {stateInfo.reservation.customerName}
-                    </div>
+                  {/* 編集モード or 予約なし: 席番号を表示 */}
+                  {(editMode || !stateInfo.reservation) && (
+                    <div style={{fontSize:".82rem",lineHeight:1}}>{seat.number}</div>
                   )}
-                  {stateInfo.reservation && (
-                    <div style={{fontSize:".5rem",lineHeight:1.1}}>{stateInfo.reservation.people}名</div>
+                  {/* 予約あり: 名前を大きく表示、席番号は小さく */}
+                  {!editMode && stateInfo.reservation && (
+                    <>
+                      <div style={{fontSize:".5rem",lineHeight:1,opacity:0.55,marginBottom:"1px"}}>{seat.number}</div>
+                      <div style={{
+                        fontSize:".78rem",
+                        fontWeight:700,
+                        lineHeight:1.1,
+                        overflow:"hidden",
+                        textOverflow:"ellipsis",
+                        whiteSpace:"nowrap",
+                        maxWidth:"95%",
+                        textAlign:"center",
+                      }}>
+                        {stateInfo.reservation.customerName}
+                      </div>
+                      <div style={{fontSize:".55rem",lineHeight:1.1,marginTop:"1px",opacity:0.85}}>{stateInfo.reservation.people}名</div>
+                    </>
                   )}
                 </div>
               );
@@ -485,6 +510,135 @@ export default function SeatLayoutModule({ navigateBack, reservations = [], onBa
           上の「＋ 新規作成」からレイアウトを作成してください
         </div>
       )}
+    </div>
+  );
+}
+
+// ===== 日別レイアウト表示（予約管理画面に埋め込み用、読み取り専用） =====
+export function DayLayoutView({ reservations, dateKey, layouts, selectedLayoutId, onLayoutChange }) {
+  const [internalSelectedId, setInternalSelectedId] = useState("");
+  const layoutId = selectedLayoutId || internalSelectedId;
+  const layout = layouts.find(l => l._id === layoutId) || getDefaultLayout(layouts);
+
+  useEffect(() => {
+    if (!selectedLayoutId && !internalSelectedId && layouts.length > 0) {
+      const def = getDefaultLayout(layouts);
+      if (def) setInternalSelectedId(def._id);
+    }
+  }, [layouts, selectedLayoutId, internalSelectedId]);
+
+  if (!layout) {
+    return (
+      <div style={{padding:"1.5rem",textAlign:"center",color:"rgba(240,232,208,0.4)",fontSize:".8rem"}}>
+        レイアウトが登録されていません
+      </div>
+    );
+  }
+
+  const seatStates = {};
+  (layout.seats||[]).forEach(s => {
+    seatStates[s.number] = getSeatStateForDate(s.number, reservations, dateKey);
+  });
+  const total = (layout.seats||[]).length;
+  let reserved = 0, arrived = 0;
+  Object.values(seatStates).forEach(st => {
+    if (st.state === "reserved") reserved++;
+    else if (st.state === "arrived") arrived++;
+  });
+
+  return (
+    <div>
+      {/* レイアウト切替 */}
+      <div style={{display:"flex",gap:".5rem",alignItems:"center",flexWrap:"wrap",marginBottom:".5rem"}}>
+        <span style={{fontSize:".68rem",color:"rgba(201,168,76,0.6)",letterSpacing:".15em"}}>レイアウト：</span>
+        <select
+          style={{...S.inp,maxWidth:240,padding:".4rem .6rem"}}
+          value={layoutId}
+          onChange={e=>{
+            if (onLayoutChange) onLayoutChange(e.target.value);
+            else setInternalSelectedId(e.target.value);
+          }}
+        >
+          {layouts.map(l => (
+            <option key={l._id} value={l._id}>{l.name}{isDefaultLayout(l)?" ⭐":""}</option>
+          ))}
+        </select>
+        <span style={{fontSize:".62rem",color:"rgba(240,232,208,0.55)"}}>
+          全{total}席 / 🟢空 {total-reserved-arrived} / 🟡予約 {reserved} / 🔵来店 {arrived}
+        </span>
+      </div>
+
+      {/* キャンバス（読み取り専用） */}
+      <div style={{position:"relative",overflowX:"auto",background:"#0a0a0a",border:"1px solid rgba(201,168,76,0.15)",borderRadius:6,padding:"1rem"}} className="seat-layout-canvas">
+        <div style={{
+          position:"relative",
+          width: CANVAS_WIDTH,
+          height: CANVAS_HEIGHT,
+          background: layout.bgImage ? `url(${layout.bgImage}) center/contain no-repeat #1a1a1a` : "#1a1a1a",
+          border: "1px dashed rgba(201,168,76,0.2)",
+          margin: "0 auto",
+        }}>
+          {(layout.seats||[]).map(seat => {
+            const stateInfo = seatStates[seat.number] || { state: "empty", reservation: null };
+            const colors = getSeatColor(stateInfo.state);
+            return (
+              <div
+                key={seat.id}
+                onClick={()=>{
+                  if (stateInfo.reservation) {
+                    alert(`席 ${seat.number}\n${stateInfo.reservation.customerName} 様\n${stateInfo.reservation.people}名\n${stateInfo.state==="arrived"?"✓ 来店済":"未来店"}${stateInfo.reservation.note?"\n備考: "+stateInfo.reservation.note:""}`);
+                  }
+                }}
+                style={{
+                  position:"absolute",
+                  left: seat.x,
+                  top: seat.y,
+                  width: seat.width || DEFAULT_SEAT_SIZE,
+                  height: seat.height || DEFAULT_SEAT_SIZE,
+                  background: colors.bg,
+                  border: `2px solid ${colors.border}`,
+                  borderRadius: 6,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: stateInfo.reservation ? "pointer" : "default",
+                  fontSize: ".75rem",
+                  fontWeight: 600,
+                  color: colors.text,
+                }}
+              >
+                {!stateInfo.reservation && (
+                  <div style={{fontSize:".82rem",lineHeight:1}}>{seat.number}</div>
+                )}
+                {stateInfo.reservation && (
+                  <>
+                    <div style={{fontSize:".5rem",lineHeight:1,opacity:0.55,marginBottom:"1px"}}>{seat.number}</div>
+                    <div style={{
+                      fontSize:".78rem",
+                      fontWeight:700,
+                      lineHeight:1.1,
+                      overflow:"hidden",
+                      textOverflow:"ellipsis",
+                      whiteSpace:"nowrap",
+                      maxWidth:"95%",
+                      textAlign:"center",
+                    }}>
+                      {stateInfo.reservation.customerName}
+                    </div>
+                    <div style={{fontSize:".55rem",lineHeight:1.1,marginTop:"1px",opacity:0.85}}>{stateInfo.reservation.people}名</div>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      <div style={{display:"flex",gap:".75rem",flexWrap:"wrap",marginTop:".5rem",fontSize:".62rem",color:"rgba(240,232,208,0.55)"}}>
+        <span style={{display:"flex",alignItems:"center",gap:".25rem"}}><span style={{display:"inline-block",width:12,height:12,background:getSeatColor("empty").bg,border:`1px solid ${getSeatColor("empty").border}`,borderRadius:2}}/>空席</span>
+        <span style={{display:"flex",alignItems:"center",gap:".25rem"}}><span style={{display:"inline-block",width:12,height:12,background:getSeatColor("reserved").bg,border:`1px solid ${getSeatColor("reserved").border}`,borderRadius:2}}/>予約</span>
+        <span style={{display:"flex",alignItems:"center",gap:".25rem"}}><span style={{display:"inline-block",width:12,height:12,background:getSeatColor("arrived").bg,border:`1px solid ${getSeatColor("arrived").border}`,borderRadius:2}}/>来店</span>
+      </div>
     </div>
   );
 }

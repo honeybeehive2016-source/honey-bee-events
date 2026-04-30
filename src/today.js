@@ -600,34 +600,38 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
         ))
       )}
 
-      {/* 本日の予約 */}
+      {/* 本日の予約（常に表示） */}
       {(() => {
         const todayReservations = reservations.filter(r => r.date === selectedDate);
-        if (todayReservations.length === 0) return null;
         const sorted = [...todayReservations].sort((a,b) => (a.createdAt||0) - (b.createdAt||0));
         const totalPeople = sorted.reduce((s,r)=>s+Number(r.people||0),0);
         const arrivedCount = sorted.filter(r=>r.arrived).length;
+        const isEmpty = sorted.length === 0;
         return (
           <>
-            <div style={S.secTitle}>📞 本日の予約（{sorted.length}組 / 計{totalPeople}名 / 来店 {arrivedCount}/{sorted.length}）</div>
+            <div style={S.secTitle}>📞 本日の予約{isEmpty?"（0組）":`（${sorted.length}組 / 計${totalPeople}名 / 来店 ${arrivedCount}/${sorted.length}）`}</div>
             <div style={{...S.card,padding:".75rem 1rem"}}>
-              <div style={{display:"flex",flexDirection:"column",gap:".4rem"}}>
-                {sorted.map((r,i) => (
-                  <div key={r._id||i} style={{display:"flex",alignItems:"center",gap:".55rem",flexWrap:"wrap",padding:".25rem 0",borderBottom:i<sorted.length-1?"1px dashed rgba(201,168,76,0.08)":"none"}}>
-                    <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:24,height:24,borderRadius:4,background:r.arrived?"rgba(126,200,127,0.2)":"rgba(244,162,97,0.13)",border:`1px solid ${r.arrived?"#7ec87e":"rgba(244,162,97,0.4)"}`,fontSize:".62rem",color:r.arrived?"#7ec87e":"#f4a261",flexShrink:0}}>
-                      {r.arrived?"✓":""}
-                    </span>
-                    <span style={{fontSize:".88rem",color:"#f0e8d0",minWidth:90}}>{r.customerName||"（無名）"} 様</span>
-                    <span style={{padding:".15rem .5rem",borderRadius:3,background:"rgba(201,168,76,0.13)",color:"#c9a84c",fontSize:".68rem",fontWeight:600}}>{r.people}名</span>
-                    <span style={{fontSize:".7rem",color:"rgba(240,232,208,0.6)"}}>{sourceIcon(r.source)}</span>
-                    {r.seatNumber && <span style={{padding:".1rem .4rem",background:"rgba(126,200,227,0.13)",borderRadius:2,fontSize:".62rem",color:"#7ec8e3"}}>🪑 {r.seatNumber}</span>}
-                    {r.note && <span style={{fontSize:".62rem",color:"#f4a261",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0,flex:1}}>📝 {r.note.length>25?r.note.slice(0,25)+"...":r.note}</span>}
-                  </div>
-                ))}
-              </div>
+              {isEmpty ? (
+                <div style={{textAlign:"center",padding:".5rem 0",fontSize:".82rem",color:"rgba(240,232,208,0.45)"}}>まだ予約はありません</div>
+              ) : (
+                <div style={{display:"flex",flexDirection:"column",gap:".4rem"}}>
+                  {sorted.map((r,i) => (
+                    <div key={r._id||i} style={{display:"flex",alignItems:"center",gap:".55rem",flexWrap:"wrap",padding:".25rem 0",borderBottom:i<sorted.length-1?"1px dashed rgba(201,168,76,0.08)":"none"}}>
+                      <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:24,height:24,borderRadius:4,background:r.arrived?"rgba(126,200,127,0.2)":"rgba(244,162,97,0.13)",border:`1px solid ${r.arrived?"#7ec87e":"rgba(244,162,97,0.4)"}`,fontSize:".62rem",color:r.arrived?"#7ec87e":"#f4a261",flexShrink:0}}>
+                        {r.arrived?"✓":""}
+                      </span>
+                      <span style={{fontSize:".88rem",color:"#f0e8d0",minWidth:90}}>{r.customerName||"（無名）"} 様</span>
+                      <span style={{padding:".15rem .5rem",borderRadius:3,background:"rgba(201,168,76,0.13)",color:"#c9a84c",fontSize:".68rem",fontWeight:600}}>{r.people}名</span>
+                      <span style={{fontSize:".7rem",color:"rgba(240,232,208,0.6)"}}>{sourceIcon(r.source)}</span>
+                      {r.seatNumber && <span style={{padding:".1rem .4rem",background:"rgba(126,200,227,0.13)",borderRadius:2,fontSize:".62rem",color:"#7ec8e3"}}>🪑 {r.seatNumber}</span>}
+                      {r.note && <span style={{fontSize:".62rem",color:"#f4a261",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0,flex:1}}>📝 {r.note.length>25?r.note.slice(0,25)+"...":r.note}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
               {onGoReservations && (
                 <button type="button" style={{...S.btn("ghost"),width:"100%",marginTop:".75rem",fontSize:".68rem"}} onClick={onGoReservations}>
-                  📞 予約管理画面へ（受付チェック・編集）
+                  📞 予約管理画面へ（受付チェック・編集{isEmpty?"・電話予約追加":""}）
                 </button>
               )}
             </div>
