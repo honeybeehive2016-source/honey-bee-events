@@ -63,12 +63,12 @@ const emptyReservation = {
   seatNumber: "",
 };
 
-export default function ReservationModule({ events = [], shifts = [], navigateBack, onGoSeatLayout }) {
+export default function ReservationModule({ events = [], shifts = [], navigateBack, onGoSeatLayout, initialFilter }) {
   const [reservations, setReservations] = useState([]);
   const [view, setView] = useState("list");
   const [form, setForm] = useState(emptyReservation);
   const [editingId, setEditingId] = useState(null);
-  const [filter, setFilter] = useState("upcoming");
+  const [filter, setFilter] = useState(initialFilter || "upcoming");
   const [dateFilter, setDateFilter] = useState("");
   const [showTrash, setShowTrash] = useState(false);
   const [allReservations, setAllReservations] = useState([]);
@@ -318,6 +318,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
             reservations={allReservations}
             currentDate={form.date}
             currentReservationId={editingId}
+            currentSeats={form.seatNumber}
             onSelect={(seatNumber)=>setField("seatNumber", seatNumber)}
             onClose={()=>setShowSeatPicker(false)}
           />

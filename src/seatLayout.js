@@ -43,9 +43,13 @@ function getSeatColor(state) {
   }
 }
 
-// 当該席の状態を計算（その日の予約から）
+// 当該席の状態を計算（その日の予約から、複数席対応）
 function getSeatStateForDate(seatNumber, reservations, dateKey) {
-  const r = reservations.find(r => r.date === dateKey && r.seatNumber === seatNumber && !r._deleted);
+  const r = reservations.find(r => {
+    if (r.date !== dateKey || r._deleted) return false;
+    const seats = (r.seatNumber || "").split(",").map(s => s.trim()).filter(Boolean);
+    return seats.includes(seatNumber);
+  });
   if (!r) return { state: "empty", reservation: null };
   return { state: r.arrived ? "arrived" : "reserved", reservation: r };
 }
@@ -130,19 +134,39 @@ export default function SeatLayoutModule({ navigateBack, reservations = [], onBa
     setSelectedLayoutId("");
   };
 
-  // 席追加
+  // 席追加（前回の席のサイズ・定員を引き継ぐ）
   const addSeat = () => {
     const seats = draftLayout.seats || [];
+    const lastSeat = seats.length > 0 ? seats[seats.length - 1] : null;
+    const inheritedSize = lastSeat?.width || DEFAULT_SEAT_SIZE;
+    const inheritedHeight = lastSeat?.height || DEFAULT_SEAT_SIZE;
+    const inheritedCapacity = lastSeat?.capacity || 4;
     const newSeat = {
       id: `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,5)}`,
       number: `${seats.length + 1}`,
-      x: 50 + (seats.length % 10) * 60,
-      y: 50 + Math.floor(seats.length / 10) * 60,
-      width: DEFAULT_SEAT_SIZE,
-      height: DEFAULT_SEAT_SIZE,
-      capacity: 4,
+      x: lastSeat ? Math.min(CANVAS_WIDTH - inheritedSize, lastSeat.x + inheritedSize + 10) : 50,
+      y: lastSeat ? lastSeat.y : 50,
+      width: inheritedSize,
+      height: inheritedHeight,
+      capacity: inheritedCapacity,
     };
     setDraftLayout({...draftLayout, seats: [...seats, newSeat]});
+  };
+
+  // 席を複製（既存の席をコピー）
+  const duplicateSeat = (id) => {
+    const seats = draftLayout.seats || [];
+    const original = seats.find(s => s.id === id);
+    if (!original) return;
+    const newSeat = {
+      ...original,
+      id: `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,5)}`,
+      number: `${original.number}'`,
+      x: Math.min(CANVAS_WIDTH - (original.width||DEFAULT_SEAT_SIZE), original.x + (original.width||DEFAULT_SEAT_SIZE) + 10),
+      y: original.y,
+    };
+    setDraftLayout({...draftLayout, seats: [...seats, newSeat]});
+    setEditingSeatId(newSeat.id); // 複製後、新しい席を編集モードに（席番号変えるため）
   };
 
   const updateSeat = (id, updates) => {
@@ -439,13 +463,16 @@ export default function SeatLayoutModule({ navigateBack, reservations = [], onBa
               <label style={S.lbl}>定員（任意）</label>
               <input type="number" style={S.inp} value={editingSeat.capacity||""} onChange={e=>updateSeat(editingSeat.id, {capacity: Number(e.target.value)})}/>
             </div>
-            <div style={{display:"flex",gap:".5rem",justifyContent:"space-between"}}>
+            <div style={{display:"flex",gap:".5rem",justifyContent:"space-between",flexWrap:"wrap"}}>
               <button style={S.btn("danger")} onClick={()=>{
                 if(window.confirm(`席 ${editingSeat.number} を削除しますか？`)){
                   removeSeat(editingSeat.id);
                   setEditingSeatId(null);
                 }
-              }}>🗑 この席を削除</button>
+              }}>🗑 削除</button>
+              <button style={{...S.btn("ghost"),borderColor:"rgba(126,200,127,0.4)",color:"#7ec87e"}} onClick={()=>{
+                duplicateSeat(editingSeat.id);
+              }}>📋 複製</button>
               <button style={S.btn("gold")} onClick={()=>setEditingSeatId(null)}>閉じる</button>
             </div>
           </div>
@@ -463,9 +490,12 @@ export default function SeatLayoutModule({ navigateBack, reservations = [], onBa
 }
 
 // ===== 席選択ポップアップ（予約画面から使う） =====
-export function SeatPicker({ layoutId, reservations, currentDate, currentReservationId, onSelect, onClose }) {
+export function SeatPicker({ layoutId, reservations, currentDate, currentReservationId, currentSeats, onSelect, onClose }) {
   const [layouts, setLayouts] = useState([]);
   const [selectedLayoutId, setSelectedLayoutId] = useState(layoutId || "");
+  // 選択中の席（複数選択可）
+  const initialSelected = (currentSeats || "").split(",").map(s => s.trim()).filter(Boolean);
+  const [selected, setSelected] = useState(initialSelected);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "seatLayouts"), (snap) => {
@@ -483,12 +513,32 @@ export function SeatPicker({ layoutId, reservations, currentDate, currentReserva
 
   const currentLayout = layouts.find(l => l._id === selectedLayoutId);
 
+  // 席をタップした時：選択 / 解除（既に選択中なら外す）
+  const toggleSeat = (seatNumber, occupiedByOther) => {
+    if (selected.includes(seatNumber)) {
+      // 選択解除
+      setSelected(selected.filter(s => s !== seatNumber));
+    } else {
+      if (occupiedByOther) {
+        if (!window.confirm(`席 ${seatNumber} は ${occupiedByOther.customerName} 様 が予約中です。\n選択しますか？`)) return;
+      }
+      setSelected([...selected, seatNumber]);
+    }
+  };
+
+  const confirmSelection = () => {
+    onSelect(selected.join(", "));
+    onClose();
+  };
+
+  const clearSelection = () => setSelected([]);
+
   return (
     <div style={{position:"fixed",top:0,left:0,width:"100%",height:"100%",background:"rgba(0,0,0,0.9)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}} onClick={onClose}>
-      <div onClick={e=>e.stopPropagation()} style={{background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.27)",borderRadius:8,padding:"1.5rem",maxWidth:900,width:"100%",maxHeight:"90vh",overflowY:"auto"}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.27)",borderRadius:8,padding:"1.5rem",maxWidth:900,width:"100%",maxHeight:"95vh",overflowY:"auto"}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1rem",flexWrap:"wrap",gap:".5rem"}}>
           <div style={{fontFamily:"Georgia,serif",fontSize:"1.1rem",color:"#c9a84c",letterSpacing:".15em"}}>🪑 席を選択</div>
-          <button style={S.btn("sm")} onClick={onClose}>閉じる</button>
+          <button style={S.btn("sm")} onClick={onClose}>✕ キャンセル</button>
         </div>
         {layouts.length === 0 ? (
           <div style={{textAlign:"center",padding:"2rem",color:"rgba(240,232,208,0.4)"}}>
@@ -507,6 +557,29 @@ export function SeatPicker({ layoutId, reservations, currentDate, currentReserva
                 {currentDate ? `表示日: ${currentDate}` : ""}
               </span>
             </div>
+
+            {/* 選択中の席表示 */}
+            <div style={{padding:".75rem 1rem",background:selected.length>0?"rgba(201,168,76,0.08)":"#0a0a0a",border:`1px solid ${selected.length>0?"#c9a84c":"rgba(201,168,76,0.15)"}`,borderRadius:5,marginBottom:".75rem"}}>
+              <div style={{fontSize:".68rem",color:"#c9a84c",letterSpacing:".1em",marginBottom:".4rem"}}>
+                選択中の席（{selected.length}席）
+                {selected.length > 0 && (
+                  <button style={{...S.btn("sm"),padding:".15rem .5rem",fontSize:".55rem",marginLeft:".5rem"}} onClick={clearSelection}>クリア</button>
+                )}
+              </div>
+              {selected.length === 0 ? (
+                <div style={{fontSize:".75rem",color:"rgba(240,232,208,0.4)"}}>席をタップで選択（複数選択可・もう一度タップで解除）</div>
+              ) : (
+                <div style={{display:"flex",gap:".4rem",flexWrap:"wrap"}}>
+                  {selected.map((s,i) => (
+                    <span key={i} style={{padding:".25rem .55rem",background:"#c9a84c",color:"#0a0a0a",borderRadius:3,fontSize:".75rem",fontWeight:600,display:"inline-flex",alignItems:"center",gap:".3rem"}}>
+                      🪑 {s}
+                      <button onClick={()=>toggleSeat(s)} style={{background:"transparent",border:"none",color:"#0a0a0a",cursor:"pointer",padding:0,fontSize:".75rem",fontWeight:700}}>✕</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {currentLayout && (
               <div style={{position:"relative",overflowX:"auto",background:"#0a0a0a",border:"1px solid rgba(201,168,76,0.15)",borderRadius:6,padding:"1rem"}}>
                 <div style={{
@@ -518,35 +591,36 @@ export function SeatPicker({ layoutId, reservations, currentDate, currentReserva
                   margin: "0 auto",
                 }}>
                   {(currentLayout.seats||[]).map(seat => {
-                    // 自分以外の予約があれば占有中
                     const occupiedByOther = reservations.find(r =>
                       r.date === currentDate &&
-                      r.seatNumber === seat.number &&
+                      (r.seatNumber || "").split(",").map(s=>s.trim()).includes(seat.number) &&
                       !r._deleted &&
                       r._id !== currentReservationId
                     );
-                    const stateInfo = occupiedByOther
-                      ? { state: occupiedByOther.arrived ? "arrived" : "reserved", reservation: occupiedByOther }
-                      : { state: "empty", reservation: null };
-                    const colors = getSeatColor(stateInfo.state);
+                    const isSelected = selected.includes(seat.number);
+                    let stateInfo;
+                    if (isSelected) {
+                      stateInfo = { state: "selected", reservation: null };
+                    } else if (occupiedByOther) {
+                      stateInfo = { state: occupiedByOther.arrived ? "arrived" : "reserved", reservation: occupiedByOther };
+                    } else {
+                      stateInfo = { state: "empty", reservation: null };
+                    }
+                    let bg, border, text;
+                    if (isSelected) { bg = "#c9a84c"; border = "#fff"; text = "#0a0a0a"; }
+                    else { const c = getSeatColor(stateInfo.state); bg = c.bg; border = c.border; text = c.text; }
                     return (
                       <div
                         key={seat.id}
-                        onClick={() => {
-                          if (occupiedByOther) {
-                            if (!window.confirm(`この席は ${occupiedByOther.customerName} 様 が予約中です。\n上書きしますか？`)) return;
-                          }
-                          onSelect(seat.number);
-                          onClose();
-                        }}
+                        onClick={() => toggleSeat(seat.number, occupiedByOther)}
                         style={{
                           position:"absolute",
                           left: seat.x,
                           top: seat.y,
                           width: seat.width || DEFAULT_SEAT_SIZE,
                           height: seat.height || DEFAULT_SEAT_SIZE,
-                          background: colors.bg,
-                          border: `2px solid ${colors.border}`,
+                          background: bg,
+                          border: `2px solid ${border}`,
                           borderRadius: 6,
                           display: "flex",
                           flexDirection: "column",
@@ -555,17 +629,20 @@ export function SeatPicker({ layoutId, reservations, currentDate, currentReserva
                           cursor: "pointer",
                           fontSize: ".75rem",
                           fontWeight: 600,
-                          color: colors.text,
-                          transition: "transform 0.1s",
+                          color: text,
+                          boxShadow: isSelected ? "0 0 12px rgba(201,168,76,0.7)" : "none",
+                          transition: "all 0.15s",
+                          userSelect:"none",
                         }}
-                        onMouseEnter={e=>e.currentTarget.style.transform="scale(1.05)"}
-                        onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}
                       >
                         <div style={{fontSize:".82rem",lineHeight:1}}>{seat.number}</div>
-                        {stateInfo.reservation && (
+                        {stateInfo.reservation && !isSelected && (
                           <div style={{fontSize:".5rem",lineHeight:1.1,maxWidth:"90%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                             {stateInfo.reservation.customerName}
                           </div>
+                        )}
+                        {isSelected && (
+                          <div style={{fontSize:".55rem",lineHeight:1.1,fontWeight:700}}>✓ 選択中</div>
                         )}
                       </div>
                     );
@@ -573,11 +650,24 @@ export function SeatPicker({ layoutId, reservations, currentDate, currentReserva
                 </div>
                 <div style={{display:"flex",gap:".75rem",flexWrap:"wrap",marginTop:".75rem",fontSize:".65rem",color:"rgba(240,232,208,0.6)",justifyContent:"center"}}>
                   <span>🟢 空席（タップで選択）</span>
+                  <span>🟨 選択中</span>
                   <span>🟡 予約あり</span>
                   <span>🔵 来店済</span>
                 </div>
               </div>
             )}
+
+            {/* 確定ボタン */}
+            <div style={{display:"flex",gap:".5rem",justifyContent:"center",marginTop:"1rem",flexWrap:"wrap"}}>
+              <button style={S.btn("ghost")} onClick={onClose}>キャンセル</button>
+              <button
+                style={{...S.btn("gold"),minWidth:200,opacity:selected.length===0?0.5:1}}
+                disabled={selected.length===0}
+                onClick={confirmSelection}
+              >
+                ✓ {selected.length}席を確定
+              </button>
+            </div>
           </>
         )}
       </div>
