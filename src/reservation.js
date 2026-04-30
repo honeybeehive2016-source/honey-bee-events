@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { db } from "./firebase";
 import { collection, doc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
 import { getOrderedStaffNames } from "./shift";
+import { sendReservationEmails } from "./email";
 
 const S = {
   card: { background:"#111", border:"1px solid rgba(201,168,76,0.1)", borderRadius:6, padding:"1rem 1.25rem", marginBottom:".75rem" },
@@ -112,7 +113,17 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
       data.savedAt = new Date().toLocaleString("ja-JP");
       if (!data.createdAt) data.createdAt = Date.now();
       await setDoc(doc(db, "reservations", id), data);
-      alert("✓ 保存しました");
+
+      // 新規予約でメアドあり、かつ確認メール送信が選択されていたら送る
+      if (!editingId && data.email && data.sendEmail) {
+        try {
+          await sendReservationEmails(data);
+        } catch (emailErr) {
+          console.error("メール通知エラー:", emailErr);
+        }
+      }
+
+      alert("✓ 保存しました" + (!editingId && data.email && data.sendEmail ? "\n📧 確認メールを送信しました" : ""));
       setView("list");
     } catch (e) { alert("保存失敗：" + e.message); }
   };
@@ -266,6 +277,17 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
               {form.arrived?`✓ 来店済み（${form.arrivedAt}）`:"未来店"}
             </label>
           </Field>
+          {!editingId && form.email && (
+            <Field label="📧 メール通知" full>
+              <label style={{display:"flex",alignItems:"center",gap:".5rem",cursor:"pointer",fontSize:".82rem",padding:".4rem 0",color:form.sendEmail?"#7ec8e3":"rgba(240,232,208,0.55)"}}>
+                <input type="checkbox" checked={!!form.sendEmail} onChange={e=>setField("sendEmail",e.target.checked)} style={{accentColor:"#7ec8e3",width:18,height:18}}/>
+                保存時にお客様へ予約確認メールを送信する
+              </label>
+              <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.45)",marginLeft:"1.7rem"}}>
+                チェックすると {form.email} へ確認メールが送られ、店舗にも通知が届きます。
+              </div>
+            </Field>
+          )}
         </div>
 
         <div style={{display:"flex",gap:".5rem",marginTop:"1.5rem",flexWrap:"wrap"}}>
@@ -468,7 +490,7 @@ export function CustomerReservationForm({ events = [] }) {
     setSubmitting(true);
     try {
       const id = `res_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,6)}`;
-      await setDoc(doc(db, "reservations", id), {
+      const reservationData = {
         ...form,
         people: Number(form.people),
         source: "form",
@@ -479,7 +501,14 @@ export function CustomerReservationForm({ events = [] }) {
         seatNumber: "",
         savedAt: new Date().toLocaleString("ja-JP"),
         createdAt: Date.now(),
-      });
+      };
+      await setDoc(doc(db, "reservations", id), reservationData);
+      // メール通知（失敗してもDB保存は完了済みなので予約自体は成立）
+      try {
+        await sendReservationEmails(reservationData);
+      } catch (emailErr) {
+        console.error("メール通知エラー:", emailErr);
+      }
       setSubmitted(true);
     } catch (e) {
       setError("送信失敗：" + e.message);
