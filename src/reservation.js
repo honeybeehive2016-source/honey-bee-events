@@ -408,6 +408,8 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   const printSeatLayout = () => {
     const layout = layouts.find(l => l._id === dayLayoutId) || getDefaultLayout(layouts);
     if (!layout) { alert("レイアウトがありません"); return; }
+    const CANVAS_WIDTH = layout.width || 1000;
+    const CANVAS_HEIGHT = layout.height || 700;
     const seatStates = {};
     (layout.seats||[]).forEach(s => {
       const r = reservations.find(rr => {
