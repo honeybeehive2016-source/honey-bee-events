@@ -325,11 +325,6 @@ export default function SeatLayoutModule({ navigateBack, reservations = [], onBa
             <div style={{display:"flex",gap:".5rem",alignItems:"center",flexWrap:"wrap"}}>
               <span style={{fontSize:".68rem",color:"rgba(201,168,76,0.6)",letterSpacing:".15em"}}>表示日：</span>
               <input type="date" style={{...S.inp,maxWidth:170,padding:".4rem .6rem"}} value={viewDate} onChange={e=>setViewDate(e.target.value)}/>
-              {stats && (
-                <span style={{fontSize:".7rem",color:"rgba(240,232,208,0.6)",marginLeft:".5rem"}}>
-                  全{stats.total}席 / 🟢空 {stats.empty} / 🟡予約 {stats.reserved} / 🔵来店 {stats.arrived}
-                </span>
-              )}
             </div>
           )}
         </div>

@@ -408,8 +408,8 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   const printSeatLayout = () => {
     const layout = layouts.find(l => l._id === dayLayoutId) || getDefaultLayout(layouts);
     if (!layout) { alert("レイアウトがありません"); return; }
-    const CANVAS_WIDTH = layout.width || 1000;
-    const CANVAS_HEIGHT = layout.height || 700;
+    const CANVAS_WIDTH = 800;
+    const CANVAS_HEIGHT = 600;
     const seatStates = {};
     (layout.seats||[]).forEach(s => {
       const r = reservations.find(rr => {
@@ -591,16 +591,21 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                 </div>
               </div>
 
-              {/* 席レイアウト */}
-              <div style={{marginBottom:"1rem"}}>
-                <DayLayoutView
-                  reservations={reservations}
-                  dateKey={calSelectedDate}
-                  layouts={layouts}
-                  selectedLayoutId={dayLayoutId}
-                  onLayoutChange={(id)=>setDayLayout(calSelectedDate, id)}
-                />
-              </div>
+              {/* 席レイアウト（折りたたみ式・デフォルト閉） */}
+              <details style={{marginBottom:"1rem"}}>
+                <summary style={{cursor:"pointer",padding:".5rem .75rem",background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.2)",borderRadius:5,fontSize:".75rem",color:"rgba(201,168,76,0.85)",letterSpacing:".1em",userSelect:"none"}}>
+                  🪑 席レイアウトを表示
+                </summary>
+                <div style={{marginTop:".75rem"}}>
+                  <DayLayoutView
+                    reservations={reservations}
+                    dateKey={calSelectedDate}
+                    layouts={layouts}
+                    selectedLayoutId={dayLayoutId}
+                    onLayoutChange={(id)=>setDayLayout(calSelectedDate, id)}
+                  />
+                </div>
+              </details>
 
               {/* 予約リスト */}
               <div style={{marginBottom:".5rem",fontSize:".7rem",color:"rgba(201,168,76,0.7)",letterSpacing:".15em"}}>

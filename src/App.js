@@ -659,7 +659,13 @@ export default function App() {
   };
 
   const navigateBack = () => {
-    setViewStack(stack => stack.length > 1 ? stack.slice(0, -1) : ["home"]);
+    setViewStack(stack => {
+      const newStack = stack.length > 1 ? stack.slice(0, -1) : ["home"];
+      const newView = newStack[newStack.length - 1];
+      // 予約モジュール以外に戻る時はフィルター指定をクリア
+      if (newView !== "reservation") setReservationInitialFilter(null);
+      return newStack;
+    });
     if (window.history.length > 1) window.history.back();
   };
 
