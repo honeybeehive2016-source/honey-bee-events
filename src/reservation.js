@@ -72,6 +72,9 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   const [filter, setFilter] = useState("upcoming");
   const [dateFilter, setDateFilter] = useState("");
   const [showTrash, setShowTrash] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
   const [allReservations, setAllReservations] = useState([]);
   const [layouts, setLayouts] = useState([]);
   const [dayLayoutMap, setDayLayoutMap] = useState({}); // dateKey -> layoutId
@@ -166,6 +169,152 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   }, [initialDate]);
 
   const trashReservations = allReservations.filter(r => r._deleted);
+
+  // ===== CSVインポート（Googleフォーム書き出し対応） =====
+  // CSVの1行を簡易的にパース（クォート対応）
+  const parseCSVLine = (line) => {
+    const cells = [];
+    let cur = "";
+    let inQuote = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (inQuote) {
+        if (ch === '"') {
+          if (line[i+1] === '"') { cur += '"'; i++; }
+          else inQuote = false;
+        } else cur += ch;
+      } else {
+        if (ch === '"') inQuote = true;
+        else if (ch === ',') { cells.push(cur); cur = ""; }
+        else cur += ch;
+      }
+    }
+    cells.push(cur);
+    return cells.map(c => c.trim());
+  };
+
+  // 日付を「2026/02/01」「2026-02-01」「2026年2月1日」など色々な形式から「2026-02-01」に変換
+  const normalizeDate = (raw) => {
+    if (!raw) return "";
+    const s = String(raw).trim();
+    // 2026/02/01 / 2026-02-01 / 2026.02.01
+    let m = s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
+    if (m) {
+      const yy = m[1];
+      const mm = String(m[2]).padStart(2, "0");
+      const dd = String(m[3]).padStart(2, "0");
+      return `${yy}-${mm}-${dd}`;
+    }
+    // 2026年2月1日
+    m = s.match(/^(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日/);
+    if (m) {
+      const yy = m[1];
+      const mm = String(m[2]).padStart(2, "0");
+      const dd = String(m[3]).padStart(2, "0");
+      return `${yy}-${mm}-${dd}`;
+    }
+    return s;
+  };
+
+  // 電話番号の正規化（先頭の0が消えていることがあるので補完）
+  const normalizePhone = (raw) => {
+    if (!raw) return "";
+    let s = String(raw).trim().replace(/[^\d\-+]/g, "");
+    // 9～10桁で始まりが0以外なら先頭に0を付ける（CSVの数値変換で0が落ちたケース）
+    if (/^\d{9,10}$/.test(s) && !s.startsWith("0")) s = "0" + s;
+    return s;
+  };
+
+  // CSVファイルを読み込んで予約として一括追加
+  const handleImportCSV = async (file) => {
+    if (!file) return;
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const text = await file.text();
+      // BOM除去
+      const clean = text.replace(/^\uFEFF/, "");
+      const lines = clean.split(/\r?\n/).filter(l => l.length > 0);
+      if (lines.length < 2) {
+        setImportResult({ ok: 0, errors: ["データ行がありません"] });
+        setImporting(false);
+        return;
+      }
+      const header = parseCSVLine(lines[0]);
+      // Googleフォームの想定列を見つける（柔軟マッチ）
+      const findCol = (...keywords) => {
+        for (let i = 0; i < header.length; i++) {
+          const h = header[i];
+          if (keywords.some(k => h.includes(k))) return i;
+        }
+        return -1;
+      };
+      const idxEvent = findCol("イベント", "ライブ", "アーティスト");
+      const idxDate = findCol("日付", "日時");
+      const idxName = findCol("お名前", "氏名", "名前");
+      const idxPeople = findCol("人数", "枚数");
+      const idxPhone = findCol("電話");
+      const idxEmail = findCol("メール", "Email", "email");
+      const idxNote = findCol("備考", "コメント", "メッセージ");
+      const idxTimestamp = findCol("タイムスタンプ", "送信", "受付日時");
+
+      if (idxName < 0 || idxDate < 0) {
+        setImportResult({ ok: 0, errors: ["「お名前」または「日付」の列が見つかりません。CSVの1行目（見出し）を確認してください。"] });
+        setImporting(false);
+        return;
+      }
+
+      let okCount = 0;
+      const errors = [];
+      for (let r = 1; r < lines.length; r++) {
+        const cells = parseCSVLine(lines[r]);
+        const customerName = (cells[idxName] || "").trim();
+        const date = normalizeDate(cells[idxDate] || "");
+        if (!customerName || !date) {
+          errors.push(`${r+1}行目：名前または日付がありません（スキップ）`);
+          continue;
+        }
+        const peopleRaw = idxPeople >= 0 ? (cells[idxPeople] || "").trim() : "1";
+        const peopleNum = parseInt(peopleRaw.replace(/[^\d]/g, ""), 10);
+        const reservationData = {
+          eventName: idxEvent >= 0 ? (cells[idxEvent] || "").trim() : "",
+          date,
+          customerName,
+          people: peopleNum > 0 ? peopleNum : 1,
+          phone: idxPhone >= 0 ? normalizePhone(cells[idxPhone] || "") : "",
+          email: idxEmail >= 0 ? (cells[idxEmail] || "").trim() : "",
+          note: idxNote >= 0 ? (cells[idxNote] || "").trim() : "",
+          source: "form",
+          sourceDetail: "Googleフォーム（CSVインポート）",
+          staff: "",
+          arrived: false,
+          arrivedAt: "",
+          seatNumber: "",
+          createdAt: Date.now() + r, // 重複しないように +r
+          savedAt: new Date().toLocaleString("ja-JP"),
+          importedAt: new Date().toLocaleString("ja-JP"),
+        };
+        // タイムスタンプ列があれば createdAt に反映
+        if (idxTimestamp >= 0 && cells[idxTimestamp]) {
+          const ts = new Date(cells[idxTimestamp]);
+          if (!isNaN(ts.getTime())) reservationData.createdAt = ts.getTime();
+        }
+        try {
+          const id = `res_imp_${Date.now().toString(36)}_${r}`;
+          await setDoc(doc(db, "reservations", id), reservationData);
+          okCount++;
+        } catch (e) {
+          errors.push(`${r+1}行目：保存失敗（${e.message || e}）`);
+        }
+      }
+      setImportResult({ ok: okCount, errors });
+    } catch (e) {
+      console.error("CSVインポートエラー:", e);
+      setImportResult({ ok: 0, errors: [`読み込み失敗：${e.message || e}`] });
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const setField = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -535,6 +684,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
           {onGoSeatLayout && (
             <button style={{...S.btn("sm"),padding:".4rem .8rem"}} onClick={onGoSeatLayout}>🪑 席レイアウト</button>
           )}
+          <button style={{...S.btn("sm"),padding:".4rem .8rem"}} onClick={()=>setShowImport(true)}>📥 CSVインポート</button>
           <button style={{...S.btn("sm"),padding:".4rem .8rem"}} onClick={()=>setShowTrash(true)}>🗑 ゴミ箱{trashReservations.length>0?` (${trashReservations.length})`:""}</button>
           <button style={S.btn("gold")} onClick={startNew}>＋ 電話予約を追加</button>
         </div>
@@ -777,6 +927,80 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
           }}>コピー</button>
         </div>
       </div>
+
+      {/* CSVインポートモーダル */}
+      {showImport && (
+        <div style={{position:"fixed",top:0,left:0,width:"100%",height:"100%",background:"rgba(0,0,0,0.85)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}} onClick={()=>!importing && setShowImport(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.27)",borderRadius:8,padding:"1.5rem",maxWidth:560,width:"100%",maxHeight:"85vh",overflowY:"auto"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1rem"}}>
+              <div style={{fontFamily:"Georgia,serif",fontSize:"1rem",color:"#c9a84c",letterSpacing:".15em"}}>📥 CSVインポート</div>
+              <button style={S.btn("sm")} onClick={()=>!importing && setShowImport(false)} disabled={importing}>閉じる</button>
+            </div>
+
+            <div style={{fontSize:".78rem",color:"rgba(240,232,208,0.75)",lineHeight:1.7,marginBottom:"1rem"}}>
+              Googleフォームの回答CSVを取り込みます。<br/>
+              対応列：<span style={{color:"rgba(201,168,76,0.85)"}}>タイムスタンプ・イベント・日付・お名前・人数・電話番号・メールアドレス・備考</span>
+            </div>
+
+            <div style={{padding:".75rem .9rem",background:"rgba(244,162,97,0.1)",border:"1px solid rgba(244,162,97,0.3)",borderRadius:5,fontSize:".72rem",color:"rgba(244,162,97,0.9)",marginBottom:"1rem",lineHeight:1.6}}>
+              ⚠️ 取り込みは <b>1件ずつそのまま追加</b> されます。CSVに重複がある場合は重複したまま登録されますのでご注意ください。<br/>
+              間違って取り込んだ場合は、ゴミ箱から削除できます。
+            </div>
+
+            {!importing && !importResult && (
+              <label style={{display:"block",padding:"1.25rem",border:"2px dashed rgba(201,168,76,0.4)",borderRadius:6,textAlign:"center",cursor:"pointer",background:"#080808"}}>
+                <div style={{fontSize:"1rem",color:"#c9a84c",marginBottom:".5rem"}}>📂 CSVファイルを選択</div>
+                <div style={{fontSize:".7rem",color:"rgba(240,232,208,0.5)"}}>クリックしてファイルを選んでください</div>
+                <input
+                  type="file"
+                  accept=".csv,text/csv"
+                  style={{display:"none"}}
+                  onChange={(e)=>{
+                    const f = e.target.files && e.target.files[0];
+                    if (f) handleImportCSV(f);
+                  }}
+                />
+              </label>
+            )}
+
+            {importing && (
+              <div style={{textAlign:"center",padding:"2rem",color:"#c9a84c",fontSize:".9rem"}}>
+                ⏳ 取り込み中...しばらくお待ちください
+              </div>
+            )}
+
+            {importResult && (
+              <div>
+                <div style={{padding:"1rem",background:importResult.ok>0?"rgba(126,200,127,0.12)":"rgba(226,75,74,0.12)",border:`1px solid ${importResult.ok>0?"rgba(126,200,127,0.4)":"rgba(226,75,74,0.4)"}`,borderRadius:5,marginBottom:"1rem"}}>
+                  <div style={{fontSize:".95rem",color:importResult.ok>0?"#7ec87e":"#ff8a89",fontWeight:600,marginBottom:".25rem"}}>
+                    {importResult.ok > 0 ? `✅ ${importResult.ok}件 取り込み完了` : "❌ 取り込みに失敗しました"}
+                  </div>
+                  {importResult.errors.length > 0 && (
+                    <div style={{fontSize:".72rem",color:"rgba(240,232,208,0.7)",marginTop:".5rem",lineHeight:1.6}}>
+                      <div style={{color:"rgba(244,162,97,0.85)",marginBottom:".25rem"}}>⚠️ {importResult.errors.length}件のスキップ・エラー：</div>
+                      <div style={{maxHeight:160,overflowY:"auto",background:"#080808",padding:".5rem .75rem",borderRadius:3,fontSize:".68rem"}}>
+                        {importResult.errors.map((err, i) => (
+                          <div key={i}>・{err}</div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div style={{display:"flex",gap:".5rem",justifyContent:"flex-end"}}>
+                  <button
+                    style={S.btn("ghost")}
+                    onClick={()=>{setImportResult(null);}}
+                  >もう一度インポート</button>
+                  <button
+                    style={S.btn("gold")}
+                    onClick={()=>{setShowImport(false);setImportResult(null);}}
+                  >閉じる</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ゴミ箱モーダル */}
       {showTrash && (
