@@ -122,6 +122,21 @@ function buildSettlementMemo(settlement, artist) {
   return lines.join("\n");
 }
 
+// ===== 過去履歴のパスワード保護 =====
+// 注意：このパスワードはコード内に書かれており、技術的には突破可能です。
+// 一般スタッフが誤って過去履歴を見ないようにするための「軽い目隠し」として運用してください。
+const ARTIST_HISTORY_PASSWORD = "honeybee2002";
+const HISTORY_AUTH_KEY = "hb_artist_history_authed";
+// 「過去」の判定基準：今日から30日より前のイベントは履歴扱い
+const HISTORY_DAYS_AGO = 30;
+
+function isHistoryUnlockedInSession() {
+  try { return sessionStorage.getItem(HISTORY_AUTH_KEY) === "1"; } catch { return false; }
+}
+function unlockHistoryInSession() {
+  try { sessionStorage.setItem(HISTORY_AUTH_KEY, "1"); } catch {}
+}
+
 export default function SettlementModule({ events = [], navigateBack }) {
   const [settlements, setSettlements] = useState([]);
   const [allSettlements, setAllSettlements] = useState([]);
@@ -131,6 +146,14 @@ export default function SettlementModule({ events = [], navigateBack }) {
   const [filter, setFilter] = useState("all"); // all | unpaid | paid
   const [copied, setCopied] = useState("");
   const [showTrash, setShowTrash] = useState(false);
+  // 過去履歴ビュー：current（直近・今後）/ history（過去）
+  const [period, setPeriod] = useState("current");
+  // パスワードモーダル
+  const [showPwdModal, setShowPwdModal] = useState(false);
+  const [pwdInput, setPwdInput] = useState("");
+  const [pwdError, setPwdError] = useState("");
+  // 既にこのブラウザセッションで認証済みか
+  const [historyUnlocked, setHistoryUnlocked] = useState(() => isHistoryUnlockedInSession());
 
   useEffect(() => {
     const TRASH_TTL = 30 * 24 * 60 * 60 * 1000;
@@ -259,16 +282,58 @@ export default function SettlementModule({ events = [], navigateBack }) {
     setTimeout(() => setCopied(""), 1600);
   };
 
+  // 履歴判定の基準日（今日からHISTORY_DAYS_AGO日前）
+  const historyCutoffDate = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - HISTORY_DAYS_AGO);
+    const yy = d.getFullYear();
+    const mm = String(d.getMonth()+1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yy}-${mm}-${dd}`;
+  })();
+
   // 一覧フィルタリング
   const filtered = settlements.filter(s => {
+    // 期間フィルタ：current は基準日より新しい、history は基準日以前
+    const eventDate = s.eventDate || "";
+    if (period === "current") {
+      if (eventDate && eventDate < historyCutoffDate) return false;
+    } else { // history
+      if (!eventDate || eventDate >= historyCutoffDate) return false;
+    }
     if (filter === "all") return true;
     const allPaid = (s.artists || []).every(a => a.paid);
-    const somePaid = (s.artists || []).some(a => a.paid);
     if (filter === "unpaid") return !allPaid;
     if (filter === "paid") return allPaid && (s.artists || []).length > 0;
     return true;
   });
   const sorted = [...filtered].sort((a, b) => (b.eventDate || "").localeCompare(a.eventDate || ""));
+
+  // 過去履歴タブを押した時の処理
+  const requestShowHistory = () => {
+    if (historyUnlocked) {
+      setPeriod("history");
+    } else {
+      setPwdInput("");
+      setPwdError("");
+      setShowPwdModal(true);
+    }
+  };
+
+  // パスワード送信
+  const submitPassword = () => {
+    if (pwdInput === ARTIST_HISTORY_PASSWORD) {
+      unlockHistoryInSession();
+      setHistoryUnlocked(true);
+      setShowPwdModal(false);
+      setPwdInput("");
+      setPwdError("");
+      setPeriod("history");
+    } else {
+      setPwdError("パスワードが違います");
+      setPwdInput("");
+    }
+  };
 
   // ===== 編集画面 =====
   if (view === "edit") {
@@ -450,6 +515,25 @@ export default function SettlementModule({ events = [], navigateBack }) {
         </div>
       </div>
 
+      {/* 期間切替（直近・今後 / 過去の履歴） */}
+      <div style={{display:"flex",gap:".4rem",marginBottom:".75rem",alignItems:"center",flexWrap:"wrap"}}>
+        <button
+          onClick={()=>setPeriod("current")}
+          style={{padding:".45rem 1rem",borderRadius:4,border:"1px solid "+(period==="current"?"#c9a84c":"rgba(201,168,76,0.25)"),background:period==="current"?"#c9a84c":"transparent",color:period==="current"?"#0a0a0a":"rgba(201,168,76,0.7)",fontSize:".75rem",cursor:"pointer",fontFamily:"inherit",letterSpacing:".05em",fontWeight:600}}
+        >📅 直近・今後</button>
+        <button
+          onClick={requestShowHistory}
+          style={{padding:".45rem 1rem",borderRadius:4,border:"1px solid "+(period==="history"?"#c9a84c":"rgba(201,168,76,0.25)"),background:period==="history"?"#c9a84c":"transparent",color:period==="history"?"#0a0a0a":"rgba(201,168,76,0.7)",fontSize:".75rem",cursor:"pointer",fontFamily:"inherit",letterSpacing:".05em",fontWeight:600}}
+        >
+          {historyUnlocked ? "📂" : "🔒"} 過去の精算履歴
+        </button>
+        {period === "history" && (
+          <span style={{fontSize:".65rem",color:"rgba(244,162,97,0.85)",marginLeft:".5rem"}}>
+            ※30日以上前のイベントの精算を表示中
+          </span>
+        )}
+      </div>
+
       {/* フィルター */}
       <div style={{display:"flex",gap:".4rem",marginBottom:"1rem"}}>
         {[{k:"all",l:"すべて"},{k:"unpaid",l:"未精算あり"},{k:"paid",l:"精算済"}].map(f=>(
@@ -490,6 +574,37 @@ export default function SettlementModule({ events = [], navigateBack }) {
           </div>
         );
       })}
+
+      {/* パスワードモーダル（過去履歴を見るとき） */}
+      {showPwdModal && (
+        <div style={{position:"fixed",top:0,left:0,width:"100%",height:"100%",background:"rgba(0,0,0,0.88)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}} onClick={()=>setShowPwdModal(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.35)",borderRadius:8,padding:"1.75rem",maxWidth:420,width:"100%"}}>
+            <div style={{fontFamily:"Georgia,serif",fontSize:"1rem",color:"#c9a84c",letterSpacing:".15em",marginBottom:".75rem"}}>
+              🔒 過去の精算履歴
+            </div>
+            <div style={{fontSize:".75rem",color:"rgba(240,232,208,0.7)",lineHeight:1.6,marginBottom:"1.25rem"}}>
+              過去の精算履歴を表示するにはパスワードが必要です。<br/>
+              <span style={{fontSize:".68rem",color:"rgba(201,168,76,0.6)"}}>※一度認証すると、ブラウザを閉じるまで再入力は不要です</span>
+            </div>
+            <input
+              type="password"
+              autoFocus
+              value={pwdInput}
+              onChange={e=>{setPwdInput(e.target.value);setPwdError("");}}
+              onKeyDown={e=>{if(e.key==="Enter")submitPassword();}}
+              placeholder="パスワード"
+              style={{...S.inp,marginBottom:".5rem",fontSize:"1rem",padding:".7rem .9rem"}}
+            />
+            {pwdError && (
+              <div style={{fontSize:".72rem",color:"#ff8a89",marginBottom:".75rem"}}>{pwdError}</div>
+            )}
+            <div style={{display:"flex",gap:".5rem",justifyContent:"flex-end",marginTop:".75rem"}}>
+              <button style={S.btn("ghost")} onClick={()=>{setShowPwdModal(false);setPwdInput("");setPwdError("");}}>キャンセル</button>
+              <button style={S.btn("gold")} onClick={submitPassword}>確認</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ゴミ箱モーダル */}
       {showTrash && (
