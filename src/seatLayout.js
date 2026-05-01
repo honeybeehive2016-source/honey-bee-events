@@ -33,12 +33,12 @@ const CANVAS_HEIGHT = 600;
 // 席のデフォルトサイズ
 const DEFAULT_SEAT_SIZE = 50;
 
-// 座席カラー（割当状態）
+// 座席カラー（割当状態）— 黒背景で見やすいよう、濃い不透明色
 function getSeatColor(state) {
   switch(state) {
-    case "arrived": return { bg: "rgba(126,200,227,0.4)", border: "#7ec8e3", text: "#0a0a0a" };  // 青
-    case "reserved": return { bg: "rgba(244,162,97,0.4)", border: "#f4a261", text: "#0a0a0a" };  // 黄
-    case "blocked": return { bg: "rgba(102,102,102,0.3)", border: "#666", text: "#888" };  // グレー
+    case "arrived": return { bg: "#7ec8e3", border: "#3a8db0", text: "#0a0a0a" };  // 青（来店済）
+    case "reserved": return { bg: "#f4a261", border: "#c47e3a", text: "#1a0a00" };  // オレンジ（予約あり）
+    case "blocked": return { bg: "#3a3a3a", border: "#666", text: "#aaa" };  // グレー（使用不可）
     default: return { bg: "rgba(126,200,127,0.15)", border: "#7ec87e", text: "#7ec87e" };  // 緑（空席）
   }
 }
@@ -55,6 +55,19 @@ function getSeatStateForDate(seatNumber, reservations, dateKey) {
 }
 
 // 「通常」を含むレイアウトを基本レイアウトとして判定
+// ===== レイアウト並び順 =====
+// sortOrder が定義されていればそれを優先、なければ createdAt（古い順）でソート
+export function sortLayouts(list) {
+  return [...list].sort((a, b) => {
+    const ao = a.sortOrder ?? null;
+    const bo = b.sortOrder ?? null;
+    if (ao !== null && bo !== null) return ao - bo;
+    if (ao !== null) return -1;
+    if (bo !== null) return 1;
+    return (a.createdAt || 0) - (b.createdAt || 0);
+  });
+}
+
 export function isDefaultLayout(layout) {
   if (!layout || !layout.name) return false;
   return layout.name.includes("通常");
@@ -91,10 +104,10 @@ export default function SeatLayoutModule({ navigateBack, reservations = [], onBa
     const unsub = onSnapshot(collection(db, "seatLayouts"), (snap) => {
       const list = [];
       snap.forEach(d => list.push({ ...d.data(), _id: d.id }));
-      list.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
-      setLayouts(list);
-      if (list.length > 0 && !selectedLayoutId) {
-        setSelectedLayoutId(list[0]._id);
+      const sorted = sortLayouts(list);
+      setLayouts(sorted);
+      if (sorted.length > 0 && !selectedLayoutId) {
+        setSelectedLayoutId(sorted[0]._id);
       }
     });
     return () => unsub();
@@ -143,6 +156,26 @@ export default function SeatLayoutModule({ navigateBack, reservations = [], onBa
     if (!window.confirm(`レイアウト「${currentLayout.name}」を削除しますか？`)) return;
     await deleteDoc(doc(db, "seatLayouts", currentLayout._id));
     setSelectedLayoutId("");
+  };
+
+  // レイアウトの並び順を変更（direction: -1=上へ, 1=下へ）
+  const moveLayout = async (id, direction) => {
+    const idx = layouts.findIndex(l => l._id === id);
+    if (idx < 0) return;
+    const target = idx + direction;
+    if (target < 0 || target >= layouts.length) return;
+    // 入れ替え
+    const reordered = [...layouts];
+    [reordered[idx], reordered[target]] = [reordered[target], reordered[idx]];
+    // 新しい sortOrder を全件に書き込む
+    try {
+      await Promise.all(reordered.map((l, i) =>
+        setDoc(doc(db, "seatLayouts", l._id), { sortOrder: i }, { merge: true })
+      ));
+    } catch (e) {
+      console.error("並び順保存失敗:", e);
+      alert("並び順の保存に失敗しました");
+    }
   };
 
   // 席追加（前回の席のサイズ・定員を引き継ぐ）
@@ -318,6 +351,18 @@ export default function SeatLayoutModule({ navigateBack, reservations = [], onBa
               <>
                 <button style={S.btn("ghost")} onClick={startEditLayout}>✏️ 編集</button>
                 <button style={S.btn("danger")} onClick={deleteLayout}>🗑 削除</button>
+                <button
+                  style={{...S.btn("ghost"),padding:".35rem .7rem"}}
+                  title="並び順で前へ"
+                  onClick={()=>moveLayout(currentLayout._id, -1)}
+                  disabled={layouts.findIndex(l=>l._id===currentLayout._id) === 0}
+                >⬆ 並び順</button>
+                <button
+                  style={{...S.btn("ghost"),padding:".35rem .7rem"}}
+                  title="並び順で次へ"
+                  onClick={()=>moveLayout(currentLayout._id, 1)}
+                  disabled={layouts.findIndex(l=>l._id===currentLayout._id) === layouts.length - 1}
+                >⬇ 並び順</button>
               </>
             )}
           </div>
@@ -509,9 +554,10 @@ export default function SeatLayoutModule({ navigateBack, reservations = [], onBa
   );
 }
 
-// ===== 日別レイアウト表示（予約管理画面に埋め込み用、読み取り専用） =====
-export function DayLayoutView({ reservations, dateKey, layouts, selectedLayoutId, onLayoutChange }) {
+// ===== 日別レイアウト表示（予約管理画面に埋め込み用） =====
+export function DayLayoutView({ reservations, dateKey, layouts, selectedLayoutId, onLayoutChange, blockedSeats = [], onToggleBlocked }) {
   const [internalSelectedId, setInternalSelectedId] = useState("");
+  const [blockMode, setBlockMode] = useState(false); // 使用不可席を編集するモード
   const layoutId = selectedLayoutId || internalSelectedId;
   const layout = layouts.find(l => l._id === layoutId) || getDefaultLayout(layouts);
 
@@ -537,7 +583,7 @@ export function DayLayoutView({ reservations, dateKey, layouts, selectedLayoutId
 
   return (
     <div>
-      {/* レイアウト切替 */}
+      {/* レイアウト切替＋編集モード切替 */}
       <div style={{display:"flex",gap:".5rem",alignItems:"center",flexWrap:"wrap",marginBottom:".5rem"}}>
         <span style={{fontSize:".68rem",color:"rgba(201,168,76,0.6)",letterSpacing:".15em"}}>レイアウト：</span>
         <select
@@ -552,9 +598,33 @@ export function DayLayoutView({ reservations, dateKey, layouts, selectedLayoutId
             <option key={l._id} value={l._id}>{l.name}{isDefaultLayout(l)?" ⭐":""}</option>
           ))}
         </select>
+        {onToggleBlocked && (
+          <button
+            type="button"
+            onClick={()=>setBlockMode(b=>!b)}
+            style={{
+              padding:".4rem .8rem",
+              borderRadius:4,
+              border:"1px solid "+(blockMode ? "#c47e3a" : "rgba(201,168,76,0.3)"),
+              background: blockMode ? "rgba(196,126,58,0.2)" : "transparent",
+              color: blockMode ? "#f4a261" : "rgba(201,168,76,0.8)",
+              fontSize:".7rem",
+              cursor:"pointer",
+              fontFamily:"inherit",
+              letterSpacing:".05em",
+            }}
+          >
+            {blockMode ? "✓ 編集中（タップで切替）" : "🚫 使用不可席を編集"}
+          </button>
+        )}
+        {blockMode && (
+          <span style={{fontSize:".62rem",color:"rgba(244,162,97,0.85)"}}>
+            ※予約のない席をタップすると使用不可↔利用可を切り替えます
+          </span>
+        )}
       </div>
 
-      {/* キャンバス（読み取り専用） */}
+      {/* キャンバス */}
       <div style={{position:"relative",overflowX:"auto",background:"#0a0a0a",border:"1px solid rgba(201,168,76,0.15)",borderRadius:6,padding:"1rem"}} className="seat-layout-canvas">
         <div style={{
           position:"relative",
@@ -566,13 +636,24 @@ export function DayLayoutView({ reservations, dateKey, layouts, selectedLayoutId
         }}>
           {(layout.seats||[]).map(seat => {
             const stateInfo = seatStates[seat.number] || { state: "empty", reservation: null };
-            const colors = getSeatColor(stateInfo.state);
+            const isBlocked = blockedSeats.includes(seat.number);
+            // 表示用の状態：予約 > 使用不可 > 空席
+            const displayState = stateInfo.reservation ? stateInfo.state : (isBlocked ? "blocked" : "empty");
+            const colors = getSeatColor(displayState);
             return (
               <div
                 key={seat.id}
                 onClick={()=>{
+                  // 編集モード中：予約のない席だけタップで切替
+                  if (blockMode && !stateInfo.reservation && onToggleBlocked) {
+                    onToggleBlocked(seat.number);
+                    return;
+                  }
+                  // 通常モード：予約情報を表示
                   if (stateInfo.reservation) {
-                    alert(`席 ${seat.number}\n${stateInfo.reservation.customerName} 様\n${stateInfo.reservation.people}名\n${stateInfo.state==="arrived"?"✓ 来店済":"未来店"}${stateInfo.reservation.note?"\n備考: "+stateInfo.reservation.note:""}`);
+                    alert(`${stateInfo.reservation.customerName} 様\n${stateInfo.reservation.people}名\n${stateInfo.state==="arrived"?"✓ 来店済":"未来店"}${stateInfo.reservation.note?"\n備考: "+stateInfo.reservation.note:""}`);
+                  } else if (isBlocked) {
+                    alert(`席 ${seat.number}：この日は使用不可に設定されています`);
                   }
                 }}
                 style={{
@@ -588,14 +669,19 @@ export function DayLayoutView({ reservations, dateKey, layouts, selectedLayoutId
                   flexDirection: "column",
                   alignItems: "center",
                   justifyContent: "center",
-                  cursor: stateInfo.reservation ? "pointer" : "default",
+                  cursor: (blockMode && !stateInfo.reservation) || stateInfo.reservation ? "pointer" : "default",
                   fontSize: ".75rem",
                   fontWeight: 600,
                   color: colors.text,
+                  textShadow: stateInfo.reservation ? "0 1px 2px rgba(255,255,255,0.4)" : "none",
+                  opacity: blockMode && stateInfo.reservation ? 0.55 : 1,
                 }}
               >
-                {!stateInfo.reservation && (
+                {!stateInfo.reservation && !isBlocked && (
                   <div style={{fontSize:".82rem",lineHeight:1}}>{seat.number}</div>
+                )}
+                {!stateInfo.reservation && isBlocked && (
+                  <div style={{fontSize:".62rem",lineHeight:1.1,fontWeight:700}}>使用不可</div>
                 )}
                 {stateInfo.reservation && (
                   <>
@@ -623,13 +709,14 @@ export function DayLayoutView({ reservations, dateKey, layouts, selectedLayoutId
         <span style={{display:"flex",alignItems:"center",gap:".25rem"}}><span style={{display:"inline-block",width:12,height:12,background:getSeatColor("empty").bg,border:`1px solid ${getSeatColor("empty").border}`,borderRadius:2}}/>空席</span>
         <span style={{display:"flex",alignItems:"center",gap:".25rem"}}><span style={{display:"inline-block",width:12,height:12,background:getSeatColor("reserved").bg,border:`1px solid ${getSeatColor("reserved").border}`,borderRadius:2}}/>予約</span>
         <span style={{display:"flex",alignItems:"center",gap:".25rem"}}><span style={{display:"inline-block",width:12,height:12,background:getSeatColor("arrived").bg,border:`1px solid ${getSeatColor("arrived").border}`,borderRadius:2}}/>来店</span>
+        <span style={{display:"flex",alignItems:"center",gap:".25rem"}}><span style={{display:"inline-block",width:12,height:12,background:getSeatColor("blocked").bg,border:`1px solid ${getSeatColor("blocked").border}`,borderRadius:2}}/>使用不可</span>
       </div>
     </div>
   );
 }
 
 // ===== 席選択ポップアップ（予約画面から使う） =====
-export function SeatPicker({ layoutId, reservations, currentDate, currentReservationId, currentSeats, onSelect, onClose }) {
+export function SeatPicker({ layoutId, reservations, currentDate, currentReservationId, currentSeats, blockedSeats = [], onSelect, onClose }) {
   const [layouts, setLayouts] = useState([]);
   const [selectedLayoutId, setSelectedLayoutId] = useState(layoutId || "");
   // 選択中の席（複数選択可）
@@ -640,10 +727,10 @@ export function SeatPicker({ layoutId, reservations, currentDate, currentReserva
     const unsub = onSnapshot(collection(db, "seatLayouts"), (snap) => {
       const list = [];
       snap.forEach(d => list.push({ ...d.data(), _id: d.id }));
-      list.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
-      setLayouts(list);
-      if (list.length > 0 && !selectedLayoutId) {
-        setSelectedLayoutId(list[0]._id);
+      const sorted = sortLayouts(list);
+      setLayouts(sorted);
+      if (sorted.length > 0 && !selectedLayoutId) {
+        setSelectedLayoutId(sorted[0]._id);
       }
     });
     return () => unsub();
@@ -737,11 +824,14 @@ export function SeatPicker({ layoutId, reservations, currentDate, currentReserva
                       r._id !== currentReservationId
                     );
                     const isSelected = selected.includes(seat.number);
+                    const isBlocked = blockedSeats.includes(seat.number);
                     let stateInfo;
                     if (isSelected) {
                       stateInfo = { state: "selected", reservation: null };
                     } else if (occupiedByOther) {
                       stateInfo = { state: occupiedByOther.arrived ? "arrived" : "reserved", reservation: occupiedByOther };
+                    } else if (isBlocked) {
+                      stateInfo = { state: "blocked", reservation: null };
                     } else {
                       stateInfo = { state: "empty", reservation: null };
                     }
@@ -751,7 +841,12 @@ export function SeatPicker({ layoutId, reservations, currentDate, currentReserva
                     return (
                       <div
                         key={seat.id}
-                        onClick={() => toggleSeat(seat.number, occupiedByOther)}
+                        onClick={() => {
+                          if (isBlocked && !isSelected) {
+                            if (!window.confirm(`席 ${seat.number} はこの日は使用不可に設定されています。\n強制的に選択しますか？`)) return;
+                          }
+                          toggleSeat(seat.number, occupiedByOther);
+                        }}
                         style={{
                           position:"absolute",
                           left: seat.x,

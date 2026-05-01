@@ -3,7 +3,7 @@ import { db } from "./firebase";
 import { collection, doc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
 import { getOrderedStaffNames } from "./shift";
 import { sendReservationEmails } from "./email";
-import { SeatPicker, DayLayoutView, getDefaultLayout } from "./seatLayout";
+import { SeatPicker, DayLayoutView, getDefaultLayout, sortLayouts } from "./seatLayout";
 
 const S = {
   card: { background:"#111", border:"1px solid rgba(201,168,76,0.1)", borderRadius:6, padding:"1rem 1.25rem", marginBottom:".75rem" },
@@ -75,6 +75,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   const [allReservations, setAllReservations] = useState([]);
   const [layouts, setLayouts] = useState([]);
   const [dayLayoutMap, setDayLayoutMap] = useState({}); // dateKey -> layoutId
+  const [dayBlockedMap, setDayBlockedMap] = useState({}); // dateKey -> [seatNumber, ...]
   // カレンダーで選択中の日付（詳細表示用）— ローカルタイムゾーンで今日を取得
   const todayLocal = (() => {
     const d = new Date();
@@ -108,16 +109,18 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
     const unsubL = onSnapshot(collection(db, "seatLayouts"), (snap) => {
       const list = [];
       snap.forEach(d => list.push({ ...d.data(), _id: d.id }));
-      list.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
-      setLayouts(list);
+      setLayouts(sortLayouts(list));
     });
     const unsubD = onSnapshot(collection(db, "daily"), (snap) => {
       const map = {};
+      const blockedMap = {};
       snap.forEach(d => {
         const data = d.data();
         if (data.layoutId) map[d.id] = data.layoutId;
+        if (Array.isArray(data.blockedSeats)) blockedMap[d.id] = data.blockedSeats;
       });
       setDayLayoutMap(map);
+      setDayBlockedMap(blockedMap);
     });
     return () => { unsub(); unsubL(); unsubD(); };
   }, []);
@@ -132,6 +135,23 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
       }, { merge: true });
     } catch (e) {
       console.error("レイアウト保存失敗:", e);
+    }
+  };
+
+  // 一日の使用不可席を保存（タップで切り替え）
+  const toggleDayBlockedSeat = async (dateKey, seatNumber) => {
+    const current = dayBlockedMap[dateKey] || [];
+    const next = current.includes(seatNumber)
+      ? current.filter(s => s !== seatNumber)
+      : [...current, seatNumber];
+    setDayBlockedMap(m => ({ ...m, [dateKey]: next }));
+    try {
+      await setDoc(doc(db, "daily", dateKey), {
+        blockedSeats: next,
+        savedAt: new Date().toLocaleString("ja-JP"),
+      }, { merge: true });
+    } catch (e) {
+      console.error("使用不可席保存失敗:", e);
     }
   };
 
@@ -373,6 +393,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
             currentDate={form.date}
             currentReservationId={editingId}
             currentSeats={form.seatNumber}
+            blockedSeats={dayBlockedMap[form.date] || []}
             onSelect={(seatNumber)=>setField("seatNumber", seatNumber)}
             onClose={()=>setShowSeatPicker(false)}
           />
@@ -435,11 +456,14 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
     if (!win) { alert("ポップアップがブロックされました"); return; }
     const seatHtml = (layout.seats||[]).map(s => {
       const r = seatStates[s.number];
-      const fillColor = r ? (r.arrived ? "#dbe9f4" : "#fde9d4") : "#ffffff";
-      const borderColor = r ? (r.arrived ? "#5a8eae" : "#c47e3a") : "#888";
-      const inner = r
-        ? `<div style="font-size:14px;font-weight:700;line-height:1.15">${r.customerName||""}</div><div style="font-size:11px;margin-top:2px">${r.people||""}名</div>`
-        : `<div style="font-size:13px">${s.number}</div>`;
+      const isBlocked = (dayBlockedMap[calSelectedDate] || []).includes(s.number);
+      const fillColor = isBlocked ? "#dadada" : (r ? (r.arrived ? "#dbe9f4" : "#fde9d4") : "#ffffff");
+      const borderColor = isBlocked ? "#888" : (r ? (r.arrived ? "#5a8eae" : "#c47e3a") : "#888");
+      const inner = isBlocked
+        ? `<div style="font-size:11px;color:#666">使用不可</div>`
+        : (r
+            ? `<div style="font-size:14px;font-weight:700;line-height:1.15">${r.customerName||""}</div><div style="font-size:11px;margin-top:2px">${r.people||""}名</div>`
+            : `<div style="font-size:13px">${s.number}</div>`);
       return `<div style="position:absolute;left:${s.x}px;top:${s.y}px;width:${s.width||50}px;height:${s.height||50}px;background:${fillColor};border:2px solid ${borderColor};border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#000;text-align:center;overflow:hidden">${inner}</div>`;
     }).join("");
     const bgImg = layout.bgImage ? `<img src="${layout.bgImage}" style="position:absolute;left:0;top:0;width:${CANVAS_WIDTH}px;height:${CANVAS_HEIGHT}px;object-fit:contain"/>` : "";
@@ -589,8 +613,13 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                     {fmtDate(calSelectedDate)}
                   </div>
                   {dayEvents.length > 0 && (
-                    <div style={{fontSize:".75rem",color:"rgba(240,232,208,0.7)",marginTop:".15rem"}}>
-                      🎵 {dayEvents.map(e=>e.name).join(" / ")}
+                    <div style={{fontSize:".75rem",color:"rgba(240,232,208,0.7)",marginTop:".15rem",display:"flex",alignItems:"center",gap:".4rem",flexWrap:"wrap"}}>
+                      <span>🎵 {dayEvents.map(e=>e.name).join(" / ")}</span>
+                      {dayEvents.some(e=>e.noBooking) && (
+                        <span style={{fontSize:".62rem",padding:".15rem .5rem",borderRadius:3,background:"rgba(226,75,74,0.18)",border:"1px solid rgba(226,75,74,0.4)",color:"#ff8a89",letterSpacing:".05em"}}>
+                          🚫 予約不可
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -612,6 +641,8 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                     layouts={layouts}
                     selectedLayoutId={dayLayoutId}
                     onLayoutChange={(id)=>setDayLayout(calSelectedDate, id)}
+                    blockedSeats={dayBlockedMap[calSelectedDate] || []}
+                    onToggleBlocked={(seatNumber)=>toggleDayBlockedSeat(calSelectedDate, seatNumber)}
                   />
                 </div>
               </details>
@@ -805,7 +836,7 @@ export function CustomerReservationForm({ events = [] }) {
     const dd = String(d.getDate()).padStart(2, "0");
     return `${yy}-${mm}-${dd}`;
   })();
-  const upcomingEvents = events.filter(e => e.date && e.date >= today && !/貸切|貸し切り/.test(e.name||""));
+  const upcomingEvents = events.filter(e => e.date && e.date >= today && !/貸切|貸し切り/.test(e.name||"") && !e.noBooking);
   const eventsByDate = {};
   upcomingEvents.forEach(e => {
     if (!eventsByDate[e.date]) eventsByDate[e.date] = [];
