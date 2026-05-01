@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { db } from "./firebase";
 import { collection, doc, setDoc, deleteDoc, onSnapshot, updateDoc } from "firebase/firestore";
 import { getShiftForDate, getRoleColor, getRoleLabel, isManager } from "./shift";
-import { sourceIcon } from "./reservation";
 
 // 業務チェックリストのテンプレート
 const CHECKLIST_TEMPLATE = {
@@ -600,38 +599,46 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
         ))
       )}
 
-      {/* 本日の予約（常に表示） */}
+      {/* 本日の予約（サマリのみ。詳細は予約管理画面で） */}
       {(() => {
         const todayReservations = reservations.filter(r => r.date === selectedDate);
-        const sorted = [...todayReservations].sort((a,b) => (a.createdAt||0) - (b.createdAt||0));
-        const totalPeople = sorted.reduce((s,r)=>s+Number(r.people||0),0);
-        const arrivedCount = sorted.filter(r=>r.arrived).length;
-        const isEmpty = sorted.length === 0;
+        const totalPeople = todayReservations.reduce((s,r)=>s+Number(r.people||0),0);
+        const arrivedCount = todayReservations.filter(r=>r.arrived).length;
+        const arrivedPeople = todayReservations.filter(r=>r.arrived).reduce((s,r)=>s+Number(r.people||0),0);
+        const noteCount = todayReservations.filter(r=>r.note && r.note.trim()).length;
+        const isEmpty = todayReservations.length === 0;
         return (
           <>
-            <div style={S.secTitle}>📞 本日の予約{isEmpty?"（0組）":`（${sorted.length}組 / 計${totalPeople}名 / 来店 ${arrivedCount}/${sorted.length}）`}</div>
-            <div style={{...S.card,padding:".75rem 1rem"}}>
+            <div style={S.secTitle}>📞 本日の予約</div>
+            <div style={{...S.card,padding:"1rem 1.1rem"}}>
               {isEmpty ? (
-                <div style={{textAlign:"center",padding:".5rem 0",fontSize:".82rem",color:"rgba(240,232,208,0.45)"}}>まだ予約はありません</div>
+                <div style={{textAlign:"center",padding:".25rem 0",fontSize:".82rem",color:"rgba(240,232,208,0.45)"}}>まだ予約はありません</div>
               ) : (
-                <div style={{display:"flex",flexDirection:"column",gap:".4rem"}}>
-                  {sorted.map((r,i) => (
-                    <div key={r._id||i} style={{display:"flex",alignItems:"center",gap:".55rem",flexWrap:"wrap",padding:".25rem 0",borderBottom:i<sorted.length-1?"1px dashed rgba(201,168,76,0.08)":"none"}}>
-                      <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:24,height:24,borderRadius:4,background:r.arrived?"rgba(126,200,127,0.2)":"rgba(244,162,97,0.13)",border:`1px solid ${r.arrived?"#7ec87e":"rgba(244,162,97,0.4)"}`,fontSize:".62rem",color:r.arrived?"#7ec87e":"#f4a261",flexShrink:0}}>
-                        {r.arrived?"✓":""}
-                      </span>
-                      <span style={{fontSize:".88rem",color:"#f0e8d0",minWidth:90}}>{r.customerName||"（無名）"} 様</span>
-                      <span style={{padding:".15rem .5rem",borderRadius:3,background:"rgba(201,168,76,0.13)",color:"#c9a84c",fontSize:".68rem",fontWeight:600}}>{r.people}名</span>
-                      <span style={{fontSize:".7rem",color:"rgba(240,232,208,0.6)"}}>{sourceIcon(r.source)}</span>
-                      {r.seatNumber && <span style={{padding:".1rem .4rem",background:"rgba(126,200,227,0.13)",borderRadius:2,fontSize:".62rem",color:"#7ec8e3"}}>🪑 {r.seatNumber}</span>}
-                      {r.note && <span style={{fontSize:".62rem",color:"#f4a261",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0,flex:1}}>📝 {r.note.length>25?r.note.slice(0,25)+"...":r.note}</span>}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:".5rem"}}>
+                  <div style={{padding:".6rem .75rem",background:"#0a0a0a",borderRadius:5,border:"1px solid rgba(201,168,76,0.15)",textAlign:"center"}}>
+                    <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.5)",letterSpacing:".1em",marginBottom:".2rem"}}>予約組数</div>
+                    <div style={{fontSize:"1.4rem",fontWeight:700,color:"#c9a84c",fontFamily:"Georgia,serif"}}>{todayReservations.length}<span style={{fontSize:".7rem",color:"rgba(201,168,76,0.6)",marginLeft:".2rem"}}>組</span></div>
+                  </div>
+                  <div style={{padding:".6rem .75rem",background:"#0a0a0a",borderRadius:5,border:"1px solid rgba(201,168,76,0.15)",textAlign:"center"}}>
+                    <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.5)",letterSpacing:".1em",marginBottom:".2rem"}}>総人数</div>
+                    <div style={{fontSize:"1.4rem",fontWeight:700,color:"#c9a84c",fontFamily:"Georgia,serif"}}>{totalPeople}<span style={{fontSize:".7rem",color:"rgba(201,168,76,0.6)",marginLeft:".2rem"}}>名</span></div>
+                  </div>
+                  <div style={{padding:".6rem .75rem",background:"#0a0a0a",borderRadius:5,border:"1px solid rgba(126,200,127,0.2)",textAlign:"center"}}>
+                    <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.5)",letterSpacing:".1em",marginBottom:".2rem"}}>来店済</div>
+                    <div style={{fontSize:"1.4rem",fontWeight:700,color:"#7ec87e",fontFamily:"Georgia,serif"}}>{arrivedCount}<span style={{fontSize:".7rem",color:"rgba(126,200,127,0.6)",marginLeft:".2rem"}}>/{todayReservations.length}組</span></div>
+                    <div style={{fontSize:".62rem",color:"rgba(126,200,127,0.55)",marginTop:".1rem"}}>{arrivedPeople}名 ご来店</div>
+                  </div>
+                  {noteCount > 0 && (
+                    <div style={{padding:".6rem .75rem",background:"#0a0a0a",borderRadius:5,border:"1px solid rgba(244,162,97,0.25)",textAlign:"center"}}>
+                      <div style={{fontSize:".62rem",color:"rgba(244,162,97,0.7)",letterSpacing:".1em",marginBottom:".2rem"}}>備考あり</div>
+                      <div style={{fontSize:"1.4rem",fontWeight:700,color:"#f4a261",fontFamily:"Georgia,serif"}}>{noteCount}<span style={{fontSize:".7rem",color:"rgba(244,162,97,0.6)",marginLeft:".2rem"}}>件</span></div>
                     </div>
-                  ))}
+                  )}
                 </div>
               )}
               {onGoReservations && (
-                <button type="button" style={{...S.btn("ghost"),width:"100%",marginTop:".75rem",fontSize:".68rem"}} onClick={()=>onGoReservations(selectedDate)}>
-                  📞 予約管理画面へ（受付チェック・編集{isEmpty?"・電話予約追加":""}）
+                <button type="button" style={{...S.btn("ghost"),width:"100%",marginTop:".75rem",fontSize:".72rem"}} onClick={()=>onGoReservations(selectedDate)}>
+                  📞 予約管理画面で詳細を確認・編集{isEmpty?"・電話予約追加":""}
                 </button>
               )}
             </div>

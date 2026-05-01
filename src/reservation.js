@@ -67,6 +67,8 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   const [reservations, setReservations] = useState([]);
   // メインビュー: list（一覧）/ calendar（カレンダー＆日付詳細）/ edit（編集）
   const [view, setView] = useState("calendar");
+  // 編集→保存後に戻るべきビュー（"calendar" or "list"）
+  const [returnView, setReturnView] = useState("calendar");
   const [form, setForm] = useState(emptyReservation);
   const [editingId, setEditingId] = useState(null);
   const [filter, setFilter] = useState("upcoming");
@@ -321,12 +323,16 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   const startNew = () => {
     setForm({ ...emptyReservation, source: "phone", date: dateFilter || calSelectedDate || todayLocal });
     setEditingId(null);
+    // 「電話予約を追加」ボタンは現在のビューから押されるので、それを覚える
+    setReturnView(view);
     setView("edit");
   };
 
   const startEdit = (r) => {
     setForm({ ...emptyReservation, ...r });
     setEditingId(r._id);
+    // どのビューから編集に入ったかを覚える
+    setReturnView(view);
     setView("edit");
   };
 
@@ -350,7 +356,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
       }
 
       alert("✓ 保存しました" + (!editingId && data.email && data.sendEmail ? "\n📧 確認メールを送信しました" : ""));
-      setView("list");
+      setView(returnView || "calendar");
     } catch (e) { alert("保存失敗：" + e.message); }
   };
 
@@ -424,7 +430,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
           <h2 style={{fontFamily:"Georgia,serif",fontSize:"1.2rem",color:"#c9a84c",letterSpacing:".15em",margin:0}}>
             📞 {editingId ? "予約編集" : "新規予約"}
           </h2>
-          <button style={S.btn("sm")} onClick={()=>setView("list")}>← 一覧</button>
+          <button style={S.btn("sm")} onClick={()=>setView(returnView || "calendar")}>← 戻る</button>
         </div>
 
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:".7rem"}} className="hb-form-grid">
@@ -530,9 +536,9 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
 
         <div style={{display:"flex",gap:".5rem",marginTop:"1.5rem",flexWrap:"wrap"}}>
           <button style={{...S.btn("gold"),flex:1,maxWidth:200}} onClick={handleSave}>💾 保存</button>
-          <button style={S.btn("ghost")} onClick={()=>setView("list")}>キャンセル</button>
+          <button style={S.btn("ghost")} onClick={()=>setView(returnView || "calendar")}>キャンセル</button>
           {editingId && (
-            <button style={{...S.btn("danger"),marginLeft:"auto"}} onClick={async()=>{await handleDelete(editingId);setView("list");}}>🗑 削除</button>
+            <button style={{...S.btn("danger"),marginLeft:"auto"}} onClick={async()=>{await handleDelete(editingId);setView(returnView || "calendar");}}>🗑 削除</button>
           )}
         </div>
 
@@ -617,22 +623,35 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
     }).join("");
     const bgImg = layout.bgImage ? `<img src="${layout.bgImage}" style="position:absolute;left:0;top:0;width:${CANVAS_WIDTH}px;height:${CANVAS_HEIGHT}px;object-fit:contain"/>` : "";
     win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>席レイアウト ${calSelectedDate}</title><style>
-      body{margin:0;padding:20px;font-family:'Hiragino Mincho ProN','游明朝',serif;background:#fff;color:#000}
-      h1{font-size:20px;margin:0 0 4px 0}
-      .meta{font-size:13px;color:#444;margin-bottom:14px}
-      .canvas{position:relative;width:${CANVAS_WIDTH}px;height:${CANVAS_HEIGHT}px;background:#f5f5f5;border:1px solid #888;margin:0 auto}
-      .legend{margin-top:12px;font-size:12px;color:#444}
-      .legend span{margin-right:14px}
-      .legend i{display:inline-block;width:14px;height:14px;border:1px solid #555;border-radius:2px;vertical-align:middle;margin-right:4px}
-      @media print{ body{padding:8px} .noprint{display:none} }
+      @page { size: A4 landscape; margin: 8mm; }
+      *{box-sizing:border-box}
+      html,body{margin:0;padding:0;font-family:'Hiragino Mincho ProN','游明朝',serif;background:#fff;color:#000}
+      body{padding:10px 14px}
+      h1{font-size:16px;margin:0 0 2px 0}
+      .meta{font-size:11px;color:#444;margin-bottom:6px}
+      .canvas-wrap{display:flex;justify-content:center;align-items:flex-start;width:100%;overflow:hidden}
+      .canvas{position:relative;width:${CANVAS_WIDTH}px;height:${CANVAS_HEIGHT}px;background:#fff;border:1px solid #888;flex:none;transform-origin:top center}
+      .legend{margin-top:6px;font-size:10px;color:#444;text-align:center}
+      .legend span{margin:0 10px}
+      .legend i{display:inline-block;width:12px;height:12px;border:1px solid #555;border-radius:2px;vertical-align:middle;margin-right:3px}
+      @media print {
+        body{padding:0}
+        .noprint{display:none}
+        /* A4横（約277×190mm印刷可能領域）に収まるよう、800×600キャンバスを縮小 */
+        .canvas{transform:scale(0.92)}
+      }
+      @media screen {
+        .canvas{transform:scale(0.85)}
+      }
     </style></head><body>
       <h1>席レイアウト：${dt.getFullYear()}年${dt.getMonth()+1}月${dt.getDate()}日（${dowJp}）</h1>
       <div class="meta">${eventLabel ? `イベント：${eventLabel} / `:""}レイアウト：${layout.name}</div>
-      <div class="canvas">${bgImg}${seatHtml}</div>
+      <div class="canvas-wrap"><div class="canvas">${bgImg}${seatHtml}</div></div>
       <div class="legend">
         <span><i style="background:#fff"></i>空席</span>
         <span><i style="background:#fde9d4"></i>予約あり</span>
         <span><i style="background:#dbe9f4"></i>来店済</span>
+        <span><i style="background:#dadada"></i>使用不可</span>
       </div>
       <div class="noprint" style="margin-top:16px;text-align:center"><button onclick="window.print()" style="padding:8px 24px">印刷</button></div>
     </body></html>`);
