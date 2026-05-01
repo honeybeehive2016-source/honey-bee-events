@@ -33,6 +33,25 @@ const CANVAS_HEIGHT = 600;
 // 席のデフォルトサイズ
 const DEFAULT_SEAT_SIZE = 50;
 
+// 席に表示する名前のサイズと折返し方を決める
+// seatWidth: 席の幅(px)、name: 表示する名前
+// 戻り値: { fontSize, lineHeight, allowWrap, transform }
+function getNameDisplayStyle(seatWidth, name) {
+  const w = seatWidth || DEFAULT_SEAT_SIZE;
+  const len = (name || "").length;
+  // 1文字あたりに使える幅（マージンを少し引く）
+  const usable = Math.max(20, w - 6);
+  // 文字幅は概ね fontSize×1（日本語は等幅前提）。
+  // 「len 文字を usable px に収める」なら fontSize ≦ usable / len
+  // 上限・下限を設定
+  let fontSize = Math.floor(usable / Math.max(len, 2));
+  // 短い名前は大きすぎないように、長い名前は小さすぎないように
+  fontSize = Math.max(8, Math.min(fontSize, 14));
+  // 4文字以上の名前で席が小さい場合は2行折返しを許可（姓だけ・全角スペース込みも考慮）
+  const allowWrap = len >= 5 && w <= 60;
+  return { fontSize, allowWrap };
+}
+
 // 座席カラー（割当状態）— 黒背景で見やすいよう、濃い不透明色
 function getSeatColor(state) {
   switch(state) {
@@ -683,23 +702,33 @@ export function DayLayoutView({ reservations, dateKey, layouts, selectedLayoutId
                 {!stateInfo.reservation && isBlocked && (
                   <div style={{fontSize:".62rem",lineHeight:1.1,fontWeight:700}}>使用不可</div>
                 )}
-                {stateInfo.reservation && (
-                  <>
-                    <div style={{
-                      fontSize:".82rem",
-                      fontWeight:700,
-                      lineHeight:1.15,
-                      overflow:"hidden",
-                      textOverflow:"ellipsis",
-                      whiteSpace:"nowrap",
-                      maxWidth:"95%",
-                      textAlign:"center",
-                    }}>
-                      {stateInfo.reservation.customerName}
-                    </div>
-                    <div style={{fontSize:".68rem",lineHeight:1.1,marginTop:"2px",opacity:0.9}}>{stateInfo.reservation.people}名</div>
-                  </>
-                )}
+                {stateInfo.reservation && (() => {
+                  const seatW = seat.width || DEFAULT_SEAT_SIZE;
+                  const seatH = seat.height || DEFAULT_SEAT_SIZE;
+                  const ns = getNameDisplayStyle(seatW, stateInfo.reservation.customerName);
+                  // 人数表示のサイズも席に応じて
+                  const peopleFontSize = Math.max(8, Math.min(11, Math.floor(seatW / 6)));
+                  return (
+                    <>
+                      <div style={{
+                        fontSize: ns.fontSize + "px",
+                        fontWeight: 700,
+                        lineHeight: 1.05,
+                        overflow: "hidden",
+                        textOverflow: ns.allowWrap ? "clip" : "ellipsis",
+                        whiteSpace: ns.allowWrap ? "normal" : "nowrap",
+                        wordBreak: "break-all",
+                        maxWidth: "98%",
+                        maxHeight: seatH * 0.65,
+                        textAlign: "center",
+                        padding: "0 1px",
+                      }}>
+                        {stateInfo.reservation.customerName}
+                      </div>
+                      <div style={{fontSize:peopleFontSize+"px",lineHeight:1.1,marginTop:"1px",opacity:0.9}}>{stateInfo.reservation.people}名</div>
+                    </>
+                  );
+                })()}
               </div>
             );
           })}

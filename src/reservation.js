@@ -614,12 +614,20 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
       const isBlocked = (dayBlockedMap[calSelectedDate] || []).includes(s.number);
       const fillColor = isBlocked ? "#dadada" : (r ? (r.arrived ? "#dbe9f4" : "#fde9d4") : "#ffffff");
       const borderColor = isBlocked ? "#888" : (r ? (r.arrived ? "#5a8eae" : "#c47e3a") : "#888");
+      const seatW = s.width || 50;
+      const seatH = s.height || 50;
+      // 名前の長さ・席幅から自動でフォントサイズを決定
+      const nameLen = (r?.customerName || "").length;
+      const usableW = Math.max(20, seatW - 4);
+      let nameFs = Math.max(8, Math.min(14, Math.floor(usableW / Math.max(nameLen, 2))));
+      const allowWrap = nameLen >= 5 && seatW <= 60;
+      const peopleFs = Math.max(8, Math.min(11, Math.floor(seatW / 5)));
       const inner = isBlocked
         ? `<div style="font-size:11px;color:#666">使用不可</div>`
         : (r
-            ? `<div style="font-size:14px;font-weight:700;line-height:1.15">${r.customerName||""}</div><div style="font-size:11px;margin-top:2px">${r.people||""}名</div>`
+            ? `<div style="font-size:${nameFs}px;font-weight:700;line-height:1.05;${allowWrap?'white-space:normal;word-break:break-all;':'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'}max-width:98%;max-height:${seatH*0.65}px">${r.customerName||""}</div><div style="font-size:${peopleFs}px;margin-top:1px">${r.people||""}名</div>`
             : `<div style="font-size:13px">${s.number}</div>`);
-      return `<div style="position:absolute;left:${s.x}px;top:${s.y}px;width:${s.width||50}px;height:${s.height||50}px;background:${fillColor};border:2px solid ${borderColor};border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#000;text-align:center;overflow:hidden">${inner}</div>`;
+      return `<div style="position:absolute;left:${s.x}px;top:${s.y}px;width:${seatW}px;height:${seatH}px;background:${fillColor};border:2px solid ${borderColor};border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#000;text-align:center;overflow:hidden;padding:0 1px;box-sizing:border-box">${inner}</div>`;
     }).join("");
     const bgImg = layout.bgImage ? `<img src="${layout.bgImage}" style="position:absolute;left:0;top:0;width:${CANVAS_WIDTH}px;height:${CANVAS_HEIGHT}px;object-fit:contain"/>` : "";
     win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>席レイアウト ${calSelectedDate}</title><style>
