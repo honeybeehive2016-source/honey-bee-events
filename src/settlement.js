@@ -140,8 +140,9 @@ function unlockHistoryInSession() {
 export default function SettlementModule({ events = [], navigateBack }) {
   const [settlements, setSettlements] = useState([]);
   const [allSettlements, setAllSettlements] = useState([]);
-  const [view, setView] = useState("list"); // list | edit
-  const [form, setForm] = useState(emptySettlement);
+  const [view, setView] = useState("edit"); // list | edit
+  const todayStr = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; })();
+  const [form, setForm] = useState({ ...emptySettlement, eventDate: todayStr, artists: [{ ...emptyArtist }] });
   const [editingId, setEditingId] = useState(null);
   const [filter, setFilter] = useState("all"); // all | unpaid | paid
   const [copied, setCopied] = useState("");
@@ -171,6 +172,38 @@ export default function SettlementModule({ events = [], navigateBack }) {
   const trashSettlements = allSettlements.filter(s => s._deleted);
 
   const setField = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  // 日付変更時：同日のイベントを検索してイベント名を自動入力
+  const handleEventDateChange = (dateStr) => {
+    if (editingId) { setField("eventDate", dateStr); return; }
+    const matched = events.filter(e => e.date === dateStr);
+    if (matched.length === 1) {
+      const ev = matched[0];
+      const perfList = (ev.perf || "").split(/[\/／,、]/).map(s => s.trim()).filter(Boolean);
+      const artists = perfList.length > 0
+        ? perfList.map(name => ({ ...emptyArtist, name, charge: ev.price?.replace(/[¥,円]/g,"").replace(/前売.*?(\d+).*/,"$1") || "" }))
+        : [{ ...emptyArtist }];
+      setForm(f => ({ ...f, eventDate: dateStr, eventName: ev.name, eventId: ev._id || "", artists }));
+    } else {
+      setForm(f => ({ ...f, eventDate: dateStr, eventName: "", eventId: "" }));
+    }
+  };
+
+  // eventsが遅延ロードされた場合の初期自動入力（新規作成時のみ）
+  useEffect(() => {
+    if (view === "edit" && !editingId && form.eventDate && !form.eventName && events.length > 0) {
+      const matched = events.filter(e => e.date === form.eventDate);
+      if (matched.length === 1) {
+        const ev = matched[0];
+        const perfList = (ev.perf || "").split(/[\/／,、]/).map(s => s.trim()).filter(Boolean);
+        const artists = perfList.length > 0
+          ? perfList.map(name => ({ ...emptyArtist, name, charge: ev.price?.replace(/[¥,円]/g,"").replace(/前売.*?(\d+).*/,"$1") || "" }))
+          : [{ ...emptyArtist }];
+        setForm(f => ({ ...f, eventName: ev.name, eventId: ev._id || "", artists }));
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [events]);
 
   // イベントから新規作成
   const startFromEvent = (eventId) => {
@@ -347,11 +380,41 @@ export default function SettlementModule({ events = [], navigateBack }) {
         </div>
 
         {/* イベント情報 */}
-        <div style={{display:"grid",gridTemplateColumns:"1fr 2fr 1fr",gap:".7rem",marginBottom:"1.5rem"}} className="hb-form-grid">
-          <Field label="開催日"><input type="date" style={S.inp} value={form.eventDate} onChange={e=>setField("eventDate",e.target.value)}/></Field>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 2fr 1fr",gap:".7rem",marginBottom:"1rem"}} className="hb-form-grid">
+          <Field label="開催日">
+            <input type="date" style={S.inp} value={form.eventDate} onChange={e=>handleEventDateChange(e.target.value)}/>
+          </Field>
           <Field label="イベント名"><input style={S.inp} value={form.eventName} onChange={e=>setField("eventName",e.target.value)} placeholder="例：Jazz Night Premium"/></Field>
-          <Field label="関連イベント"><input style={S.inp} value={form.eventId||""} disabled placeholder="（手動入力）"/></Field>
+          <Field label="関連イベント"><input style={S.inp} value={form.eventId||""} disabled placeholder="（自動入力）"/></Field>
         </div>
+        {/* 同日に複数イベントがある場合の候補ボタン */}
+        {!editingId && (() => {
+          const candidates = events.filter(e => e.date === form.eventDate);
+          if (candidates.length <= 1) return null;
+          return (
+            <div style={{padding:".6rem .9rem",background:"rgba(201,168,76,0.06)",border:"1px solid rgba(201,168,76,0.2)",borderRadius:5,marginBottom:"1rem"}}>
+              <div style={{fontSize:".62rem",color:"rgba(201,168,76,0.7)",letterSpacing:".1em",marginBottom:".4rem"}}>この日のイベント（タップで選択）</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:".4rem"}}>
+                {candidates.map(ev => (
+                  <button key={ev._id} type="button" onClick={()=>{
+                    const perfList = (ev.perf || "").split(/[\/／,、]/).map(s => s.trim()).filter(Boolean);
+                    const artists = perfList.length > 0
+                      ? perfList.map(name => ({ ...emptyArtist, name, charge: ev.price?.replace(/[¥,円]/g,"").replace(/前売.*?(\d+).*/,"$1") || "" }))
+                      : [{ ...emptyArtist }];
+                    setForm(f => ({ ...f, eventName: ev.name, eventId: ev._id || "", artists }));
+                  }} style={{
+                    padding:".3rem .75rem",borderRadius:4,border:`1px solid ${form.eventName===ev.name?"#c9a84c":"rgba(201,168,76,0.3)"}`,
+                    background:form.eventName===ev.name?"#c9a84c":"transparent",
+                    color:form.eventName===ev.name?"#0a0a0a":"rgba(201,168,76,0.8)",
+                    fontSize:".72rem",cursor:"pointer",fontFamily:"inherit",
+                  }}>
+                    {ev.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* 出演者ごとの精算 */}
         <div style={{...S.secTitle,marginTop:0}}>出演者（{(form.artists||[]).length}名）</div>
