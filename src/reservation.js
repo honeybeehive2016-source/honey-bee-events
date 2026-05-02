@@ -468,12 +468,17 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
           )}
           <Field label="イベント名" full>
             {candidateEvents.length > 1 ? (
-              <select style={S.inp} value={form.eventName} onChange={e=>setField("eventName",e.target.value)}>
-                <option value="">-- イベントを選択 --</option>
-                {candidateEvents.map(e=>(
-                  <option key={e._id} value={e.name}>{e.name}{e.start?` (${e.start}〜)`:""}</option>
-                ))}
-              </select>
+              <>
+                <div style={{padding:".4rem .65rem",background:"rgba(244,162,97,0.1)",border:"1px solid rgba(244,162,97,0.3)",borderRadius:4,fontSize:".68rem",color:"#f4a261",marginBottom:".4rem"}}>
+                  ⚠️ この日は複数のイベントがあります。お客様が予約したイベントを選んでください。
+                </div>
+                <select style={S.inp} value={form.eventName} onChange={e=>setField("eventName",e.target.value)}>
+                  <option value="">-- イベントを選択 --</option>
+                  {candidateEvents.map(e=>(
+                    <option key={e._id} value={e.name}>{e.name}{e.start?` (${e.start}〜)`:""}</option>
+                  ))}
+                </select>
+              </>
             ) : (
               <input style={S.inp} value={form.eventName} onChange={e=>setField("eventName",e.target.value)} placeholder={candidateEvents.length===0?"日付を選んでください or 手動入力":"イベント名"}/>
             )}
@@ -667,13 +672,36 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   };
 
   const printReservationList = () => {
-    const eventLabel = dayEvents.map(e => e.name).join(" / ") || "";
     const dt = new Date(calSelectedDate + "T00:00:00");
     const dowJp = ["日","月","火","水","木","金","土"][dt.getDay()];
     const totalPeople = dayReservations.reduce((s,r)=>s+Number(r.people||0),0);
     const win = window.open("", "_blank");
     if (!win) { alert("ポップアップがブロックされました"); return; }
-    const rows = dayReservations.map(r => `
+
+    // イベントごとにグループ化（複数ある場合のみ）
+    const groups = [];
+    if (dayEvents.length <= 1) {
+      groups.push({
+        title: dayEvents[0]?.name || "",
+        event: dayEvents[0] || null,
+        reservations: dayReservations,
+      });
+    } else {
+      dayEvents.forEach(ev => {
+        groups.push({
+          title: ev.name,
+          event: ev,
+          reservations: dayReservations.filter(r => r.eventName === ev.name),
+        });
+      });
+      const eventNames = dayEvents.map(e => e.name);
+      const orphans = dayReservations.filter(r => !eventNames.includes(r.eventName));
+      if (orphans.length > 0) {
+        groups.push({ title: "（イベント未指定）", event: null, reservations: orphans });
+      }
+    }
+
+    const renderRows = (list) => list.map(r => `
       <tr>
         <td style="text-align:center;width:40px"><div style="display:inline-block;width:18px;height:18px;border:1.5px solid #555;border-radius:3px;background:${r.arrived?"#5a8eae":"#fff"};color:#fff;font-weight:700;line-height:18px;text-align:center;font-size:12px">${r.arrived?"✓":""}</div></td>
         <td>${r.customerName||""}</td>
@@ -683,21 +711,43 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
         <td>${r.seatNumber||""}</td>
         <td style="font-size:11px">${(r.note||"").replace(/[<>]/g,"")}</td>
       </tr>`).join("");
+
+    const sections = groups.map(g => {
+      const totalP = g.reservations.reduce((s,r)=>s+Number(r.people||0),0);
+      const arrivedC = g.reservations.filter(r=>r.arrived).length;
+      const ev = g.event;
+      const evMeta = ev ? `${ev.open?`開店 ${ev.open}`:""}${ev.open&&ev.start?" / ":""}${ev.start?`開演 ${ev.start}`:""}` : "";
+      const noBookingBadge = ev && ev.noBooking ? `<span style="background:#e24b4a;color:#fff;padding:2px 8px;border-radius:3px;font-size:11px;margin-left:8px;font-weight:700">🚫 予約不可</span>` : "";
+      return `
+        <div class="section">
+          ${dayEvents.length > 1 || g.title ? `<div class="section-title">🎵 ${g.title || "（イベントなし）"}${noBookingBadge}</div>` : ""}
+          ${evMeta ? `<div class="section-meta">🕒 ${evMeta}</div>` : ""}
+          ${ev && ev.notes ? `<div class="notes">⚠️ <b>スタッフへの注意事項</b><br/>${(ev.notes||"").replace(/[<>]/g,"").replace(/\n/g,"<br/>")}</div>` : ""}
+          <div class="section-stat">${g.reservations.length}組 / 計${totalP}名 / 来店 ${arrivedC}/${g.reservations.length}</div>
+          <table>
+            <thead><tr><th>受付</th><th>お名前</th><th>人数</th><th>電話</th><th>経路</th><th>席</th><th>備考</th></tr></thead>
+            <tbody>${renderRows(g.reservations)||'<tr><td colspan="7" style="text-align:center;color:#888;padding:14px">予約はありません</td></tr>'}</tbody>
+          </table>
+        </div>`;
+    }).join("");
+
     win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>予約リスト ${calSelectedDate}</title><style>
       body{margin:0;padding:20px;font-family:'Hiragino Mincho ProN','游明朝',serif;background:#fff;color:#000}
       h1{font-size:20px;margin:0 0 4px 0}
       .meta{font-size:13px;color:#444;margin-bottom:14px}
+      .section{margin-bottom:18px;page-break-inside:avoid}
+      .section-title{font-size:15px;font-weight:700;margin-bottom:4px;padding:4px 8px;background:#f5efde;border-left:4px solid #c9a84c}
+      .section-meta{font-size:12px;color:#444;margin-bottom:4px;padding:0 8px}
+      .section-stat{font-size:12px;color:#666;margin-bottom:6px;padding:0 8px}
+      .notes{margin:6px 8px 8px 8px;padding:6px 10px;background:#fef4e6;border:1px solid #d68b3a;border-left:4px solid #d68b3a;font-size:12px;line-height:1.55}
       table{width:100%;border-collapse:collapse;font-size:13px}
       th,td{border:1px solid #888;padding:6px 8px;text-align:left;vertical-align:top}
       th{background:#eee;font-weight:600;font-size:12px}
       @media print{ body{padding:8px} .noprint{display:none} }
     </style></head><body>
       <h1>予約リスト：${dt.getFullYear()}年${dt.getMonth()+1}月${dt.getDate()}日（${dowJp}）</h1>
-      <div class="meta">${eventLabel ? `イベント：${eventLabel} / `:""}${dayReservations.length}組 / 計${totalPeople}名 / 来店 ${dayReservations.filter(r=>r.arrived).length}/${dayReservations.length}</div>
-      <table>
-        <thead><tr><th>受付</th><th>お名前</th><th>人数</th><th>電話</th><th>経路</th><th>席</th><th>備考</th></tr></thead>
-        <tbody>${rows||'<tr><td colspan="7" style="text-align:center;color:#888;padding:20px">予約はありません</td></tr>'}</tbody>
-      </table>
+      <div class="meta">${dayReservations.length}組 / 計${totalPeople}名 / 来店 ${dayReservations.filter(r=>r.arrived).length}/${dayReservations.length}</div>
+      ${sections}
       <div class="noprint" style="margin-top:16px;text-align:center"><button onclick="window.print()" style="padding:8px 24px">印刷</button></div>
     </body></html>`);
     win.document.close();
@@ -784,27 +834,71 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
           {/* 選択した日の詳細 */}
           {calSelectedDate && (
             <div style={{marginTop:"1rem",padding:"1rem 1.1rem",background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.2)",borderRadius:6}}>
-              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:".5rem",marginBottom:".75rem",paddingBottom:".5rem",borderBottom:"1px solid rgba(201,168,76,0.13)"}}>
-                <div>
-                  <div style={{fontFamily:"Georgia,serif",fontSize:"1rem",color:"#c9a84c"}}>
-                    {fmtDate(calSelectedDate)}
-                  </div>
-                  {dayEvents.length > 0 && (
-                    <div style={{fontSize:".75rem",color:"rgba(240,232,208,0.7)",marginTop:".15rem",display:"flex",alignItems:"center",gap:".4rem",flexWrap:"wrap"}}>
-                      <span>🎵 {dayEvents.map(e=>e.name).join(" / ")}</span>
-                      {dayEvents.some(e=>e.noBooking) && (
-                        <span style={{fontSize:".62rem",padding:".15rem .5rem",borderRadius:3,background:"rgba(226,75,74,0.18)",border:"1px solid rgba(226,75,74,0.4)",color:"#ff8a89",letterSpacing:".05em"}}>
-                          🚫 予約不可
-                        </span>
-                      )}
-                    </div>
-                  )}
+              {/* 日付タイトル＆印刷ボタン */}
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:".5rem",marginBottom:".75rem"}}>
+                <div style={{fontFamily:"Georgia,serif",fontSize:"1.1rem",color:"#c9a84c"}}>
+                  {fmtDate(calSelectedDate)}
                 </div>
                 <div style={{display:"flex",gap:".4rem",flexWrap:"wrap"}}>
                   <button style={{...S.btn("ghost"),padding:".35rem .7rem",fontSize:".62rem"}} onClick={printSeatLayout}>🖨 席レイアウト印刷</button>
                   <button style={{...S.btn("ghost"),padding:".35rem .7rem",fontSize:".62rem"}} onClick={printReservationList}>🖨 予約リスト印刷</button>
                 </div>
               </div>
+
+              {/* イベントごとの詳細カード（複数あれば縦に並ぶ） */}
+              {dayEvents.length > 0 && (
+                <div style={{display:"flex",flexDirection:"column",gap:".5rem",marginBottom:".75rem"}}>
+                  {dayEvents.map((ev, idx) => (
+                    <div key={ev._id || idx} style={{
+                      padding:".7rem .9rem",
+                      background: ev.noBooking ? "rgba(226,75,74,0.08)" : "#0a0a0a",
+                      border: `1px solid ${ev.noBooking ? "rgba(226,75,74,0.55)" : "rgba(201,168,76,0.2)"}`,
+                      borderRadius: 5,
+                    }}>
+                      <div style={{display:"flex",alignItems:"center",gap:".5rem",flexWrap:"wrap",marginBottom:".25rem"}}>
+                        <span style={{fontSize:".88rem",color:"#c9a84c",fontWeight:600}}>🎵 {ev.name}</span>
+                        {ev.noBooking && (
+                          <span style={{
+                            fontSize:".65rem",
+                            padding:".25rem .6rem",
+                            borderRadius:3,
+                            background:"#e24b4a",
+                            color:"#fff",
+                            letterSpacing:".08em",
+                            fontWeight:700,
+                            boxShadow:"0 0 8px rgba(226,75,74,0.5)",
+                          }}>
+                            🚫 予約不可
+                          </span>
+                        )}
+                      </div>
+                      {/* 時間情報 */}
+                      {(ev.open || ev.start) && (
+                        <div style={{fontSize:".72rem",color:"rgba(240,232,208,0.7)",marginBottom:".15rem"}}>
+                          🕒 {ev.open && `開店 ${ev.open}`}{ev.open && ev.start && " / "}{ev.start && `開演 ${ev.start}`}
+                        </div>
+                      )}
+                      {/* スタッフ向け注意事項 */}
+                      {ev.notes && (
+                        <div style={{
+                          marginTop:".5rem",
+                          padding:".5rem .65rem",
+                          background:"rgba(244,162,97,0.1)",
+                          border:"1px solid rgba(244,162,97,0.35)",
+                          borderRadius:4,
+                          fontSize:".72rem",
+                          color:"#f4a261",
+                          whiteSpace:"pre-wrap",
+                          lineHeight:1.55,
+                        }}>
+                          ⚠️ <span style={{color:"rgba(244,162,97,0.85)",fontWeight:600,letterSpacing:".05em"}}>スタッフへの注意事項</span><br/>
+                          <span style={{color:"#f0e8d0"}}>{ev.notes}</span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {/* 席レイアウト（折りたたみ式・デフォルト閉） */}
               <details style={{marginBottom:"1rem"}}>
@@ -824,43 +918,102 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                 </div>
               </details>
 
-              {/* 予約リスト */}
-              <div style={{marginBottom:".5rem",fontSize:".7rem",color:"rgba(201,168,76,0.7)",letterSpacing:".15em"}}>
-                📞 予約リスト（{dayReservations.length}組 / 計{dayReservations.reduce((s,r)=>s+Number(r.people||0),0)}名 / 来店 {dayReservations.filter(r=>r.arrived).length}/{dayReservations.length}）
-              </div>
-              {dayReservations.length === 0 ? (
-                <div style={{textAlign:"center",padding:"1.5rem",color:"rgba(240,232,208,0.4)",fontSize:".82rem",background:"#111",borderRadius:5}}>この日の予約はありません</div>
-              ) : dayReservations.map(r => (
-                <div key={r._id} style={{...S.card,padding:".7rem .9rem",marginBottom:".4rem",display:"grid",gridTemplateColumns:"auto 1fr auto",gap:".6rem",alignItems:"center",borderLeft:r.arrived?"3px solid #7ec87e":"3px solid rgba(244,162,97,0.3)"}}>
-                  <button onClick={()=>toggleArrived(r._id)} style={{
-                    padding:".35rem .55rem",
-                    background:r.arrived?"rgba(126,200,127,0.13)":"transparent",
-                    border:`1px solid ${r.arrived?"#7ec87e":"rgba(244,162,97,0.4)"}`,
-                    borderRadius:4,
-                    color:r.arrived?"#7ec87e":"#f4a261",
-                    cursor:"pointer",fontSize:".68rem",fontFamily:"inherit",
-                    minWidth:60,
-                  }}>
-                    {r.arrived?"✓ 来店済":"未来店"}
-                  </button>
-                  <div onClick={()=>startEdit(r)} style={{cursor:"pointer",minWidth:0}}>
-                    <div style={{display:"flex",alignItems:"center",gap:".5rem",marginBottom:".15rem",flexWrap:"wrap"}}>
-                      <span style={{fontSize:".7rem"}}>{sourceIcon(r.source)}</span>
-                      <span style={{fontFamily:"Georgia,serif",fontSize:".92rem"}}>{r.customerName||"（無名）"}</span>
-                      <span style={{padding:".1rem .4rem",background:"rgba(201,168,76,0.13)",borderRadius:2,fontSize:".62rem",color:"#c9a84c"}}>{r.people}名</span>
-                      {r.seatNumber && <span style={{padding:".1rem .4rem",background:"rgba(126,200,227,0.13)",borderRadius:2,fontSize:".62rem",color:"#7ec8e3"}}>🪑 {r.seatNumber}</span>}
+              {/* 予約リスト：イベントごとにセクション分け */}
+              {(() => {
+                // イベントが0個 or 1個の場合：従来通り1セクション
+                // イベントが2個以上の場合：イベントごとに分けて、未割り当てを最後に
+                const groups = [];
+                if (dayEvents.length <= 1) {
+                  groups.push({
+                    eventName: dayEvents[0]?.name || "",
+                    event: dayEvents[0] || null,
+                    reservations: dayReservations,
+                  });
+                } else {
+                  // イベントごとに分ける
+                  dayEvents.forEach(ev => {
+                    groups.push({
+                      eventName: ev.name,
+                      event: ev,
+                      reservations: dayReservations.filter(r => r.eventName === ev.name),
+                    });
+                  });
+                  // どのイベントにも紐づかない予約
+                  const eventNames = dayEvents.map(e => e.name);
+                  const orphans = dayReservations.filter(r => !eventNames.includes(r.eventName));
+                  if (orphans.length > 0) {
+                    groups.push({
+                      eventName: "（イベント未指定）",
+                      event: null,
+                      reservations: orphans,
+                    });
+                  }
+                }
+
+                const renderReservationCard = (r) => (
+                  <div key={r._id} style={{...S.card,padding:".7rem .9rem",marginBottom:".4rem",display:"grid",gridTemplateColumns:"auto 1fr auto",gap:".6rem",alignItems:"center",borderLeft:r.arrived?"3px solid #7ec87e":"3px solid rgba(244,162,97,0.3)"}}>
+                    <button onClick={()=>toggleArrived(r._id)} style={{
+                      padding:".35rem .55rem",
+                      background:r.arrived?"rgba(126,200,127,0.13)":"transparent",
+                      border:`1px solid ${r.arrived?"#7ec87e":"rgba(244,162,97,0.4)"}`,
+                      borderRadius:4,
+                      color:r.arrived?"#7ec87e":"#f4a261",
+                      cursor:"pointer",fontSize:".68rem",fontFamily:"inherit",
+                      minWidth:60,
+                    }}>
+                      {r.arrived?"✓ 来店済":"未来店"}
+                    </button>
+                    <div onClick={()=>startEdit(r)} style={{cursor:"pointer",minWidth:0}}>
+                      <div style={{display:"flex",alignItems:"center",gap:".5rem",marginBottom:".15rem",flexWrap:"wrap"}}>
+                        <span style={{fontSize:".7rem"}}>{sourceIcon(r.source)}</span>
+                        <span style={{fontFamily:"Georgia,serif",fontSize:".92rem"}}>{r.customerName||"（無名）"}</span>
+                        <span style={{padding:".1rem .4rem",background:"rgba(201,168,76,0.13)",borderRadius:2,fontSize:".62rem",color:"#c9a84c"}}>{r.people}名</span>
+                        {r.seatNumber && <span style={{padding:".1rem .4rem",background:"rgba(126,200,227,0.13)",borderRadius:2,fontSize:".62rem",color:"#7ec8e3"}}>🪑 {r.seatNumber}</span>}
+                      </div>
+                      <div style={{fontSize:".66rem",color:"rgba(240,232,208,0.55)",display:"flex",gap:".7rem",flexWrap:"wrap"}}>
+                        {r.phone && <span>📞 {r.phone}</span>}
+                        {r.note && <span style={{color:"#f4a261"}}>📝 {r.note}</span>}
+                      </div>
                     </div>
-                    <div style={{fontSize:".66rem",color:"rgba(240,232,208,0.55)",display:"flex",gap:".7rem",flexWrap:"wrap"}}>
-                      {r.phone && <span>📞 {r.phone}</span>}
-                      {r.note && <span style={{color:"#f4a261"}}>📝 {r.note}</span>}
+                    <div style={{display:"flex",gap:".25rem",flexDirection:"column"}}>
+                      <button style={{...S.btn("sm"),padding:".25rem .5rem",fontSize:".55rem"}} onClick={()=>startEdit(r)}>編集</button>
+                      <button style={{...S.btn("danger"),padding:".25rem .5rem",fontSize:".55rem"}} onClick={()=>handleDelete(r._id)}>削除</button>
                     </div>
                   </div>
-                  <div style={{display:"flex",gap:".25rem",flexDirection:"column"}}>
-                    <button style={{...S.btn("sm"),padding:".25rem .5rem",fontSize:".55rem"}} onClick={()=>startEdit(r)}>編集</button>
-                    <button style={{...S.btn("danger"),padding:".25rem .5rem",fontSize:".55rem"}} onClick={()=>handleDelete(r._id)}>削除</button>
-                  </div>
-                </div>
-              ))}
+                );
+
+                return groups.map((g, gi) => {
+                  const totalP = g.reservations.reduce((s,r)=>s+Number(r.people||0),0);
+                  const arrivedC = g.reservations.filter(r=>r.arrived).length;
+                  return (
+                    <div key={gi} style={{marginBottom: gi<groups.length-1 ? "1.25rem" : 0}}>
+                      <div style={{
+                        display:"flex",
+                        alignItems:"center",
+                        gap:".5rem",
+                        flexWrap:"wrap",
+                        marginBottom:".5rem",
+                        padding: dayEvents.length > 1 ? ".4rem .65rem" : 0,
+                        background: dayEvents.length > 1 ? "#080808" : "transparent",
+                        borderRadius: 4,
+                        borderLeft: dayEvents.length > 1 ? "3px solid #c9a84c" : "none",
+                      }}>
+                        <span style={{fontSize:".72rem",color:"#c9a84c",letterSpacing:".1em",fontWeight:600}}>
+                          📞 {dayEvents.length > 1 && g.eventName ? `${g.eventName} の予約` : "予約リスト"}
+                        </span>
+                        <span style={{fontSize:".68rem",color:"rgba(201,168,76,0.65)"}}>
+                          （{g.reservations.length}組 / 計{totalP}名 / 来店 {arrivedC}/{g.reservations.length}）
+                        </span>
+                      </div>
+                      {g.reservations.length === 0 ? (
+                        <div style={{textAlign:"center",padding:"1rem",color:"rgba(240,232,208,0.4)",fontSize:".78rem",background:"#111",borderRadius:5}}>
+                          {dayEvents.length > 1 ? "このイベントの予約はまだありません" : "この日の予約はありません"}
+                        </div>
+                      ) : g.reservations.map(renderReservationCard)}
+                    </div>
+                  );
+                });
+              })()}
             </div>
           )}
         </>
