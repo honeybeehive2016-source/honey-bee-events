@@ -851,26 +851,37 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                   {dayEvents.map((ev, idx) => (
                     <div key={ev._id || idx} style={{
                       padding:".7rem .9rem",
-                      background: ev.noBooking ? "rgba(226,75,74,0.08)" : "#0a0a0a",
-                      border: `1px solid ${ev.noBooking ? "rgba(226,75,74,0.55)" : "rgba(201,168,76,0.2)"}`,
+                      background: ev.noBooking
+                        ? "repeating-linear-gradient(45deg,rgba(226,75,74,0.18),rgba(226,75,74,0.18) 10px,rgba(226,75,74,0.08) 10px,rgba(226,75,74,0.08) 20px)"
+                        : "#0a0a0a",
+                      border: `${ev.noBooking ? "2px" : "1px"} solid ${ev.noBooking ? "#e24b4a" : "rgba(201,168,76,0.2)"}`,
                       borderRadius: 5,
+                      position: "relative",
                     }}>
+                      {ev.noBooking && (
+                        <div style={{
+                          padding:".5rem .75rem",
+                          marginBottom:".6rem",
+                          background:"#e24b4a",
+                          color:"#fff",
+                          borderRadius:4,
+                          fontSize:".82rem",
+                          fontWeight:700,
+                          letterSpacing:".08em",
+                          textAlign:"center",
+                          boxShadow:"0 2px 8px rgba(226,75,74,0.4)",
+                        }}>
+                          🚫 このイベントは予約受付不可です
+                        </div>
+                      )}
                       <div style={{display:"flex",alignItems:"center",gap:".5rem",flexWrap:"wrap",marginBottom:".25rem"}}>
-                        <span style={{fontSize:".88rem",color:"#c9a84c",fontWeight:600}}>🎵 {ev.name}</span>
-                        {ev.noBooking && (
-                          <span style={{
-                            fontSize:".65rem",
-                            padding:".25rem .6rem",
-                            borderRadius:3,
-                            background:"#e24b4a",
-                            color:"#fff",
-                            letterSpacing:".08em",
-                            fontWeight:700,
-                            boxShadow:"0 0 8px rgba(226,75,74,0.5)",
-                          }}>
-                            🚫 予約不可
-                          </span>
-                        )}
+                        <span style={{
+                          fontSize:".88rem",
+                          color: ev.noBooking ? "rgba(255,138,137,0.95)" : "#c9a84c",
+                          fontWeight:600,
+                          textDecoration: ev.noBooking ? "line-through" : "none",
+                          textDecorationThickness: ev.noBooking ? "2px" : undefined,
+                        }}>🎵 {ev.name}</span>
                       </div>
                       {/* 時間情報 */}
                       {(ev.open || ev.start) && (

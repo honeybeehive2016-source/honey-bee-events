@@ -585,14 +585,73 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                   {ev.cap && <div>👥 定員 {ev.cap}名</div>}
                   {ev.perf && <div style={{marginTop:".3rem"}}>✨ {ev.perf}</div>}
                 </div>
+                {/* 撮影・喫煙の可否バッジ */}
+                {(ev.photoOk && ev.photoOk !== "unset") || (ev.smokeOk && ev.smokeOk !== "unset") ? (
+                  <div style={{display:"flex",gap:".4rem",marginTop:".5rem",flexWrap:"wrap"}}>
+                    {ev.photoOk === "ok" && (
+                      <span style={{padding:".2rem .55rem",borderRadius:3,background:"rgba(126,200,127,0.18)",border:"1px solid rgba(126,200,127,0.45)",color:"#7ec87e",fontSize:".68rem",fontWeight:600}}>📸 撮影 OK</span>
+                    )}
+                    {ev.photoOk === "ng" && (
+                      <span style={{padding:".2rem .55rem",borderRadius:3,background:"rgba(226,75,74,0.18)",border:"1px solid rgba(226,75,74,0.5)",color:"#ff8a89",fontSize:".68rem",fontWeight:600}}>📸 撮影 NG</span>
+                    )}
+                    {ev.smokeOk === "ok" && (
+                      <span style={{padding:".2rem .55rem",borderRadius:3,background:"rgba(126,200,127,0.18)",border:"1px solid rgba(126,200,127,0.45)",color:"#7ec87e",fontSize:".68rem",fontWeight:600}}>🚬 喫煙 OK</span>
+                    )}
+                    {ev.smokeOk === "ng" && (
+                      <span style={{padding:".2rem .55rem",borderRadius:3,background:"rgba(226,75,74,0.18)",border:"1px solid rgba(226,75,74,0.5)",color:"#ff8a89",fontSize:".68rem",fontWeight:600}}>🚬 喫煙 NG</span>
+                    )}
+                  </div>
+                ) : null}
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:".3rem"}}>
                 {onEditEvent && <button type="button" style={S.btn("sm")} onClick={()=>onEditEvent(ev._id)}>📝 編集</button>}
               </div>
             </div>
+            {/* スタッフへの注意事項：目立たせて全文表示 */}
             {ev.notes && (
-              <div style={{marginTop:".5rem",padding:".5rem .7rem",background:"rgba(226,75,74,0.08)",borderLeft:"2px solid rgba(226,75,74,0.4)",borderRadius:3,fontSize:".75rem",color:"rgba(240,232,208,0.75)",lineHeight:1.6,whiteSpace:"pre-wrap"}}>
-                ⚠️ {ev.notes}
+              <div style={{
+                marginTop:".75rem",
+                padding:"1rem 1.15rem",
+                background:"linear-gradient(135deg,rgba(244,162,97,0.15),rgba(226,75,74,0.12))",
+                border:"2px solid #f4a261",
+                borderRadius:6,
+                boxShadow:"0 2px 12px rgba(244,162,97,0.2)",
+              }}>
+                <div style={{
+                  display:"flex",
+                  alignItems:"center",
+                  gap:".5rem",
+                  marginBottom:".5rem",
+                  fontSize:".82rem",
+                  fontWeight:700,
+                  color:"#f4a261",
+                  letterSpacing:".08em",
+                  textShadow:"0 0 8px rgba(244,162,97,0.5)",
+                }}>
+                  ⚠️ スタッフへの注意事項
+                </div>
+                <div style={{
+                  fontSize:".88rem",
+                  color:"#ffe5c7",
+                  lineHeight:1.75,
+                  whiteSpace:"pre-wrap",
+                  wordBreak:"break-word",
+                }}>
+                  {ev.notes}
+                </div>
+              </div>
+            )}
+            {/* イベント画像（複数枚・横スクロール） */}
+            {Array.isArray(ev.images) && ev.images.length > 0 && (
+              <div style={{marginTop:".75rem"}}>
+                <div style={{fontSize:".68rem",color:"rgba(201,168,76,0.7)",letterSpacing:".1em",marginBottom:".4rem"}}>📷 関連画像</div>
+                <div style={{display:"flex",gap:".5rem",overflowX:"auto",padding:".25rem 0"}}>
+                  {ev.images.map((url, idx) => (
+                    <a key={idx} href={url} target="_blank" rel="noreferrer" style={{flexShrink:0,display:"block",borderRadius:5,overflow:"hidden",border:"1px solid rgba(201,168,76,0.2)"}}>
+                      <img src={url} alt={`画像${idx+1}`} style={{height:160,display:"block"}}/>
+                    </a>
+                  ))}
+                </div>
               </div>
             )}
           </div>

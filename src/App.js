@@ -27,7 +27,7 @@ export const extractTimeLabel = (name) => {
   const m = (name||"").match(/[\[（(](昼|夜|深夜|朝|午前|午後)[\]）)]|^(昼|夜|深夜|朝|午前|午後)\s/);
   return m ? (m[1] || m[2]) : "";
 };
-const emptyForm = { name:"",date:"",day:"",open:"",start:"",price:"",cap:"",perf:"",desc:"",url:"",notes:"",genre:"",rehearsal:"",poster:"",timetable:"",reference:"",seatable:true,reserveNotes:"",noBooking:false };
+const emptyForm = { name:"",date:"",day:"",open:"",start:"",price:"",cap:"",perf:"",desc:"",url:"",notes:"",genre:"",rehearsal:"",poster:"",timetable:"",reference:"",seatable:true,reserveNotes:"",noBooking:false,photoOk:"unset",smokeOk:"unset",images:[] };
 
 // 行単位ではなく1文字ずつ読んでパースする（セル内改行に対応）
 function parseCSVText(text) {
@@ -236,6 +236,77 @@ const S={
 };
 
 function Field({label,children,full}){return(<div style={{gridColumn:full?"1/-1":undefined,display:"flex",flexDirection:"column"}}><label style={S.lbl}>{label}</label>{children}</div>);}
+
+// 画像URL管理コンポーネント（URL貼り付け式・複数枚対応）
+function ImageUploader({images=[],maxCount=5,onChange}){
+  const [draftUrl,setDraftUrl]=useState("");
+  const addImage=()=>{
+    const u=(draftUrl||"").trim();
+    if(!u) return;
+    if(!/^https?:\/\//i.test(u)){
+      alert("画像のURLは http:// または https:// で始まる必要があります");
+      return;
+    }
+    if(images.length>=maxCount){
+      alert(`画像は最大${maxCount}枚までです`);
+      return;
+    }
+    onChange([...images,u]);
+    setDraftUrl("");
+  };
+  const removeAt=(idx)=>onChange(images.filter((_,i)=>i!==idx));
+  const moveLeft=(idx)=>{
+    if(idx<=0) return;
+    const next=[...images];
+    [next[idx-1],next[idx]]=[next[idx],next[idx-1]];
+    onChange(next);
+  };
+  const moveRight=(idx)=>{
+    if(idx>=images.length-1) return;
+    const next=[...images];
+    [next[idx],next[idx+1]]=[next[idx+1],next[idx]];
+    onChange(next);
+  };
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:".5rem"}}>
+      {/* 既存画像のサムネイル一覧 */}
+      {images.length>0 && (
+        <div style={{display:"flex",gap:".5rem",overflowX:"auto",padding:".25rem 0"}}>
+          {images.map((url,idx)=>(
+            <div key={idx} style={{flexShrink:0,position:"relative",width:120,height:120,background:"#0a0a0a",border:"1px solid rgba(201,168,76,0.25)",borderRadius:5,overflow:"hidden"}}>
+              <img src={url} alt={`${idx+1}`} style={{width:"100%",height:"100%",objectFit:"cover"}}
+                onError={(e)=>{e.target.style.display="none";e.target.nextSibling.style.display="flex";}}/>
+              <div style={{display:"none",width:"100%",height:"100%",alignItems:"center",justifyContent:"center",color:"rgba(226,75,74,0.7)",fontSize:".62rem",textAlign:"center",padding:".25rem"}}>⚠️ 表示できません</div>
+              <div style={{position:"absolute",top:0,right:0,display:"flex",gap:"2px"}}>
+                <button type="button" onClick={()=>moveLeft(idx)} disabled={idx===0} title="前へ" style={{background:"rgba(0,0,0,0.7)",border:"none",color:idx===0?"rgba(255,255,255,0.3)":"#fff",fontSize:".7rem",padding:"2px 5px",cursor:idx===0?"default":"pointer"}}>←</button>
+                <button type="button" onClick={()=>moveRight(idx)} disabled={idx===images.length-1} title="次へ" style={{background:"rgba(0,0,0,0.7)",border:"none",color:idx===images.length-1?"rgba(255,255,255,0.3)":"#fff",fontSize:".7rem",padding:"2px 5px",cursor:idx===images.length-1?"default":"pointer"}}>→</button>
+                <button type="button" onClick={()=>removeAt(idx)} title="削除" style={{background:"rgba(226,75,74,0.85)",border:"none",color:"#fff",fontSize:".7rem",padding:"2px 6px",cursor:"pointer"}}>×</button>
+              </div>
+              <div style={{position:"absolute",bottom:0,left:0,right:0,background:"rgba(0,0,0,0.7)",color:"rgba(201,168,76,0.85)",fontSize:".58rem",padding:"2px 4px",letterSpacing:".05em"}}>#{idx+1}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {/* URL入力欄 */}
+      {images.length<maxCount && (
+        <div style={{display:"flex",gap:".4rem",flexWrap:"wrap"}}>
+          <input
+            type="url"
+            placeholder="画像のURLを貼り付け（https://...）"
+            value={draftUrl}
+            onChange={(e)=>setDraftUrl(e.target.value)}
+            onKeyDown={(e)=>{if(e.key==="Enter"){e.preventDefault();addImage();}}}
+            style={{...S.inp,flex:1,minWidth:200}}
+          />
+          <button type="button" onClick={addImage} style={{...S.btn("ghost"),padding:".5rem 1rem"}}>＋ 追加</button>
+        </div>
+      )}
+      {images.length>=maxCount && (
+        <div style={{fontSize:".62rem",color:"rgba(244,162,97,0.7)"}}>📷 上限{maxCount}枚に達しました（削除すれば追加できます）</div>
+      )}
+    </div>
+  );
+}
 
 function CalendarView({events,rentals=[],onEdit,onEditRental}){
   const today=new Date();
@@ -1189,6 +1260,55 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
         </div>
       </div>
 
+      {/* グローバルナビゲーション（ホーム以外で常時表示・どのページにも飛べる） */}
+      {view!=="home" && (
+        <div style={{
+          background:"#0a0a0a",
+          borderBottom:"1px solid rgba(201,168,76,0.15)",
+          padding:".5rem 1rem",
+          overflowX:"auto",
+          whiteSpace:"nowrap",
+          position:"sticky",
+          top:0,
+          zIndex:50,
+        }}>
+          <div style={{display:"inline-flex",gap:".4rem",alignItems:"center"}}>
+            {[
+              {key:"today", label:"📅 本日の営業", views:["today"]},
+              {key:"events_list", label:"🎵 イベント管理", views:["events_list","events_form"]},
+              {key:"reservation", label:"📞 予約管理", views:["reservation","seat_layout"]},
+              {key:"shift", label:"👥 シフト", views:["shift"]},
+              {key:"settlement", label:"💴 アーティスト精算", views:["settlement"]},
+              {key:"rentals", label:"🍽 貸切", views:["rentals"]},
+            ].map(item => {
+              const active = item.views.includes(view);
+              return (
+                <button
+                  key={item.key}
+                  onClick={()=>navigateTo(item.key)}
+                  style={{
+                    padding:".4rem .85rem",
+                    borderRadius:4,
+                    border:`1px solid ${active?"#c9a84c":"rgba(201,168,76,0.2)"}`,
+                    background: active ? "rgba(201,168,76,0.18)" : "transparent",
+                    color: active ? "#f4d97a" : "rgba(201,168,76,0.75)",
+                    fontSize:".72rem",
+                    cursor:"pointer",
+                    fontFamily:"inherit",
+                    letterSpacing:".05em",
+                    fontWeight: active ? 600 : 500,
+                    flexShrink: 0,
+                    whiteSpace:"nowrap",
+                  }}
+                >
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* ===== TOP: HONEY BEE OPERATION ===== */}
       {view==="home"&&(
         <div style={{padding:"2.5rem 2rem",maxWidth:1100,margin:"0 auto"}} className="hb-view">
@@ -1408,8 +1528,65 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
                     席指定可能（外すと「席指定不可」と予約フォームに表示）
                   </label>
                 </Field>
+                {/* 撮影・喫煙の可否 */}
+                <Field label="📸 撮影 / 🚬 喫煙の可否（未設定なら表示しません）" full>
+                  <div style={{display:"flex",gap:"1.5rem",flexWrap:"wrap",padding:".3rem 0"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:".5rem"}}>
+                      <span style={{fontSize:".82rem",color:"rgba(240,232,208,0.85)",minWidth:80}}>📸 撮影</span>
+                      {[
+                        {v:"unset",l:"未設定",c:"rgba(240,232,208,0.4)"},
+                        {v:"ok",l:"○ 可",c:"#7ec87e"},
+                        {v:"ng",l:"× 不可",c:"#e24b4a"},
+                      ].map(o => (
+                        <button key={o.v} type="button" onClick={()=>setField("photoOk",o.v)}
+                          style={{
+                            padding:".3rem .65rem",
+                            borderRadius:3,
+                            border:`1px solid ${form.photoOk===o.v?o.c:"rgba(201,168,76,0.2)"}`,
+                            background: form.photoOk===o.v ? `${o.c}25` : "transparent",
+                            color: form.photoOk===o.v ? o.c : "rgba(240,232,208,0.55)",
+                            fontSize:".7rem",
+                            cursor:"pointer",
+                            fontFamily:"inherit",
+                          }}>{o.l}</button>
+                      ))}
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:".5rem"}}>
+                      <span style={{fontSize:".82rem",color:"rgba(240,232,208,0.85)",minWidth:80}}>🚬 喫煙</span>
+                      {[
+                        {v:"unset",l:"未設定",c:"rgba(240,232,208,0.4)"},
+                        {v:"ok",l:"○ 可",c:"#7ec87e"},
+                        {v:"ng",l:"× 不可",c:"#e24b4a"},
+                      ].map(o => (
+                        <button key={o.v} type="button" onClick={()=>setField("smokeOk",o.v)}
+                          style={{
+                            padding:".3rem .65rem",
+                            borderRadius:3,
+                            border:`1px solid ${form.smokeOk===o.v?o.c:"rgba(201,168,76,0.2)"}`,
+                            background: form.smokeOk===o.v ? `${o.c}25` : "transparent",
+                            color: form.smokeOk===o.v ? o.c : "rgba(240,232,208,0.55)",
+                            fontSize:".7rem",
+                            cursor:"pointer",
+                            fontFamily:"inherit",
+                          }}>{o.l}</button>
+                      ))}
+                    </div>
+                  </div>
+                </Field>
                 <Field label="📋 予約フォーム用 注意事項（お客様向け）" full>
                   <textarea style={{...S.inp,resize:"vertical",lineHeight:1.5}} rows={2} value={form.reserveNotes||""} onChange={e=>setField("reserveNotes",e.target.value)} placeholder="例：お席は先着順とさせていただきます / 飲食代は別途お願いします など"/>
+                </Field>
+                {/* イベント画像（複数枚） */}
+                <Field label="📷 イベント関連画像（最大5枚）" full>
+                  <ImageUploader
+                    images={Array.isArray(form.images) ? form.images : []}
+                    maxCount={5}
+                    onChange={(imgs)=>setField("images", imgs)}
+                  />
+                  <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.4)",marginTop:".4rem",lineHeight:1.5}}>
+                    アップロードした画像は「本日の営業」画面でも表示されます。<br/>
+                    対応：JPG / PNG / GIF / WebP（1枚あたり最大5MB目安）
+                  </div>
                 </Field>
                 {form.rehearsal&&<Field label="バンド入り時間（参考）" full><input style={{...S.inp,color:"rgba(201,168,76,0.5)"}} value={form.rehearsal} readOnly/></Field>}
                 {form.poster&&(
@@ -1424,9 +1601,9 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
                 {form.timetable&&<Field label="タイムテーブル" full><a href={form.timetable} target="_blank" rel="noreferrer" style={{color:"#c9a84c",fontSize:".8rem"}}>📋 タイムテーブルを開く</a></Field>}
               </div>
               <div style={{display:"flex",gap:".5rem",marginTop:"1rem",flexWrap:"wrap"}}>
-                <button style={{...S.btn("gold"),flex:1}} onClick={handleGenerate}>✦ 文章を生成</button>
-                <button style={S.btn("ghost")} onClick={handleSaveEvent}>💾 保存</button>
-                <button style={S.btn("ghost")} onClick={()=>{setTplName(form.name);setShowTplModal(true);}}>⭐</button>
+                <button style={{...S.btn("gold"),flex:1,fontSize:".85rem",padding:".7rem 1rem",fontWeight:700,boxShadow:"0 2px 12px rgba(201,168,76,0.4)"}} onClick={handleSaveEvent}>💾 保存する</button>
+                <button style={{...S.btn("ghost"),padding:".5rem .9rem"}} onClick={handleGenerate}>✦ AIで文章を生成</button>
+                <button style={S.btn("ghost")} onClick={()=>{setTplName(form.name);setShowTplModal(true);}}>⭐ テンプレ保存</button>
               </div>
               <div style={{display:"flex",gap:".5rem",marginTop:".5rem",flexWrap:"wrap"}}>
                 <button style={S.btn("sm")} onClick={clearForm}>クリア</button>
