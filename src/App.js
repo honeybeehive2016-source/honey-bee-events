@@ -27,7 +27,7 @@ export const extractTimeLabel = (name) => {
   const m = (name||"").match(/[\[（(](昼|夜|深夜|朝|午前|午後)[\]）)]|^(昼|夜|深夜|朝|午前|午後)\s/);
   return m ? (m[1] || m[2]) : "";
 };
-const emptyForm = { name:"",date:"",day:"",open:"",start:"",price:"",cap:"",perf:"",desc:"",url:"",notes:"",genre:"",rehearsal:"",poster:"",timetable:"",reference:"",seatable:true,reserveNotes:"",noBooking:false,photoOk:"unset",smokeOk:"unset",images:[] };
+const emptyForm = { name:"",date:"",day:"",open:"",start:"",price:"",cap:"",perf:"",desc:"",url:"",notes:"",genre:"",rehearsal:"",poster:"",timetable:"",reference:"",seatable:true,reserveNotes:"",noBooking:false,photoOk:"unset",smokeOk:"unset",images:[],galleryNote:"",remark:"" };
 
 // 行単位ではなく1文字ずつ読んでパースする（セル内改行に対応）
 function parseCSVText(text) {
@@ -126,7 +126,9 @@ function parseCSV(text) {
     const descText = (cols[3] || "").trim();
     const rehearsal = (cols[6] || "").trim();
     const poster = (cols[7] || "").trim();
-    const notes = ((cols[8] || "") + " " + (cols[9] || "")).trim();
+    const notes = (cols[8] || "").trim();
+    const galleryNote = (cols[9] || "").trim();
+    const remark = (cols[10] || "").trim();
 
     // イベント名がセル内改行で複数あるか判定
     const nameLines = rawName.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
@@ -137,7 +139,7 @@ function parseCSV(text) {
         date: isoDate, day, name: rawName, perf: descText,
         open: defaultOpen, start: defaultStart, price: defaultPrice,
         rehearsal, poster, timetable: "", desc: "", url: "",
-        notes, genre: "", cap: "", reference: "",
+        notes, galleryNote, remark, genre: "", cap: "", reference: "",
         savedAt: new Date().toLocaleDateString("ja-JP"),
       });
     } else {
@@ -161,7 +163,7 @@ function parseCSV(text) {
           start: start || (idx === nameLines.length - 1 ? defaultStart : ""),
           price: price || (idx === nameLines.length - 1 ? defaultPrice : ""),
           rehearsal, poster, timetable: "", desc: "", url: "",
-          notes, genre: "", cap: "", reference: "",
+          notes, galleryNote, remark, genre: "", cap: "", reference: "",
           savedAt: new Date().toLocaleDateString("ja-JP"),
         });
       });
@@ -1123,7 +1125,7 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
       try {
         const imported = parseCSV(ev.target.result);
         if (!imported.length) { setCsvMsg("⚠️ 読み込めるイベントがありませんでした。"); return; }
-        const csvFields = ["date","day","name","perf","open","start","price","rehearsal","poster","notes"];
+        const csvFields = ["date","day","name","perf","open","start","price","rehearsal","poster","notes","galleryNote","remark"];
         let added = 0, updated = 0, rentalAdded = 0;
         setCsvMsg("📤 クラウドに同期中...");
         for (const imp of imported) {
@@ -1575,6 +1577,12 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
                 </Field>
                 <Field label="📋 予約フォーム用 注意事項（お客様向け）" full>
                   <textarea style={{...S.inp,resize:"vertical",lineHeight:1.5}} rows={2} value={form.reserveNotes||""} onChange={e=>setField("reserveNotes",e.target.value)} placeholder="例：お席は先着順とさせていただきます / 飲食代は別途お願いします など"/>
+                </Field>
+                <Field label="💰 ギャラ条件等（スタッフ内部用）" full>
+                  <textarea style={{...S.inp,resize:"vertical",lineHeight:1.5}} rows={2} value={form.galleryNote||""} onChange={e=>setField("galleryNote",e.target.value)} placeholder="例：歩合50%・最低保証3万 / 固定2万 など"/>
+                </Field>
+                <Field label="📌 備考（スタッフ内部用）" full>
+                  <textarea style={{...S.inp,resize:"vertical",lineHeight:1.5}} rows={2} value={form.remark||""} onChange={e=>setField("remark",e.target.value)} placeholder="例：前日仕込みあり / 機材持ち込み など"/>
                 </Field>
                 {/* イベント画像（複数枚） */}
                 <Field label="📷 イベント関連画像（最大5枚）" full>
