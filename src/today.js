@@ -760,9 +760,16 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
       {/* スタッフ向け注意事項 */}
       <div style={S.secTitle}>📝 スタッフ向け注意事項</div>
       <textarea
-        style={{...S.inp,resize:"vertical",lineHeight:1.6,minHeight:80}}
+        style={{...S.inp,resize:"none",lineHeight:1.6,minHeight:80,overflow:"hidden"}}
         value={dayData.staffNote || ""}
+        ref={(el)=>{
+          // マウント時・再描画時にも高さを内容にフィット
+          if(el){ el.style.height="auto"; el.style.height=el.scrollHeight+"px"; }
+        }}
         onChange={e=>{
+          // 入力に応じて自動で高さ調整
+          e.target.style.height="auto";
+          e.target.style.height=e.target.scrollHeight+"px";
           setDayData({...dayData, staffNote: e.target.value});
           updateField("staffNote", e.target.value);
         }}

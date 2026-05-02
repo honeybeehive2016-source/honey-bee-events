@@ -121,8 +121,11 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
       const blockedMap = {};
       snap.forEach(d => {
         const data = d.data();
-        if (data.layoutId) map[d.id] = data.layoutId;
-        if (Array.isArray(data.blockedSeats)) blockedMap[d.id] = data.blockedSeats;
+        // dateKey フィールドがあればそれを使う（"2026-06-13::イベント名" 形式に対応）
+        // 無ければドキュメントIDをそのまま使う（後方互換）
+        const key = data.dateKey || d.id;
+        if (data.layoutId) map[key] = data.layoutId;
+        if (Array.isArray(data.blockedSeats)) blockedMap[key] = data.blockedSeats;
       });
       setDayLayoutMap(map);
       setDayBlockedMap(blockedMap);
@@ -130,12 +133,16 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
     return () => { unsub(); unsubL(); unsubD(); };
   }, []);
 
-  // 一日のレイアウトを変更
+  // 一日（または一日×イベント）のレイアウトを変更
+  // dateKey: "2026-06-13" or "2026-06-13::イベント名"
+  // ストレージは "::" を含むIDをそのままドキュメントIDに使えないので、別形式で保存
+  const dailyDocId = (dateKey) => dateKey.replace(/::/g, "__EV__");
   const setDayLayout = async (dateKey, layoutId) => {
     setDayLayoutMap(m => ({ ...m, [dateKey]: layoutId }));
     try {
-      await setDoc(doc(db, "daily", dateKey), {
+      await setDoc(doc(db, "daily", dailyDocId(dateKey)), {
         layoutId,
+        dateKey,
         savedAt: new Date().toLocaleString("ja-JP"),
       }, { merge: true });
     } catch (e) {
@@ -143,7 +150,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
     }
   };
 
-  // 一日の使用不可席を保存（タップで切り替え）
+  // 一日（または一日×イベント）の使用不可席を保存（タップで切り替え）
   const toggleDayBlockedSeat = async (dateKey, seatNumber) => {
     const current = dayBlockedMap[dateKey] || [];
     const next = current.includes(seatNumber)
@@ -151,8 +158,9 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
       : [...current, seatNumber];
     setDayBlockedMap(m => ({ ...m, [dateKey]: next }));
     try {
-      await setDoc(doc(db, "daily", dateKey), {
+      await setDoc(doc(db, "daily", dailyDocId(dateKey)), {
         blockedSeats: next,
+        dateKey,
         savedAt: new Date().toLocaleString("ja-JP"),
       }, { merge: true });
     } catch (e) {
@@ -879,8 +887,6 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                           fontSize:".88rem",
                           color: ev.noBooking ? "rgba(255,138,137,0.95)" : "#c9a84c",
                           fontWeight:600,
-                          textDecoration: ev.noBooking ? "line-through" : "none",
-                          textDecorationThickness: ev.noBooking ? "2px" : undefined,
                         }}>🎵 {ev.name}</span>
                       </div>
                       {/* 時間情報 */}
@@ -911,23 +917,26 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                 </div>
               )}
 
-              {/* 席レイアウト（折りたたみ式・デフォルト閉） */}
-              <details style={{marginBottom:"1rem"}}>
-                <summary style={{cursor:"pointer",padding:".5rem .75rem",background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.2)",borderRadius:5,fontSize:".75rem",color:"rgba(201,168,76,0.85)",letterSpacing:".1em",userSelect:"none"}}>
-                  🪑 席レイアウトを表示
-                </summary>
-                <div style={{marginTop:".75rem"}}>
-                  <DayLayoutView
-                    reservations={reservations}
-                    dateKey={calSelectedDate}
-                    layouts={layouts}
-                    selectedLayoutId={dayLayoutId}
-                    onLayoutChange={(id)=>setDayLayout(calSelectedDate, id)}
-                    blockedSeats={dayBlockedMap[calSelectedDate] || []}
-                    onToggleBlocked={(seatNumber)=>toggleDayBlockedSeat(calSelectedDate, seatNumber)}
-                  />
-                </div>
-              </details>
+              {/* 席レイアウト：イベントが0個 or 1個のときは1つだけ表示
+                  複数イベントの場合は各グループ内に表示するのでここでは出さない */}
+              {dayEvents.length <= 1 && (
+                <details style={{marginBottom:"1rem"}}>
+                  <summary style={{cursor:"pointer",padding:".5rem .75rem",background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.2)",borderRadius:5,fontSize:".75rem",color:"rgba(201,168,76,0.85)",letterSpacing:".1em",userSelect:"none"}}>
+                    🪑 席レイアウトを表示
+                  </summary>
+                  <div style={{marginTop:".75rem"}}>
+                    <DayLayoutView
+                      reservations={reservations}
+                      dateKey={calSelectedDate}
+                      layouts={layouts}
+                      selectedLayoutId={dayLayoutMap[calSelectedDate] || (getDefaultLayout(layouts)?._id || "")}
+                      onLayoutChange={(id)=>setDayLayout(calSelectedDate, id)}
+                      blockedSeats={dayBlockedMap[calSelectedDate] || []}
+                      onToggleBlocked={(seatNumber)=>toggleDayBlockedSeat(calSelectedDate, seatNumber)}
+                    />
+                  </div>
+                </details>
+              )}
 
               {/* 予約リスト：イベントごとにセクション分け */}
               {(() => {
@@ -996,6 +1005,10 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                 return groups.map((g, gi) => {
                   const totalP = g.reservations.reduce((s,r)=>s+Number(r.people||0),0);
                   const arrivedC = g.reservations.filter(r=>r.arrived).length;
+                  // 複数イベント時は、イベント名をキーに付けて席レイアウトを分ける
+                  const eventScopedKey = (dayEvents.length > 1 && g.eventName)
+                    ? `${calSelectedDate}::${g.eventName}`
+                    : calSelectedDate;
                   return (
                     <div key={gi} style={{marginBottom: gi<groups.length-1 ? "1.25rem" : 0}}>
                       <div style={{
@@ -1016,6 +1029,25 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                           （{g.reservations.length}組 / 計{totalP}名 / 来店 {arrivedC}/{g.reservations.length}）
                         </span>
                       </div>
+                      {/* 複数イベント時のみ、各イベントに席レイアウト（折りたたみ式） */}
+                      {dayEvents.length > 1 && g.event && (
+                        <details style={{marginBottom:".75rem"}}>
+                          <summary style={{cursor:"pointer",padding:".4rem .7rem",background:"#0a0a0a",border:"1px solid rgba(201,168,76,0.18)",borderRadius:4,fontSize:".7rem",color:"rgba(201,168,76,0.8)",letterSpacing:".08em",userSelect:"none"}}>
+                            🪑 「{g.eventName}」の席レイアウト
+                          </summary>
+                          <div style={{marginTop:".5rem"}}>
+                            <DayLayoutView
+                              reservations={g.reservations}
+                              dateKey={calSelectedDate}
+                              layouts={layouts}
+                              selectedLayoutId={dayLayoutMap[eventScopedKey] || (getDefaultLayout(layouts)?._id || "")}
+                              onLayoutChange={(id)=>setDayLayout(eventScopedKey, id)}
+                              blockedSeats={dayBlockedMap[eventScopedKey] || []}
+                              onToggleBlocked={(seatNumber)=>toggleDayBlockedSeat(eventScopedKey, seatNumber)}
+                            />
+                          </div>
+                        </details>
+                      )}
                       {g.reservations.length === 0 ? (
                         <div style={{textAlign:"center",padding:"1rem",color:"rgba(240,232,208,0.4)",fontSize:".78rem",background:"#111",borderRadius:5}}>
                           {dayEvents.length > 1 ? "このイベントの予約はまだありません" : "この日の予約はありません"}
