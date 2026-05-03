@@ -158,13 +158,6 @@ function formatAttachmentSizeBytes(bytes) {
   return `${(n / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-/** PDF を埋め込み表示するときの URL（ビューアのツールバー等を抑える試み。未対応ブラウザでは無視される場合あり） */
-function pdfEmbedViewerSrc(url) {
-  if (!url || url === "#") return url;
-  if (url.includes("#")) return url;
-  return `${url}#toolbar=0&navpanes=0`;
-}
-
 /** YYYY-MM-DD の利用日が有効か */
 function isValidDesiredDateYmd(s) {
   return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s.trim());
@@ -293,60 +286,37 @@ function RentalAttachmentTile({ att, idx, readOnly, onRemove }) {
   }
 
   if (isPdf) {
-    const pdfSrc = url !== "#" ? pdfEmbedViewerSrc(url) : url;
+    const canOpen = url && url !== "#";
     return (
       <div style={wrapStyle}>
-        {url !== "#" ? (
-          <div
-            onWheel={(e) => e.preventDefault()}
-            style={{
-              height: 200,
-              borderRadius: 8,
-              overflow: "hidden",
-              border: "1px solid rgba(201,168,76,0.2)",
-              background: "#0a0a0a",
-              flexShrink: 0,
-              position: "relative",
-            }}
-          >
-            <iframe
-              title={att.originalName || "PDF"}
-              src={pdfSrc}
-              tabIndex={-1}
-              style={{
-                position: "absolute",
-                inset: 0,
-                width: "100%",
-                height: "100%",
-                border: "none",
-                display: "block",
-                pointerEvents: "none",
-              }}
-            />
-          </div>
-        ) : (
-          <div
-            style={{
-              height: 200,
-              borderRadius: 8,
-              overflow: "hidden",
-              border: "1px dashed rgba(201,168,76,0.25)",
-              background: "#101010",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "rgba(240,232,208,0.35)",
-              fontSize: ".68rem",
-            }}
-          >
-            プレビュー不可
-          </div>
-        )}
+        <div
+          style={{
+            minHeight: 120,
+            borderRadius: 8,
+            border: "1px solid rgba(201,168,76,0.22)",
+            background: "linear-gradient(145deg, #1a1510 0%, #0e0e0e 100%)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: ".35rem",
+            padding: ".85rem .65rem",
+            flexShrink: 0,
+            boxSizing: "border-box",
+          }}
+        >
+          <div style={{ fontSize: "2rem", lineHeight: 1 }} aria-hidden>📄</div>
+          <div style={{ fontSize: ".62rem", letterSpacing: ".2em", textTransform: "uppercase", color: "#c9a84c", fontWeight: 600 }}>PDF</div>
+        </div>
         <div style={{ fontSize: ".65rem", color: "rgba(240,232,208,0.55)", wordBreak: "break-all", lineHeight: 1.35 }}>{att.originalName || "PDF"}</div>
-        <div style={{ fontSize: ".6rem", color: "rgba(240,232,208,0.4)" }}>PDF ・ {formatAttachmentSizeBytes(att.sizeBytes)}</div>
-        <a href={url} target="_blank" rel="noopener noreferrer" style={attachmentOpenLinkStyle}>
-          PDFを開く
-        </a>
+        <div style={{ fontSize: ".6rem", color: "rgba(240,232,208,0.4)" }}>{formatAttachmentSizeBytes(att.sizeBytes)}</div>
+        {canOpen ? (
+          <a href={url} target="_blank" rel="noopener noreferrer" style={attachmentOpenLinkStyle}>
+            PDFを開く
+          </a>
+        ) : (
+          <span style={{ ...attachmentOpenLinkStyle, opacity: 0.45, cursor: "not-allowed", pointerEvents: "none" }}>PDFを開く</span>
+        )}
         {removeBtn}
       </div>
     );
@@ -1591,40 +1561,53 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
           ))}
         </>
       )}
-      {!listIsEmpty && rentalsPast.length > 0 && (
-        <div style={{ marginTop: rentalsUpcoming.length ? "1.25rem" : 0, marginBottom: "1rem" }}>
-          <button
-            type="button"
-            onClick={() => setShowPastRentals((v) => !v)}
-            style={{
-              width: "100%",
-              textAlign: "left",
-              padding: ".55rem .75rem",
-              marginBottom: showPastRentals ? ".5rem" : ".15rem",
-              background: "#111",
-              border: "1px solid rgba(201,168,76,0.18)",
-              borderRadius: 6,
-              color: "#c9a84c",
-              fontFamily: "inherit",
-              fontSize: ".72rem",
-              cursor: "pointer",
-              letterSpacing: ".06em",
-            }}
-          >
-            {showPastRentals ? "▼" : "▶"} 過去の貸切履歴（{rentalsPast.length}件）
-          </button>
-          {showPastRentals &&
-            rentalsPast.map((r) => (
-              <RentalListCard
-                key={r._id}
-                r={r}
-                onOpenDetail={() => startDetail(r)}
-                onOpenEdit={() => startEdit(r)}
-                onTrash={() => handleDelete(r._id)}
-              />
-            ))}
-        </div>
-      )}
+      {/* 過去の貸切履歴：0件でも折りたたみ行を常時表示（rentalsPast.length>0 条件で非表示になっていた不具合の修正） */}
+      <div
+        style={{
+          marginTop: !listIsEmpty && rentalsUpcoming.length > 0 ? "1.25rem" : listIsEmpty ? "0.5rem" : "0",
+          marginBottom: "1rem",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setShowPastRentals((v) => !v)}
+          style={{
+            width: "100%",
+            textAlign: "left",
+            padding: ".65rem .9rem",
+            marginBottom: showPastRentals ? ".55rem" : ".15rem",
+            background: "rgba(201,168,76,0.08)",
+            border: "1px solid rgba(201,168,76,0.35)",
+            borderRadius: 6,
+            color: "#f0e8d0",
+            fontFamily: "inherit",
+            fontSize: ".78rem",
+            fontWeight: 600,
+            cursor: "pointer",
+            letterSpacing: ".04em",
+            boxShadow: "0 1px 0 rgba(0,0,0,0.35)",
+          }}
+        >
+          {showPastRentals ? "▼" : "▶"} 過去の貸切履歴（{rentalsPast.length}件）
+        </button>
+        {showPastRentals && rentalsPast.length > 0 &&
+          rentalsPast.map((r) => (
+            <RentalListCard
+              key={r._id}
+              r={r}
+              onOpenDetail={() => startDetail(r)}
+              onOpenEdit={() => startEdit(r)}
+              onTrash={() => handleDelete(r._id)}
+            />
+          ))}
+        {showPastRentals && rentalsPast.length === 0 && (
+          <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.38)", padding: ".35rem 0 .25rem", lineHeight: 1.5 }}>
+            {listIsEmpty
+              ? "この条件に一致する貸切がありません。"
+              : "この条件では過去の貸切（利用日が今日より前）はありません。日付未設定の案件は下の「日付未設定」に含まれます。"}
+          </div>
+        )}
+      </div>
       {!listIsEmpty && rentalsUndated.length > 0 && (
         <>
           <div style={{ ...S.secTitle, marginTop: rentalsUpcoming.length || rentalsPast.length ? "1.25rem" : 0, marginBottom: ".65rem" }}>
