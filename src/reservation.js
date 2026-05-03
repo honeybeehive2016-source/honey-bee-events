@@ -59,6 +59,14 @@ function findEventByDateAndName(events, date, eventName) {
   if (!date || !eventName) return null;
   return events.find(e => e.date === date && e.name === eventName) || null;
 }
+/** イベント名に「貸切」「貸し切り」を含むか（お客様フォームと同じ判定。電話予約の候補から除外する） */
+function isRentalEventName(name) {
+  return /貸切|貸し切り/.test(String(name || ""));
+}
+/** スタッフの電話予約フォーム用：指定日のうち貸切以外のイベント */
+function staffReservationEventsForDate(allEvents, date) {
+  return allEvents.filter(e => e.date === date && !isRentalEventName(e.name));
+}
 /** UI にご予約アーティストを出すのは perf に `/` があるイベントのみ */
 function isMultiArtistEvent(ev) {
   return !!(ev && String(ev.perf || "").includes("/"));
@@ -416,7 +424,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
 
   const startNew = () => {
     const date = dateFilter || calSelectedDate || todayLocal;
-    const evs = events.filter(ev => ev.date === date);
+    const evs = staffReservationEventsForDate(events, date);
     let nextEventName = "";
     let nextTargetArtist = TARGET_ARTIST_NONE;
     if (evs.length === 1) {
@@ -527,8 +535,8 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
 
   // ===== 編集画面 =====
   if (view === "edit") {
-    // 選択日のイベント候補
-    const candidateEvents = events.filter(e => e.date === form.date);
+    // 選択日のイベント候補（貸切は電話予約の対象外）
+    const candidateEvents = staffReservationEventsForDate(events, form.date);
     return (
       <div style={{padding:"1.5rem 2rem",maxWidth:800,margin:"0 auto"}} className="hb-view">
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1rem",flexWrap:"wrap",gap:".5rem"}}>
@@ -543,12 +551,12 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
             <input type="date" style={S.inp} value={form.date} onChange={e=>{
               const newDate = e.target.value;
               setField("date", newDate);
-              // 日付選択でイベント名を自動入力
-              const evs = events.filter(ev => ev.date === newDate);
+              // 日付選択でイベント名を自動入力（貸切は除外）
+              const evs = staffReservationEventsForDate(events, newDate);
               if (evs.length === 1) {
                 setField("eventName", evs[0].name);
                 setField("targetArtist", resolveTargetArtistValue(form.targetArtist, evs[0]));
-              } else if (evs.length === 0) {
+              } else {
                 setField("eventName", "");
                 setField("targetArtist", TARGET_ARTIST_NONE);
               }
