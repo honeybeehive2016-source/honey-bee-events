@@ -13,6 +13,55 @@ export function kitchenCategoryLabel(key) {
   return KITCHEN_NOTE_CATEGORIES.find(c => c.key === key)?.label || key;
 }
 
+/** 一覧カードのカテゴリ色分け（Firestore は変更しない） */
+const CATEGORY_VISUAL = {
+  prep: {
+    accent: "#5aa9ff",
+    rowBg: "rgba(90, 169, 255, 0.07)",
+    rowBgImportant: "linear-gradient(180deg, rgba(244,162,97,0.1), rgba(90, 169, 255, 0.07))",
+    border: "rgba(90, 169, 255, 0.32)",
+    badgeBg: "rgba(90, 169, 255, 0.22)",
+    badgeColor: "#a8d4ff",
+  },
+  stock: {
+    accent: "#e76f51",
+    rowBg: "rgba(231, 111, 81, 0.08)",
+    rowBgImportant: "linear-gradient(180deg, rgba(244,162,97,0.11), rgba(231, 111, 81, 0.08))",
+    border: "rgba(231, 111, 81, 0.38)",
+    badgeBg: "rgba(231, 111, 81, 0.22)",
+    badgeColor: "#ffc9b5",
+  },
+  event_prep: {
+    accent: "#9b7ed9",
+    rowBg: "rgba(155, 126, 217, 0.09)",
+    rowBgImportant: "linear-gradient(180deg, rgba(244,162,97,0.1), rgba(155, 126, 217, 0.09))",
+    border: "rgba(155, 126, 217, 0.38)",
+    badgeBg: "rgba(155, 126, 217, 0.24)",
+    badgeColor: "#dcc9fa",
+  },
+  notice: {
+    accent: "#c9a84c",
+    rowBg: "rgba(201, 168, 76, 0.1)",
+    rowBgImportant: "linear-gradient(180deg, rgba(244,162,97,0.1), rgba(201, 168, 76, 0.1))",
+    border: "rgba(201, 168, 76, 0.38)",
+    badgeBg: "rgba(201, 168, 76, 0.22)",
+    badgeColor: "#edd89a",
+  },
+  _default: {
+    accent: "#7ec8b8",
+    rowBg: "rgba(126, 200, 184, 0.06)",
+    rowBgImportant: "linear-gradient(180deg, rgba(244,162,97,0.1), rgba(126, 200, 184, 0.06))",
+    border: "rgba(126, 200, 184, 0.28)",
+    badgeBg: "rgba(126, 200, 184, 0.18)",
+    badgeColor: "#b8ebe0",
+  },
+};
+
+function getCategoryVisual(categoryKey) {
+  const k = String(categoryKey || "").trim();
+  return CATEGORY_VISUAL[k] || CATEGORY_VISUAL._default;
+}
+
 /** 旧データ：targetDates が無ければ date を 1 日表示とみなす */
 export function getResolvedTargetDates(n) {
   if (Array.isArray(n.targetDates) && n.targetDates.length > 0) return n.targetDates;
@@ -307,17 +356,22 @@ export default function KitchenNotesModule() {
             <div style={{ display:"flex", flexDirection:"column", gap:".5rem" }}>
               {incomingKitchenNotes.map(n => {
                 const nt = getNoteType(n);
+                const cv = getCategoryVisual(n.category);
                 const bodyText = getNoteText(n);
                 const fromLabel = n.sourceDate === selectedDate
                   ? "本日投稿"
                   : `${fmtDate(n.sourceDate || "").replace(/^\d+年/, "")} 投稿`;
+                const rowBackground = n.important ? cv.rowBgImportant : cv.rowBg;
+                const rowBorder = n.important ? "rgba(244,162,97,0.42)" : cv.border;
                 return (
                   <div
                     key={n._id}
                     style={{
                       padding:".65rem .75rem",
-                      background: n.important ? "rgba(244,162,97,0.08)" : "#0a0a0a",
-                      border:`1px solid ${n.important ? "rgba(244,162,97,0.35)" : "rgba(126,200,127,0.15)"}`,
+                      paddingLeft:".7rem",
+                      background: rowBackground,
+                      border:`1px solid ${rowBorder}`,
+                      borderLeft:`4px solid ${cv.accent}`,
                       borderRadius:5,
                       opacity: nt === "item" && n.done ? 0.72 : 1,
                     }}
@@ -326,7 +380,7 @@ export default function KitchenNotesModule() {
                       <span style={{ fontSize:".55rem", padding:".1rem .4rem", borderRadius:3, background: nt === "note" ? "rgba(126,200,227,0.18)" : "rgba(126,200,127,0.15)", color: nt === "note" ? "#9cd4f0" : "#7ec8b8", letterSpacing:".05em" }}>
                         {nt === "note" ? "📝 自由記載" : "☑ チェック項目"}
                       </span>
-                      <span style={{ fontSize:".58rem", padding:".12rem .45rem", borderRadius:3, background:"rgba(126,200,127,0.12)", color:"#7ec8b8", letterSpacing:".05em" }}>
+                      <span style={{ fontSize:".58rem", padding:".12rem .45rem", borderRadius:3, background: cv.badgeBg, color: cv.badgeColor, letterSpacing:".05em", border:`1px solid ${cv.border}` }}>
                         {kitchenCategoryLabel(n.category)}
                       </span>
                       {n.author ? (
