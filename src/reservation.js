@@ -935,6 +935,23 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                           🕒 {ev.open && `開店 ${ev.open}`}{ev.open && ev.start && " / "}{ev.start && `開演 ${ev.start}`}
                         </div>
                       )}
+                      {/* 席指定不可バッジ */}
+                      {ev.seatable === false && (
+                        <div style={{
+                          display:"inline-block",
+                          marginTop:".35rem",
+                          marginBottom:".15rem",
+                          padding:".28rem .65rem",
+                          background:"rgba(244,162,97,0.12)",
+                          border:"1px solid rgba(244,162,97,0.5)",
+                          borderRadius:4,
+                          fontSize:".7rem",
+                          color:"#f4a261",
+                          fontWeight:600,
+                        }}>
+                          🪑 席指定不可（お客様はお席を選べません）
+                        </div>
+                      )}
                       {/* スタッフ向け注意事項 */}
                       {ev.notes && (
                         <div style={{
