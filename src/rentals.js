@@ -214,9 +214,19 @@ const attachmentOpenLinkStyle = {
 };
 
 function RentalAttachmentTile({ att, idx, readOnly, onRemove }) {
+  const [pdfModalOpen, setPdfModalOpen] = useState(false);
   const url = att.downloadURL || "#";
   const isImg = isImageAttachmentRecord(att);
   const isPdf = isPdfAttachmentRecord(att);
+
+  useEffect(() => {
+    if (!pdfModalOpen) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") setPdfModalOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [pdfModalOpen]);
   const wrapStyle = {
     width: 280,
     maxWidth: "100%",
@@ -287,38 +297,119 @@ function RentalAttachmentTile({ att, idx, readOnly, onRemove }) {
 
   if (isPdf) {
     const canOpen = url && url !== "#";
+    const pdfLabel = att.originalName || "PDF";
     return (
-      <div style={wrapStyle}>
-        <div
-          style={{
-            minHeight: 120,
-            borderRadius: 8,
-            border: "1px solid rgba(201,168,76,0.22)",
-            background: "linear-gradient(145deg, #1a1510 0%, #0e0e0e 100%)",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: ".35rem",
-            padding: ".85rem .65rem",
-            flexShrink: 0,
-            boxSizing: "border-box",
-          }}
-        >
-          <div style={{ fontSize: "2rem", lineHeight: 1 }} aria-hidden>📄</div>
-          <div style={{ fontSize: ".62rem", letterSpacing: ".2em", textTransform: "uppercase", color: "#c9a84c", fontWeight: 600 }}>PDF</div>
+      <>
+        <div style={wrapStyle}>
+          <div
+            style={{
+              minHeight: 120,
+              borderRadius: 8,
+              border: "1px solid rgba(201,168,76,0.22)",
+              background: "linear-gradient(145deg, #1a1510 0%, #0e0e0e 100%)",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: ".35rem",
+              padding: ".85rem .65rem",
+              flexShrink: 0,
+              boxSizing: "border-box",
+            }}
+          >
+            <div style={{ fontSize: "2rem", lineHeight: 1 }} aria-hidden>📄</div>
+            <div style={{ fontSize: ".62rem", letterSpacing: ".2em", textTransform: "uppercase", color: "#c9a84c", fontWeight: 600 }}>PDF</div>
+          </div>
+          <div style={{ fontSize: ".65rem", color: "rgba(240,232,208,0.55)", wordBreak: "break-all", lineHeight: 1.35 }}>{pdfLabel}</div>
+          <div style={{ fontSize: ".6rem", color: "rgba(240,232,208,0.4)" }}>{formatAttachmentSizeBytes(att.sizeBytes)}</div>
+          {canOpen ? (
+            <a href={url} target="_blank" rel="noopener noreferrer" style={attachmentOpenLinkStyle}>
+              PDFを開く
+            </a>
+          ) : (
+            <span style={{ ...attachmentOpenLinkStyle, opacity: 0.45, cursor: "not-allowed", pointerEvents: "none" }}>PDFを開く</span>
+          )}
+          <button
+            type="button"
+            disabled={!canOpen}
+            onClick={() => canOpen && setPdfModalOpen(true)}
+            style={{
+              ...S.btn("ghost"),
+              width: "100%",
+              boxSizing: "border-box",
+              padding: ".48rem 1rem",
+              fontSize: ".68rem",
+              letterSpacing: ".06em",
+              opacity: canOpen ? 1 : 0.45,
+              cursor: canOpen ? "pointer" : "not-allowed",
+            }}
+          >
+            PDFプレビュー
+          </button>
+          {removeBtn}
         </div>
-        <div style={{ fontSize: ".65rem", color: "rgba(240,232,208,0.55)", wordBreak: "break-all", lineHeight: 1.35 }}>{att.originalName || "PDF"}</div>
-        <div style={{ fontSize: ".6rem", color: "rgba(240,232,208,0.4)" }}>{formatAttachmentSizeBytes(att.sizeBytes)}</div>
-        {canOpen ? (
-          <a href={url} target="_blank" rel="noopener noreferrer" style={attachmentOpenLinkStyle}>
-            PDFを開く
-          </a>
-        ) : (
-          <span style={{ ...attachmentOpenLinkStyle, opacity: 0.45, cursor: "not-allowed", pointerEvents: "none" }}>PDFを開く</span>
-        )}
-        {removeBtn}
-      </div>
+        {pdfModalOpen && canOpen ? (
+          <div
+            role="presentation"
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 220,
+              background: "rgba(0,0,0,0.88)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "1rem",
+            }}
+            onClick={() => setPdfModalOpen(false)}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="PDFプレビュー"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: "min(960px, 100%)",
+                height: "min(88vh, 900px)",
+                maxHeight: "88vh",
+                background: "#0d0d0d",
+                border: "1px solid rgba(201,168,76,0.35)",
+                borderRadius: 10,
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+                boxShadow: "0 12px 48px rgba(0,0,0,0.55)",
+              }}
+            >
+              <div
+                style={{
+                  flexShrink: 0,
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  gap: ".5rem",
+                  padding: ".65rem .85rem",
+                  borderBottom: "1px solid rgba(201,168,76,0.2)",
+                  background: "rgba(201,168,76,0.06)",
+                }}
+              >
+                <div style={{ fontSize: ".78rem", color: "#f0e8d0", fontWeight: 600, flex: "1 1 160px", minWidth: 0, wordBreak: "break-all" }}>{pdfLabel}</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: ".4rem", marginLeft: "auto" }}>
+                  <a href={url} target="_blank" rel="noopener noreferrer" style={{ ...S.btn("sm"), textDecoration: "none", display: "inline-block", borderColor: "rgba(201,168,76,0.45)", color: "#c9a84c" }}>
+                    新しいタブで開く
+                  </a>
+                  <button type="button" style={S.btn("gold")} onClick={() => setPdfModalOpen(false)}>
+                    閉じる
+                  </button>
+                </div>
+              </div>
+              <div style={{ flex: 1, minHeight: 0, position: "relative", background: "#111" }}>
+                <iframe key={url} title={pdfLabel} src={url} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", border: "none", display: "block" }} />
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </>
     );
   }
 
