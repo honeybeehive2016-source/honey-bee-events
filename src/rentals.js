@@ -1,0 +1,970 @@
+import { useState, useEffect } from "react";
+import { db } from "./firebase";
+import { collection, doc, setDoc, deleteDoc, onSnapshot, getDoc } from "firebase/firestore";
+
+export const RENTAL_STATUSES = [
+  { key: "new", label: "未対応", color: "#e24b4a" },
+  { key: "replied", label: "返信済み", color: "#7ec8e3" },
+  { key: "checking", label: "条件確認中", color: "#f4a261" },
+  { key: "quoted", label: "見積提出済み", color: "#c9a84c" },
+  { key: "hold", label: "仮押さえ", color: "#b58cd1" },
+  { key: "won", label: "成約", color: "#7ec87e" },
+  { key: "lost", label: "失注", color: "#888888" },
+  { key: "done", label: "完了", color: "#5a8a5a" },
+];
+
+export const emptyRental = {
+  inquiryDate: "", desiredDate: "", desiredTime: "",
+  purpose: "", people: "", budget: "",
+  food: "", drinks: "", stage: false, sound: false, mic: false, projector: false,
+  contactName: "", phone: "", email: "",
+  customerCompany: "",
+  status: "new",
+  replyStatus: "", quoteStatus: "",
+  outcome: "",
+  memo: "",
+  quoteItems: [],
+  quoteNo: "",
+  invoiceNo: "",
+  quoteSubject: "",
+  invoiceSubject: "",
+  validityDate: "",
+  // 予約金管理
+  depositPolicy: "required",
+  depositReceived: false,
+  depositDate: "",
+  depositAmount: "30000",
+  depositMemo: "",
+  staff: "",
+  documentHistory: [],
+};
+
+// 担当者リスト
+export const STAFF_LIST = ["西崎", "渡辺"];
+
+// プリセット項目
+const PRESET_ITEMS = [
+  // ホールレンタル料金
+  { name: "ホールレンタル料金（平日10:00〜15:00）", price: 50000, unit: "式", group: "ホール" },
+  { name: "ホールレンタル料金（平日15:00〜21:00）", price: 80000, unit: "式", group: "ホール" },
+  { name: "ホールレンタル料金（土日祝10:00〜15:00）", price: 80000, unit: "式", group: "ホール" },
+  { name: "ホールレンタル料金（土日祝15:00〜21:00）", price: 150000, unit: "式", group: "ホール" },
+  // 飲み放題
+  { name: "飲み放題（1時間）", price: 1500, unit: "名", group: "飲み放題" },
+  { name: "飲み放題（2時間）", price: 2500, unit: "名", group: "飲み放題" },
+  { name: "飲み放題（3時間）", price: 3500, unit: "名", group: "飲み放題" },
+  // コース料理
+  { name: "コース料理（5品）", price: 2500, unit: "名", group: "料理" },
+  { name: "コース料理（7〜8品）", price: 3500, unit: "名", group: "料理" },
+  { name: "コース料理（10品）", price: 4500, unit: "名", group: "料理" },
+];
+
+const S = {
+  card: { background:"#111", border:"1px solid rgba(201,168,76,0.1)", borderRadius:6, padding:"1rem 1.25rem", marginBottom:".75rem", display:"grid", gridTemplateColumns:"1fr auto", gap:".75rem", alignItems:"center" },
+  secTitle: { fontFamily:"Georgia,serif", fontSize:".7rem", letterSpacing:".25em", textTransform:"uppercase", color:"#c9a84c", borderBottom:"1px solid rgba(201,168,76,0.2)", paddingBottom:".5rem", marginBottom:".75rem", marginTop:"1.25rem" },
+  lbl: { fontSize:".65rem", letterSpacing:".12em", textTransform:"uppercase", color:"rgba(201,168,76,0.6)", fontWeight:500, display:"block", marginBottom:".28rem" },
+  inp: { background:"#111", border:"1px solid rgba(201,168,76,0.14)", borderRadius:4, color:"#f0e8d0", fontFamily:"inherit", fontSize:".85rem", padding:".5rem .65rem", outline:"none", width:"100%" },
+  btn: (v) => {
+    const b = { padding:".5rem 1rem", borderRadius:4, fontFamily:"inherit", fontSize:".72rem", fontWeight:500, letterSpacing:".12em", textTransform:"uppercase", cursor:"pointer", border:"none" };
+    if (v==="gold") return { ...b, background:"#c9a84c", color:"#0a0a0a" };
+    if (v==="ghost") return { ...b, background:"transparent", color:"#c9a84c", border:"1px solid rgba(201,168,76,0.27)" };
+    if (v==="danger") return { ...b, background:"transparent", color:"#e24b4a", border:"1px solid rgba(226,75,74,0.27)" };
+    if (v==="sm") return { ...b, padding:".3rem .65rem", fontSize:".62rem", background:"transparent", color:"#c9a84c", border:"1px solid rgba(201,168,76,0.27)" };
+    if (v==="ai") return { ...b, background:"linear-gradient(135deg,#7c4dff,#c9a84c)", color:"#fff", padding:".4rem .9rem", fontSize:".65rem" };
+    return b;
+  },
+};
+
+const StatusBadge = ({ status }) => {
+  const s = RENTAL_STATUSES.find(x => x.key === status) || RENTAL_STATUSES[0];
+  return (
+    <span style={{display:"inline-block",padding:".2rem .55rem",borderRadius:3,fontSize:".58rem",letterSpacing:".1em",textTransform:"uppercase",background:s.color+"22",color:s.color,border:`1px solid ${s.color}55`}}>
+      {s.label}
+    </span>
+  );
+};
+
+const Field = ({ label, children, full }) => (
+  <div style={{ gridColumn: full ? "1/-1" : undefined, display:"flex", flexDirection:"column" }}>
+    <label style={S.lbl}>{label}</label>
+    {children}
+  </div>
+);
+
+// 連番取得（Firestoreで集中管理）
+async function getNextNumber(type) {
+  const ref = doc(db, "counters", type);
+  const snap = await getDoc(ref);
+  let next = 10001;
+  if (snap.exists()) next = (snap.data().value || 10000) + 1;
+  await setDoc(ref, { value: next });
+  return String(next);
+}
+
+const COMPANY_INFO = {
+  name: "ビーハイブ株式会社",
+  zip: "〒247-0056",
+  address: "鎌倉市大船1-22-19 第2三友ビル3F",
+  tel: "0467-46-5576",
+  hp: "https://www.ofunahoneybee.net",
+  email: "info@beehive2016.com",
+  staff: "西崎",
+  bank: "湘南信用金庫 大船支店",
+  bankNum: "(普) 4225938",
+  bankName: "ビーハイブ カブシキガイシャ",
+  invoiceRegNo: "T9021001059544",
+};
+
+function buildDocumentHTMLFromSnapshot(snap) {
+  const isInvoice = snap.type === "invoice";
+  const title = isInvoice ? "御請求書" : "御見積書";
+  const dateLabel = isInvoice ? "請求日" : "見積日";
+  const noLabel = isInvoice ? "請求No." : "見積No.";
+
+  const docDate = snap.date ? new Date(snap.date) : new Date();
+  const dateStr = `${docDate.getFullYear()}年${docDate.getMonth()+1}月${docDate.getDate()}日`;
+
+  const subtotal = snap.subtotal || snap.items.reduce((s,i)=>s+(Number(i.qty||0)*Number(i.price||0)),0);
+  const tax = snap.tax || Math.round(subtotal * 0.1);
+  const total = snap.total || subtotal + tax;
+  const depositAmount = snap.depositAmount || 0;
+  const balance = snap.balance != null ? snap.balance : (total - depositAmount);
+  const showDeposit = isInvoice && depositAmount > 0;
+
+  const validityStr = snap.validityDate
+    ? `${new Date(snap.validityDate).getFullYear()}年${new Date(snap.validityDate).getMonth()+1}月${new Date(snap.validityDate).getDate()}日`
+    : "発行日より30日間";
+
+  const customerName = snap.customerName || "";
+  const items = snap.items || [];
+
+  const minRows = 15;
+  const itemRows = [];
+  for (let i = 0; i < Math.max(minRows, items.length); i++) {
+    const it = items[i];
+    if (it) {
+      itemRows.push(`
+        <tr>
+          <td class="desc">${escapeHtml(it.name||"")}</td>
+          <td class="num">${it.qty||""}</td>
+          <td class="num">${it.unit||""}</td>
+          <td class="num">${it.price?Number(it.price).toLocaleString():""}</td>
+          <td class="num">${it.qty&&it.price?(Number(it.qty)*Number(it.price)).toLocaleString():""}</td>
+        </tr>`);
+    } else {
+      itemRows.push(`<tr><td class="desc">　</td><td></td><td></td><td></td><td></td></tr>`);
+    }
+  }
+
+  return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>${title}</title>
+<style>
+  @page { size: A4; margin: 12mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "游明朝", "Yu Mincho", "ヒラギノ明朝 ProN", serif; color: #000; background: #fff; padding: 0; font-size: 10.5pt; line-height: 1.5; }
+  .doc { max-width: 186mm; margin: 0 auto; position: relative; }
+  h1 { text-align: center; font-size: 22pt; letter-spacing: 1em; padding-left: 1em; font-weight: normal; margin-bottom: 1.5em; }
+  .top { display: grid; grid-template-columns: 1fr 1fr; gap: 1em; margin-bottom: 1em; }
+  .customer { padding-top: .5em; }
+  .customer-name { font-size: 14pt; border-bottom: 1px solid #000; padding: .5em 0 .25em; min-width: 200px; display: inline-block; }
+  .customer-name + span { font-size: 11pt; padding-left: .5em; }
+  .meta { text-align: right; font-size: 10pt; }
+  .meta-row { display: flex; justify-content: flex-end; gap: .5em; margin-bottom: .25em; }
+  .meta-label { width: 60px; }
+  .meta-val { min-width: 100px; border-bottom: 1px solid #000; padding: 0 .3em; text-align: left; }
+  .info-block { display: grid; grid-template-columns: 1fr 1fr; gap: 1em; margin-bottom: 1em; align-items: start; }
+  .left-info { font-size: 10pt; line-height: 1.7; }
+  .left-info .greeting { margin-bottom: .5em; }
+  .left-info .field { margin-bottom: .3em; display: flex; align-items: center; gap: .5em; }
+  .left-info .field-label { white-space: nowrap; }
+  .left-info .field-value { flex: 1; border-bottom: 1px solid #000; padding: 0 .3em; }
+  .company { font-size: 10pt; line-height: 1.7; }
+  .total-box { border: 2px solid #000; padding: .6em 1em; margin: .5em 0 1em; display: flex; align-items: center; gap: 1em; }
+  .total-label { font-size: 12pt; font-weight: bold; }
+  .total-value { font-size: 14pt; font-weight: bold; flex: 1; }
+  .tax-note { font-size: 9pt; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { border: 1px solid #000; padding: .35em .5em; font-size: 9.5pt; }
+  th { background: #d0d0d0; font-weight: normal; }
+  .desc { text-align: left; }
+  .num { text-align: right; }
+  .total-row td { font-weight: bold; background: #f5f5f5; }
+  .footer { margin-top: 1em; font-size: 9.5pt; line-height: 1.7; }
+  .footer-grid { display: grid; grid-template-columns: 1fr; gap: .3em; }
+  .bank { display: flex; gap: 1em; }
+  .bank-label { white-space: nowrap; }
+  .memo-box { border: 1px solid #000; padding: .5em; margin-top: 1em; min-height: 50px; }
+  .memo-label { font-size: 9pt; }
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .no-print { display: none; }
+  }
+  .actions { text-align: center; margin: 1em 0; }
+  .btn { padding: .6em 1.5em; font-size: 11pt; cursor: pointer; background: #c9a84c; border: none; color: #000; font-weight: bold; border-radius: 4px; margin: 0 .3em; }
+  .btn-secondary { background: #555; color: #fff; }
+</style>
+</head>
+<body>
+<div class="actions no-print">
+  <button class="btn" onclick="window.print()">🖨 PDFとして保存 / 印刷</button>
+  <button class="btn btn-secondary" onclick="window.close()">閉じる</button>
+</div>
+<div class="doc">
+  <h1>${title}</h1>
+  <div class="top">
+    <div class="customer">
+      <span class="customer-name">${escapeHtml(customerName)}</span><span>様</span>
+    </div>
+    <div class="meta">
+      <div class="meta-row"><span class="meta-label">${noLabel}</span><span class="meta-val">${escapeHtml(snap.no||"")}</span></div>
+      <div class="meta-row"><span class="meta-label">${dateLabel}</span><span class="meta-val">${dateStr}</span></div>
+    </div>
+  </div>
+
+  <div class="info-block">
+    <div class="left-info">
+      <div class="greeting">下記のとおり、${isInvoice?"御請求":"御見積"}申し上げます。</div>
+      <div class="field">
+        <span class="field-label">件　名：</span>
+        <span class="field-value">${escapeHtml(snap.subject||"")}</span>
+      </div>
+      ${!isInvoice?`<div class="field">
+        <span class="field-label">有効期限：</span>
+        <span class="field-value">${validityStr}</span>
+      </div>`:""}
+    </div>
+    <div class="company">
+      <div><strong>${COMPANY_INFO.name}</strong></div>
+      <div>${COMPANY_INFO.zip}</div>
+      <div>${COMPANY_INFO.address}</div>
+      <div>TEL：${COMPANY_INFO.tel}</div>
+      <div>HP：<a href="${COMPANY_INFO.hp}">${COMPANY_INFO.hp.replace("https://","")}</a></div>
+      <div>E-Mail：${COMPANY_INFO.email}</div>
+      <div>担当：${COMPANY_INFO.staff}</div>
+      <div style="font-size: 9pt; margin-top: .25em;">登録番号：${COMPANY_INFO.invoiceRegNo}</div>
+    </div>
+  </div>
+
+  <div class="total-box">
+    <span class="total-label">${showDeposit?"ご請求金額":"合計金額"}</span>
+    <span class="total-value">¥${(showDeposit?balance:total).toLocaleString()}</span>
+    <span class="tax-note">（税込）</span>
+  </div>
+
+  ${showDeposit?`
+  <div style="font-size: 9.5pt; margin: -0.5em 0 0.7em; padding: 0.4em 0.8em; background: #f5f5f5; border-left: 3px solid #888;">
+    合計金額 ¥${total.toLocaleString()}（税込）から、ご入金済み予約金 ¥${depositAmount.toLocaleString()}${snap.depositDate?`（${new Date(snap.depositDate).getFullYear()}/${new Date(snap.depositDate).getMonth()+1}/${new Date(snap.depositDate).getDate()}受領）`:""} を差し引いた残額となります。
+  </div>`:""}
+
+  <table>
+    <thead>
+      <tr>
+        <th class="desc" style="width: 50%;">摘要</th>
+        <th style="width: 10%;">数量</th>
+        <th style="width: 10%;">単位</th>
+        <th style="width: 15%;">単価（税抜）</th>
+        <th style="width: 15%;">金額</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${itemRows.join("")}
+      <tr class="total-row">
+        <td colspan="4" class="num">小計</td>
+        <td class="num">¥${subtotal.toLocaleString()}</td>
+      </tr>
+      <tr class="total-row">
+        <td colspan="4" class="num">消費税（10%）</td>
+        <td class="num">¥${tax.toLocaleString()}</td>
+      </tr>
+      <tr class="total-row">
+        <td colspan="4" class="num">合計</td>
+        <td class="num">¥${total.toLocaleString()}</td>
+      </tr>
+      ${showDeposit?`
+      <tr class="total-row">
+        <td colspan="4" class="num">ご入金済み（予約金）</td>
+        <td class="num">－¥${depositAmount.toLocaleString()}</td>
+      </tr>
+      <tr class="total-row" style="background:#e8e8e8;">
+        <td colspan="4" class="num"><strong>ご請求金額（残額）</strong></td>
+        <td class="num"><strong>¥${balance.toLocaleString()}</strong></td>
+      </tr>`:""}
+    </tbody>
+  </table>
+
+  ${isInvoice?`
+  <div class="footer">
+    <div class="footer-grid">
+      <div class="bank"><span class="bank-label">振込先</span><span>${COMPANY_INFO.bank}</span></div>
+      <div class="bank"><span class="bank-label">口座番号</span><span>${COMPANY_INFO.bankNum}</span></div>
+      <div class="bank"><span class="bank-label">口座名</span><span>${COMPANY_INFO.bankName}</span></div>
+      <div style="font-size: 9pt; margin-top: .3em;">※振込手数料はお客様にてご負担にてお願い致します。</div>
+    </div>
+  </div>`:""}
+
+  <div class="memo-box">
+    <div class="memo-label">備考</div>
+  </div>
+</div>
+</body>
+</html>`;
+}
+
+// 旧 buildDocumentHTML は互換のため残す（呼ばれない）
+function buildDocumentHTML(type, rental, items, no, subject) {
+  const subtotal = items.reduce((s,i)=>s+(Number(i.qty||0)*Number(i.price||0)),0);
+  return buildDocumentHTMLFromSnapshot({
+    type, no, date: new Date().toISOString().split("T")[0], subject,
+    customerName: rental.customerCompany || rental.contactName || "",
+    items, validityDate: rental.validityDate,
+    subtotal, tax: Math.round(subtotal*0.1), total: subtotal + Math.round(subtotal*0.1),
+  });
+}
+
+function escapeHtml(s) {
+  if (!s) return "";
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+async function openDocumentWindow(type, rental, setRental) {
+  const items = rental.quoteItems || [];
+  if (items.length === 0) {
+    alert("見積項目を1つ以上追加してください");
+    return;
+  }
+  // 新しい連番を毎回取得（=新しい書類として履歴に残す）
+  const no = await getNextNumber(type === "invoice" ? "invoice" : "quote");
+  const subject = type === "invoice" ? (rental.invoiceSubject || rental.quoteSubject) : rental.quoteSubject;
+
+  // 履歴用のスナップショット
+  const today = new Date();
+  const depositReceived = !!(rental.depositPolicy === "required" && rental.depositReceived);
+  const depositAmount = depositReceived ? Number(rental.depositAmount || 0) : 0;
+  const snapshot = {
+    type,
+    no,
+    date: today.toISOString().split("T")[0],
+    issuedAt: today.toLocaleString("ja-JP"),
+    subject,
+    customerName: rental.customerCompany || rental.contactName || "",
+    items: JSON.parse(JSON.stringify(items)),
+    validityDate: rental.validityDate || "",
+    subtotal: items.reduce((s,i)=>s+(Number(i.qty||0)*Number(i.price||0)),0),
+    depositReceived,
+    depositAmount,
+    depositDate: rental.depositDate || "",
+  };
+  snapshot.tax = Math.round(snapshot.subtotal * 0.1);
+  snapshot.total = snapshot.subtotal + snapshot.tax;
+  snapshot.balance = snapshot.total - snapshot.depositAmount;
+
+  // フォームに現在のNoと履歴を保存
+  setRental(r => {
+    const history = [...(r.documentHistory || []), snapshot];
+    const update = { ...r, documentHistory: history };
+    if (type === "invoice") update.invoiceNo = no;
+    else update.quoteNo = no;
+    return update;
+  });
+
+  // ウィンドウを開く（スナップショットから生成）
+  openDocFromSnapshot(snapshot);
+}
+
+function openDocFromSnapshot(snapshot) {
+  const html = buildDocumentHTMLFromSnapshot(snapshot);
+  const w = window.open("", "_blank", "width=900,height=1200");
+  if (!w) { alert("ポップアップがブロックされました。許可してください。"); return; }
+  w.document.write(html);
+  w.document.close();
+}
+
+// AI返信文生成
+async function generateReplyAI(rental, apiKey, type) {
+  const prompts = {
+    initial: `あなたは大船HONEY BEEの貸切担当者です。以下の貸切お問い合わせに対する初回返信メールを書いてください。
+
+【お問い合わせ内容】
+お名前：${rental.contactName || "未記入"}
+希望日：${rental.desiredDate || "未定"} ${rental.desiredTime || ""}
+人数：${rental.people || "未定"}名
+利用目的：${rental.purpose || "未記入"}
+予算：${rental.budget || "未記入"}
+ご希望オプション：${[rental.food && "料理", rental.drinks && "飲み放題", rental.stage && "ステージ", rental.sound && "音響", rental.mic && "マイク", rental.projector && "プロジェクター"].filter(Boolean).join("、") || "なし"}
+備考：${rental.memo || "なし"}
+
+【HONEY BEEの貸切情報（必ず参考にしてください）】
+- 大船にあるエンターテイメント×レストランバー
+- 収容人数：約70名
+- 設備：ベースアンプ・ギターアンプ・キーボード・ドラム・PA機材完備
+- 料金（外税）：
+  ・平日 10:00〜15:00：¥50,000+税
+  ・平日 15:00〜21:00：¥80,000+税
+  ・土日祝 10:00〜15:00：¥80,000+税
+  ・土日祝 15:00〜21:00：¥150,000+税
+  ※上記時間帯以外は要相談
+  ※常設機材、PA・照明オペレーター料込み
+- 予約金：¥30,000（入金時点で予約確定）
+- キャンセル料：90日前まで¥30,000、90〜45日前は25%、45日前〜前日は50%、当日は100%
+- TEL: 0467-46-5576
+
+丁寧で温かみのある文体で、お問い合わせへの感謝、内容確認、料金や条件の概要、次のステップ案内を含めてください。署名は「HONEY BEE 西崎」で。`,
+
+    quote: `あなたは大船HONEY BEEの貸切担当者です。条件確認後の見積提案メールを書いてください。
+
+【条件】
+お名前：${rental.contactName}様
+希望日：${rental.desiredDate} ${rental.desiredTime}
+人数：${rental.people}名
+利用目的：${rental.purpose}
+
+別途見積書を添付する想定で、内容確認のお願いと、ご質問・ご要望の問い合わせ案内を含めてください。署名は「HONEY BEE 西崎」で。`,
+
+    confirmed: `あなたは大船HONEY BEEの貸切担当者です。成約のお礼メールを書いてください。
+
+【内容】
+お名前：${rental.contactName}様
+日時：${rental.desiredDate} ${rental.desiredTime}
+人数：${rental.people}名
+利用目的：${rental.purpose}
+
+予約金¥30,000のお振込確認、当日のスケジュール確認、何かあればいつでもご連絡くださいの旨を含めてください。署名は「HONEY BEE 西崎」で。`,
+  };
+
+  const prompt = prompts[type];
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      max_tokens: 800,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(()=>({}));
+    throw new Error(err.error?.message || "AI生成失敗");
+  }
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || "";
+}
+
+export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, initialOpenId, onConsumeOpenId, events = [], onConvertToEvent, onBulkImport }) {
+  const [rentals, setRentals] = useState([]);
+  const [view, setView] = useState("list"); // list | edit
+  const [form, setForm] = useState(emptyRental);
+  const [editingId, setEditingId] = useState(null);
+  const [filter, setFilter] = useState("all");
+  const [staffFilter, setStaffFilter] = useState("all");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiReply, setAiReply] = useState("");
+  const [copied, setCopied] = useState("");
+
+  const [showTrash, setShowTrash] = useState(false);
+  const [allRentals, setAllRentals] = useState([]); // 削除済みも含む
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "rentals"), (snap) => {
+      const list = [];
+      snap.forEach(d => list.push({ ...d.data(), _id: d.id }));
+      setAllRentals(list);
+      setRentals(list.filter(r => !r._deleted));
+    });
+    return () => unsub();
+  }, []);
+  const trashRentals = allRentals.filter(r => r._deleted);
+
+  // initialOpenId が来たら、そのrentalを自動で開く
+  useEffect(() => {
+    if (initialOpenId && rentals.length > 0) {
+      const target = rentals.find(r => r._id === initialOpenId);
+      if (target) {
+        setForm({ ...emptyRental, ...target });
+        setEditingId(target._id);
+        setAiReply("");
+        setView("edit");
+        if (onConsumeOpenId) onConsumeOpenId();
+      }
+    }
+  }, [initialOpenId, rentals, onConsumeOpenId]);
+
+  const setField = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleSave = async () => {
+    if (!form.contactName) { alert("担当者名を入力してください"); return; }
+    try {
+      const id = editingId || `rental_${Date.now().toString(36)}`;
+      const { _id, ...data } = form;
+      data.savedAt = new Date().toLocaleDateString("ja-JP");
+      if (!data.inquiryDate) data.inquiryDate = new Date().toISOString().split("T")[0];
+      await setDoc(doc(db, "rentals", id), data);
+      alert("✓ 保存しました");
+      setView("list");
+      setForm(emptyRental);
+      setEditingId(null);
+    } catch (e) { alert("保存失敗：" + e.message); }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm("この問い合わせをゴミ箱に移動しますか？\n（30日以内なら復元できます）")) return;
+    const target = allRentals.find(r => r._id === id);
+    if (!target) return;
+    const { _id, ...data } = target;
+    await setDoc(doc(db, "rentals", id), {
+      ...data,
+      _deleted: true,
+      _deletedAt: Date.now(),
+    });
+  };
+
+  const restoreRental = async (id) => {
+    const target = allRentals.find(r => r._id === id);
+    if (!target) return;
+    const { _id, _deleted, _deletedAt, ...data } = target;
+    await setDoc(doc(db, "rentals", id), data);
+  };
+
+  const purgeRental = async (id) => {
+    if (!window.confirm("この問い合わせを完全に削除しますか？\nこの操作は取り消せません。")) return;
+    await deleteDoc(doc(db, "rentals", id));
+  };
+
+  const startNew = () => {
+    setForm({ ...emptyRental, inquiryDate: new Date().toISOString().split("T")[0] });
+    setEditingId(null);
+    setAiReply("");
+    setView("edit");
+  };
+
+  const startEdit = (r) => {
+    setForm({ ...emptyRental, ...r });
+    setEditingId(r._id);
+    setAiReply("");
+    setView("edit");
+  };
+
+  const handleAIReply = async (type) => {
+    if (!apiKey) { onRequireApiKey(); return; }
+    setAiLoading(true);
+    try {
+      const result = await generateReplyAI(form, apiKey, type);
+      setAiReply(result);
+    } catch (e) { alert("AI生成失敗：" + e.message); }
+    setAiLoading(false);
+  };
+
+  const copyText = (text, key) => {
+    navigator.clipboard.writeText(text);
+    setCopied(key);
+    setTimeout(() => setCopied(""), 1600);
+  };
+
+  // ステータス別件数
+  const statusCounts = RENTAL_STATUSES.map(s => ({
+    ...s,
+    count: rentals.filter(r => r.status === s.key).length,
+  }));
+
+  const filtered = rentals.filter(r => {
+    if (filter !== "all" && r.status !== filter) return false;
+    if (staffFilter !== "all" && (r.staff||"") !== staffFilter) return false;
+    return true;
+  });
+  const sorted = [...filtered].sort((a, b) => (b.inquiryDate || "").localeCompare(a.inquiryDate || ""));
+
+  if (view === "edit") {
+    return (
+      <div style={{padding:"1.5rem 2rem",maxWidth:1100,margin:"0 auto"}} className="hb-view">
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1rem"}}>
+          <h2 style={{fontFamily:"Georgia,serif",fontSize:"1.2rem",color:"#c9a84c",letterSpacing:".15em",margin:0}}>
+            🍽 {editingId ? "貸切お問い合わせ編集" : "新規お問い合わせ"}
+          </h2>
+          <button style={S.btn("sm")} onClick={()=>setView("list")}>← 一覧</button>
+        </div>
+
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1.5rem"}} className="hb-form-layout">
+          <div>
+            <div style={S.secTitle}>お客様情報</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:".7rem"}} className="hb-form-grid">
+              <Field label="担当者名" full><input style={S.inp} value={form.contactName} onChange={e=>setField("contactName",e.target.value)} placeholder="例：山田太郎"/></Field>
+              <Field label="電話番号"><input style={S.inp} value={form.phone} onChange={e=>setField("phone",e.target.value)} placeholder="090-..."/></Field>
+              <Field label="メール"><input type="email" style={S.inp} value={form.email} onChange={e=>setField("email",e.target.value)} placeholder="@..."/></Field>
+              <Field label="問い合わせ日"><input type="date" style={S.inp} value={form.inquiryDate} onChange={e=>setField("inquiryDate",e.target.value)}/></Field>
+              <Field label="店舗担当者" full>
+                <select style={S.inp} value={form.staff||""} onChange={e=>setField("staff",e.target.value)}>
+                  <option value="">未割当</option>
+                  {STAFF_LIST.map(s=><option key={s} value={s}>{s}</option>)}
+                </select>
+              </Field>
+            </div>
+
+            <div style={S.secTitle}>希望条件</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:".7rem"}} className="hb-form-grid">
+              <Field label="希望日"><input type="date" style={S.inp} value={form.desiredDate} onChange={e=>setField("desiredDate",e.target.value)}/></Field>
+              <Field label="希望時間"><input style={S.inp} value={form.desiredTime} onChange={e=>setField("desiredTime",e.target.value)} placeholder="例：18:00〜21:00"/></Field>
+              <Field label="人数"><input type="number" style={S.inp} value={form.people} onChange={e=>setField("people",e.target.value)} placeholder="30"/></Field>
+              <Field label="予算"><input style={S.inp} value={form.budget} onChange={e=>setField("budget",e.target.value)} placeholder="例：¥150,000"/></Field>
+              <Field label="利用目的" full><input style={S.inp} value={form.purpose} onChange={e=>setField("purpose",e.target.value)} placeholder="例：歓送迎会・誕生日・発表会"/></Field>
+            </div>
+
+            <div style={S.secTitle}>ご希望オプション</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:".7rem"}} className="hb-form-grid">
+              <Field label="料理希望"><input style={S.inp} value={form.food} onChange={e=>setField("food",e.target.value)} placeholder="例：コース料理"/></Field>
+              <Field label="飲み放題希望"><input style={S.inp} value={form.drinks} onChange={e=>setField("drinks",e.target.value)} placeholder="例：2時間"/></Field>
+              <Field full><div style={{display:"flex",gap:"1rem",flexWrap:"wrap",marginTop:".25rem"}}>
+                {[{k:"stage",l:"ステージ使用"},{k:"sound",l:"音響使用"},{k:"mic",l:"マイク使用"},{k:"projector",l:"プロジェクター使用"}].map(o=>(
+                  <label key={o.k} style={{display:"flex",alignItems:"center",gap:".4rem",cursor:"pointer",fontSize:".85rem",color:form[o.k]?"#c9a84c":"rgba(240,232,208,0.55)"}}>
+                    <input type="checkbox" checked={!!form[o.k]} onChange={e=>setField(o.k,e.target.checked)} style={{accentColor:"#c9a84c"}}/>
+                    {o.l}
+                  </label>
+                ))}
+              </div></Field>
+            </div>
+          </div>
+
+          <div>
+            <div style={S.secTitle}>進行状況</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:".7rem"}} className="hb-form-grid">
+              <Field label="ステータス" full>
+                <select style={S.inp} value={form.status} onChange={e=>setField("status",e.target.value)}>
+                  {RENTAL_STATUSES.map(s=><option key={s.key} value={s.key}>{s.label}</option>)}
+                </select>
+              </Field>
+              <Field label="返信状況"><input style={S.inp} value={form.replyStatus} onChange={e=>setField("replyStatus",e.target.value)} placeholder="例：4/27 初回返信済"/></Field>
+              <Field label="見積状況"><input style={S.inp} value={form.quoteStatus} onChange={e=>setField("quoteStatus",e.target.value)} placeholder="例：見積提出済"/></Field>
+            </div>
+
+            {/* 予約金管理 */}
+            <div style={S.secTitle}>💰 予約金</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:".7rem"}} className="hb-form-grid">
+              <Field label="予約金の有無" full>
+                <div style={{display:"flex",gap:"1rem",marginTop:".25rem"}}>
+                  <label style={{display:"flex",alignItems:"center",gap:".4rem",cursor:"pointer",fontSize:".85rem",color:form.depositPolicy==="required"?"#c9a84c":"rgba(240,232,208,0.55)"}}>
+                    <input type="radio" name="depositPolicy" checked={form.depositPolicy==="required"} onChange={()=>setField("depositPolicy","required")} style={{accentColor:"#c9a84c"}}/>
+                    もらう
+                  </label>
+                  <label style={{display:"flex",alignItems:"center",gap:".4rem",cursor:"pointer",fontSize:".85rem",color:form.depositPolicy==="waived"?"#c9a84c":"rgba(240,232,208,0.55)"}}>
+                    <input type="radio" name="depositPolicy" checked={form.depositPolicy==="waived"} onChange={()=>setField("depositPolicy","waived")} style={{accentColor:"#c9a84c"}}/>
+                    もらわない
+                  </label>
+                </div>
+              </Field>
+              {form.depositPolicy==="required" && (
+                <>
+                  <Field label="金額"><input type="number" style={S.inp} value={form.depositAmount} onChange={e=>setField("depositAmount",e.target.value)} placeholder="30000"/></Field>
+                  <Field label="受領状態">
+                    <label style={{display:"flex",alignItems:"center",gap:".5rem",cursor:"pointer",fontSize:".85rem",padding:".55rem 0",color:form.depositReceived?"#7ec87e":"rgba(240,232,208,0.55)"}}>
+                      <input type="checkbox" checked={!!form.depositReceived} onChange={e=>setField("depositReceived",e.target.checked)} style={{accentColor:"#7ec87e"}}/>
+                      {form.depositReceived?"✓ 受領済み":"未受領"}
+                    </label>
+                  </Field>
+                  {form.depositReceived && (
+                    <Field label="受領日" full>
+                      <input type="date" style={S.inp} value={form.depositDate||""} onChange={e=>setField("depositDate",e.target.value)}/>
+                    </Field>
+                  )}
+                  <Field label="メモ" full>
+                    <input style={S.inp} value={form.depositMemo||""} onChange={e=>setField("depositMemo",e.target.value)} placeholder="例：銀行振込 / 現金受領 など"/>
+                  </Field>
+                </>
+              )}
+            </div>
+
+            <div style={S.secTitle}>メモ</div>
+            <textarea style={{...S.inp,resize:"vertical",lineHeight:1.5}} rows={4} value={form.memo} onChange={e=>setField("memo",e.target.value)} placeholder="自由記述"/>
+
+            <div style={S.secTitle}>✨ AI返信文生成</div>
+            <div style={{display:"flex",gap:".4rem",flexWrap:"wrap",marginBottom:".75rem"}}>
+              <button style={S.btn("ai")} disabled={aiLoading} onClick={()=>handleAIReply("initial")}>{aiLoading?"⏳":"✨ 初回返信"}</button>
+              <button style={S.btn("ai")} disabled={aiLoading} onClick={()=>handleAIReply("quote")}>{aiLoading?"⏳":"✨ 見積提案"}</button>
+              <button style={S.btn("ai")} disabled={aiLoading} onClick={()=>handleAIReply("confirmed")}>{aiLoading?"⏳":"✨ 成約御礼"}</button>
+            </div>
+            {aiReply && (
+              <div style={{position:"relative",background:"#0f0f0f",border:"1px solid rgba(201,168,76,0.1)",borderRadius:6,padding:"1rem",fontSize:".82rem",lineHeight:1.75,color:"rgba(240,232,208,0.8)",whiteSpace:"pre-wrap"}}>
+                {aiReply}
+                <button style={{position:"absolute",top:".6rem",right:".6rem",padding:".25rem .6rem",background:"rgba(201,168,76,0.13)",border:"1px solid rgba(201,168,76,0.27)",borderRadius:3,color:"#c9a84c",fontSize:".6rem",cursor:"pointer"}} onClick={()=>copyText(aiReply,"reply")}>{copied==="reply"?"✓ 完了":"コピー"}</button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ===== 見積書・請求書セクション ===== */}
+        <div style={{marginTop:"2rem",padding:"1.25rem",background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.2)",borderRadius:8}}>
+          <div style={{...S.secTitle,marginTop:0,fontSize:".75rem"}}>📄 見積書・請求書</div>
+
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:".7rem",marginBottom:"1rem"}} className="hb-form-grid">
+            <Field label="法人/団体名（顧客名）"><input style={S.inp} value={form.customerCompany||""} onChange={e=>setField("customerCompany",e.target.value)} placeholder="個人の場合は空欄でOK"/></Field>
+            <Field label="件名"><input style={S.inp} value={form.quoteSubject||""} onChange={e=>setField("quoteSubject",e.target.value)} placeholder="例：○月○日ホールレンタル代金として"/></Field>
+            <Field label="見積有効期限"><input type="date" style={S.inp} value={form.validityDate||""} onChange={e=>setField("validityDate",e.target.value)}/></Field>
+          </div>
+
+          {/* 明細 */}
+          <div style={{fontSize:".68rem",color:"rgba(201,168,76,0.7)",marginBottom:".5rem",letterSpacing:".1em"}}>明細</div>
+
+          {/* プリセット追加ボタン（グループ分け） */}
+          <div style={{marginBottom:".75rem"}}>
+            {["ホール","飲み放題","料理"].map(group=>(
+              <div key={group} style={{display:"flex",gap:".35rem",flexWrap:"wrap",marginBottom:".4rem",alignItems:"center"}}>
+                <span style={{fontSize:".6rem",letterSpacing:".1em",color:"rgba(201,168,76,0.5)",minWidth:60,textTransform:"uppercase"}}>{group}：</span>
+                {PRESET_ITEMS.filter(p=>p.group===group).map((p,i)=>(
+                  <button key={i} style={{...S.btn("sm"),fontSize:".6rem",padding:".25rem .5rem"}} onClick={()=>{
+                    const qty = p.unit==="名" ? Number(form.people||1) : 1;
+                    const newItem = { name: p.name, qty, unit: p.unit, price: p.price };
+                    setField("quoteItems", [...(form.quoteItems||[]), newItem]);
+                  }}>＋ {p.name.replace(group+"・","").replace(/^.*?（/,"（").length>20?p.name.slice(0,20)+"...":p.name}</button>
+                ))}
+              </div>
+            ))}
+          </div>
+
+          {/* 明細テーブル */}
+          <div style={{marginBottom:".75rem"}}>
+            <div style={{display:"grid",gridTemplateColumns:"3fr 60px 60px 100px 100px 30px",gap:".35rem",marginBottom:".3rem",fontSize:".62rem",color:"rgba(201,168,76,0.5)",letterSpacing:".05em"}}>
+              <div>摘要</div><div>数量</div><div>単位</div><div>単価(税抜)</div><div>金額</div><div></div>
+            </div>
+            {(form.quoteItems||[]).map((it,i)=>{
+              const total = (Number(it.qty||0) * Number(it.price||0)).toLocaleString();
+              return (
+                <div key={i} style={{display:"grid",gridTemplateColumns:"3fr 60px 60px 100px 100px 30px",gap:".35rem",marginBottom:".3rem",alignItems:"center"}}>
+                  <input style={{...S.inp,padding:".4rem .55rem",fontSize:".78rem"}} value={it.name||""} onChange={e=>{
+                    const arr = [...form.quoteItems];
+                    arr[i] = { ...arr[i], name: e.target.value };
+                    setField("quoteItems", arr);
+                  }}/>
+                  <input type="number" style={{...S.inp,padding:".4rem .55rem",fontSize:".78rem"}} value={it.qty||""} onChange={e=>{
+                    const arr = [...form.quoteItems];
+                    arr[i] = { ...arr[i], qty: e.target.value };
+                    setField("quoteItems", arr);
+                  }}/>
+                  <input style={{...S.inp,padding:".4rem .55rem",fontSize:".78rem"}} value={it.unit||""} onChange={e=>{
+                    const arr = [...form.quoteItems];
+                    arr[i] = { ...arr[i], unit: e.target.value };
+                    setField("quoteItems", arr);
+                  }} placeholder="式"/>
+                  <input type="number" style={{...S.inp,padding:".4rem .55rem",fontSize:".78rem",textAlign:"right"}} value={it.price||""} onChange={e=>{
+                    const arr = [...form.quoteItems];
+                    arr[i] = { ...arr[i], price: e.target.value };
+                    setField("quoteItems", arr);
+                  }}/>
+                  <div style={{padding:".4rem .55rem",fontSize:".78rem",textAlign:"right",color:"rgba(201,168,76,0.7)"}}>¥{total}</div>
+                  <button onClick={()=>{
+                    setField("quoteItems", form.quoteItems.filter((_,idx)=>idx!==i));
+                  }} style={{padding:".25rem .35rem",background:"transparent",border:"1px solid rgba(226,75,74,0.27)",borderRadius:3,color:"#e24b4a",cursor:"pointer",fontSize:".7rem"}}>✕</button>
+                </div>
+              );
+            })}
+            <button style={S.btn("sm")} onClick={()=>setField("quoteItems",[...(form.quoteItems||[]),{name:"",qty:1,unit:"式",price:0}])}>＋ 行を追加</button>
+          </div>
+
+          {/* 合計プレビュー */}
+          {(form.quoteItems||[]).length > 0 && (() => {
+            const sub = (form.quoteItems||[]).reduce((s,i)=>s+(Number(i.qty||0)*Number(i.price||0)),0);
+            const tax = Math.round(sub * 0.1);
+            const total = sub + tax;
+            const dep = (form.depositPolicy==="required" && form.depositReceived) ? Number(form.depositAmount||0) : 0;
+            const balance = total - dep;
+            return (
+              <div style={{padding:".75rem 1rem",background:"#111",borderRadius:5,marginBottom:"1rem",fontSize:".82rem"}}>
+                <div style={{display:"flex",gap:"1.5rem",justifyContent:"flex-end",alignItems:"baseline",flexWrap:"wrap"}}>
+                  <span style={{color:"rgba(240,232,208,0.55)"}}>小計: <strong style={{color:"#f0e8d0"}}>¥{sub.toLocaleString()}</strong></span>
+                  <span style={{color:"rgba(240,232,208,0.55)"}}>消費税(10%): <strong style={{color:"#f0e8d0"}}>¥{tax.toLocaleString()}</strong></span>
+                  <span style={{color:"#c9a84c"}}>合計: <strong style={{fontSize:"1.05rem"}}>¥{total.toLocaleString()}</strong></span>
+                </div>
+                {dep > 0 && (
+                  <div style={{display:"flex",gap:"1.5rem",justifyContent:"flex-end",alignItems:"baseline",flexWrap:"wrap",marginTop:".4rem",paddingTop:".4rem",borderTop:"1px dashed rgba(201,168,76,0.15)"}}>
+                    <span style={{color:"rgba(126,200,127,0.8)"}}>ご入金済み（予約金）: <strong>−¥{dep.toLocaleString()}</strong></span>
+                    <span style={{color:"#c9a84c"}}>請求書の残額: <strong style={{fontSize:"1.1rem"}}>¥{balance.toLocaleString()}</strong></span>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* 連番表示 */}
+          <div style={{display:"flex",gap:"1rem",fontSize:".7rem",color:"rgba(240,232,208,0.5)",marginBottom:".75rem"}}>
+            {form.quoteNo && <span>📄 見積No.{form.quoteNo}</span>}
+            {form.invoiceNo && <span>📄 請求No.{form.invoiceNo}</span>}
+          </div>
+
+          {/* PDF出力ボタン */}
+          <div style={{display:"flex",gap:".5rem",flexWrap:"wrap"}}>
+            <button style={S.btn("gold")} onClick={async()=>{
+              if(!(form.quoteItems||[]).length){alert("明細を追加してください");return;}
+              await openDocumentWindow("quote", form, setForm);
+              // 自動保存
+              setTimeout(handleSave, 500);
+            }}>📄 見積書PDF</button>
+            <button style={S.btn("gold")} onClick={async()=>{
+              if(!(form.quoteItems||[]).length){alert("明細を追加してください");return;}
+              await openDocumentWindow("invoice", form, setForm);
+              setTimeout(handleSave, 500);
+            }}>📄 請求書PDF</button>
+          </div>
+          <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.4)",marginTop:".5rem"}}>
+            ※ 新しいウィンドウが開きます。「PDFとして保存」ボタンでPDF出力 or 印刷できます。
+          </div>
+
+          {/* 発行履歴 */}
+          {(form.documentHistory||[]).length>0 && (
+            <div style={{marginTop:"1.5rem",paddingTop:"1.25rem",borderTop:"1px dashed rgba(201,168,76,0.2)"}}>
+              <div style={{fontSize:".68rem",color:"rgba(201,168,76,0.7)",marginBottom:".75rem",letterSpacing:".15em"}}>📚 発行履歴（{form.documentHistory.length}件）</div>
+              <div style={{display:"flex",flexDirection:"column",gap:".4rem"}}>
+                {[...form.documentHistory].reverse().map((doc,ri)=>{
+                  const i = form.documentHistory.length - 1 - ri;
+                  return (
+                    <div key={i} style={{display:"grid",gridTemplateColumns:"auto 1fr auto auto",gap:".75rem",alignItems:"center",padding:".55rem .75rem",background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.1)",borderRadius:5}}>
+                      <div style={{fontSize:".58rem",letterSpacing:".1em",padding:".15rem .45rem",borderRadius:2,background:doc.type==="invoice"?"rgba(126,200,227,0.15)":"rgba(201,168,76,0.15)",color:doc.type==="invoice"?"#7ec8e3":"#c9a84c",textTransform:"uppercase"}}>
+                        {doc.type==="invoice"?"請求書":"見積書"} No.{doc.no}
+                      </div>
+                      <div style={{fontSize:".72rem",color:"rgba(240,232,208,0.65)"}}>
+                        <div>{doc.subject||"（件名未設定）"}</div>
+                        <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.4)",marginTop:".15rem"}}>発行日：{doc.issuedAt} ／ ¥{(doc.total||0).toLocaleString()}</div>
+                      </div>
+                      <button style={{...S.btn("sm"),padding:".25rem .55rem",fontSize:".58rem"}} onClick={()=>openDocFromSnapshot(doc)}>📄 表示</button>
+                      <button style={{padding:".22rem .4rem",background:"transparent",border:"1px solid rgba(226,75,74,0.27)",borderRadius:3,color:"#e24b4a",cursor:"pointer",fontSize:".7rem"}} onClick={()=>{
+                        if(!window.confirm("この履歴を削除しますか？(連番は復活しません)"))return;
+                        setField("documentHistory", form.documentHistory.filter((_,idx)=>idx!==i));
+                      }} title="履歴削除">✕</button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div style={{display:"flex",gap:".5rem",marginTop:"1.5rem",flexWrap:"wrap"}}>
+          <button style={{...S.btn("gold"),flex:1,maxWidth:200}} onClick={handleSave}>💾 保存</button>
+          <button style={S.btn("ghost")} onClick={()=>setView("list")}>キャンセル</button>
+          {editingId && onConvertToEvent && (
+            <button style={{...S.btn("sm"),padding:".5rem 1rem",fontSize:".7rem",borderColor:"rgba(201,168,76,0.4)"}} onClick={async()=>{
+              const ok = await onConvertToEvent(form, editingId);
+              if (ok === "deleted") setView("list");
+            }}>🎵 イベントに変換</button>
+          )}
+          {editingId && (
+            <button style={{...S.btn("danger"),marginLeft:"auto"}} onClick={async()=>{await handleDelete(editingId);setView("list");}}>🗑 削除</button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // 一覧
+  return (
+    <div style={{padding:"1.5rem 2rem",maxWidth:1100,margin:"0 auto"}} className="hb-view">
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1.25rem",flexWrap:"wrap",gap:".5rem"}}>
+        <h2 style={{fontFamily:"Georgia,serif",fontSize:"1.2rem",color:"#c9a84c",letterSpacing:".15em",margin:0}}>🍽 貸切管理</h2>
+        <div style={{display:"flex",gap:".5rem",flexWrap:"wrap"}}>
+          <button style={{...S.btn("sm"),padding:".4rem .8rem"}} onClick={()=>setShowTrash(true)}>🗑 ゴミ箱{trashRentals.length>0?` (${trashRentals.length})`:""}</button>
+          {onBulkImport && (
+            <button style={{...S.btn("ghost"),fontSize:".62rem",padding:".4rem .8rem"}} onClick={onBulkImport}>🔄 既存イベントから取り込み</button>
+          )}
+          <button style={S.btn("gold")} onClick={startNew}>＋ 新規問い合わせ</button>
+        </div>
+      </div>
+
+      {/* ステータス別件数 */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(110px,1fr))",gap:".5rem",marginBottom:"1.25rem"}}>
+        <div onClick={()=>setFilter("all")} style={{padding:".55rem .7rem",background:filter==="all"?"rgba(201,168,76,0.15)":"#111",border:`1px solid ${filter==="all"?"#c9a84c":"rgba(201,168,76,0.1)"}`,borderRadius:4,cursor:"pointer",textAlign:"center"}}>
+          <div style={{fontSize:".58rem",letterSpacing:".1em",color:"rgba(240,232,208,0.5)",marginBottom:".15rem"}}>すべて</div>
+          <div style={{fontSize:"1.1rem",color:"#c9a84c",fontFamily:"Georgia,serif"}}>{rentals.length}</div>
+        </div>
+        {statusCounts.map(s=>(
+          <div key={s.key} onClick={()=>setFilter(s.key)} style={{padding:".55rem .7rem",background:filter===s.key?s.color+"22":"#111",border:`1px solid ${filter===s.key?s.color:"rgba(201,168,76,0.1)"}`,borderRadius:4,cursor:"pointer",textAlign:"center"}}>
+            <div style={{fontSize:".58rem",letterSpacing:".1em",color:s.color,marginBottom:".15rem"}}>{s.label}</div>
+            <div style={{fontSize:"1.1rem",color:"#f0e8d0",fontFamily:"Georgia,serif"}}>{s.count}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* 担当者フィルター */}
+      <div style={{display:"flex",alignItems:"center",gap:".75rem",marginBottom:"1rem",flexWrap:"wrap"}}>
+        <span style={{fontSize:".68rem",letterSpacing:".15em",color:"rgba(201,168,76,0.7)"}}>👤 担当:</span>
+        <button onClick={()=>setStaffFilter("all")} style={{padding:".3rem .7rem",borderRadius:3,border:"1px solid "+(staffFilter==="all"?"#c9a84c":"rgba(201,168,76,0.2)"),background:staffFilter==="all"?"#c9a84c":"transparent",color:staffFilter==="all"?"#0a0a0a":"rgba(201,168,76,0.7)",fontSize:".65rem",cursor:"pointer",fontFamily:"inherit",letterSpacing:".05em"}}>全員</button>
+        {STAFF_LIST.map(s=>(
+          <button key={s} onClick={()=>setStaffFilter(s)} style={{padding:".3rem .7rem",borderRadius:3,border:"1px solid "+(staffFilter===s?"#c9a84c":"rgba(201,168,76,0.2)"),background:staffFilter===s?"#c9a84c":"transparent",color:staffFilter===s?"#0a0a0a":"rgba(201,168,76,0.7)",fontSize:".65rem",cursor:"pointer",fontFamily:"inherit",letterSpacing:".05em"}}>{s}</button>
+        ))}
+        <button onClick={()=>setStaffFilter("")} style={{padding:".3rem .7rem",borderRadius:3,border:"1px solid "+(staffFilter===""?"#c9a84c":"rgba(201,168,76,0.2)"),background:staffFilter===""?"#c9a84c":"transparent",color:staffFilter===""?"#0a0a0a":"rgba(201,168,76,0.7)",fontSize:".65rem",cursor:"pointer",fontFamily:"inherit",letterSpacing:".05em"}}>未割当</button>
+      </div>
+
+      {/* 一覧 */}
+      {sorted.length === 0 && (
+        <div style={{textAlign:"center",padding:"3rem",color:"rgba(240,232,208,0.25)",fontSize:".85rem"}}>
+          🍽 該当する問い合わせはありません
+        </div>
+      )}
+      {sorted.map(r=>(
+        <div key={r._id} style={S.card} className="hb-card">
+          <div onClick={()=>startEdit(r)} style={{cursor:"pointer"}}>
+            <div style={{display:"flex",alignItems:"center",gap:".5rem",marginBottom:".35rem",flexWrap:"wrap"}}>
+              <span style={{fontFamily:"Georgia,serif",fontSize:"1rem"}}>{r.contactName||"（無題）"}</span>
+              <StatusBadge status={r.status}/>
+              {r.staff && <span style={{display:"inline-block",padding:".1rem .4rem",borderRadius:2,fontSize:".55rem",letterSpacing:".08em",background:"rgba(201,168,76,0.1)",color:"rgba(201,168,76,0.8)"}}>👤 {r.staff}</span>}
+              {r.depositPolicy==="required" && (
+                <span style={{display:"inline-block",padding:".1rem .4rem",borderRadius:2,fontSize:".55rem",letterSpacing:".08em",background:r.depositReceived?"rgba(126,200,127,0.13)":"rgba(244,162,97,0.13)",color:r.depositReceived?"#7ec87e":"#f4a261"}}>
+                  {r.depositReceived?"💰 受領済":"💰 未受領"}
+                </span>
+              )}
+              {r.depositPolicy==="waived" && (
+                <span style={{display:"inline-block",padding:".1rem .4rem",borderRadius:2,fontSize:".55rem",letterSpacing:".08em",background:"rgba(255,255,255,0.05)",color:"rgba(240,232,208,0.5)"}}>予約金なし</span>
+              )}
+              {(r.documentHistory||[]).length>0 && (
+                <span style={{display:"inline-block",padding:".1rem .4rem",borderRadius:2,fontSize:".55rem",letterSpacing:".08em",background:"rgba(126,200,227,0.13)",color:"#7ec8e3"}}>📄 {r.documentHistory.length}件</span>
+              )}
+            </div>
+            <div style={{fontSize:".7rem",color:"rgba(240,232,208,0.5)",display:"flex",gap:"1rem",flexWrap:"wrap"}}>
+              {r.desiredDate && <span>📅 希望: {r.desiredDate} {r.desiredTime}</span>}
+              {r.people && <span>👥 {r.people}名</span>}
+              {r.purpose && <span>📝 {r.purpose}</span>}
+              {r.inquiryDate && <span style={{opacity:.6}}>問合: {r.inquiryDate}</span>}
+            </div>
+          </div>
+          <div style={{display:"flex",gap:".4rem"}}>
+            <button style={S.btn("sm")} onClick={()=>startEdit(r)}>編集</button>
+            <button style={S.btn("danger")} onClick={()=>handleDelete(r._id)}>削除</button>
+          </div>
+        </div>
+      ))}
+
+      {/* ゴミ箱モーダル */}
+      {showTrash && (
+        <div style={{position:"fixed",top:0,left:0,width:"100%",height:"100%",background:"rgba(0,0,0,0.85)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}} onClick={()=>setShowTrash(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.27)",borderRadius:8,padding:"1.5rem",maxWidth:600,width:"100%",maxHeight:"85vh",overflowY:"auto"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1rem"}}>
+              <div style={{fontFamily:"Georgia,serif",fontSize:"1rem",color:"#c9a84c",letterSpacing:".15em"}}>🗑 貸切のゴミ箱</div>
+              <button style={S.btn("sm")} onClick={()=>setShowTrash(false)}>閉じる</button>
+            </div>
+            <div style={{fontSize:".7rem",color:"rgba(240,232,208,0.5)",marginBottom:"1rem",lineHeight:1.6}}>
+              削除された問い合わせは30日間保持され、その後自動で完全削除されます。
+            </div>
+            {trashRentals.length === 0 ? (
+              <div style={{textAlign:"center",padding:"2rem",color:"rgba(240,232,208,0.3)",fontSize:".85rem"}}>ゴミ箱は空です</div>
+            ) : trashRentals.sort((a,b)=>(b._deletedAt||0)-(a._deletedAt||0)).map(r=>{
+              const daysLeft = r._deletedAt ? Math.max(0,Math.ceil(30 - (Date.now()-r._deletedAt)/(24*60*60*1000))) : 30;
+              return (
+                <div key={r._id} style={{padding:".75rem 1rem",background:"#111",borderRadius:5,marginBottom:".5rem",display:"grid",gridTemplateColumns:"1fr auto",gap:".5rem",alignItems:"center"}}>
+                  <div>
+                    <div style={{fontSize:".88rem",marginBottom:".2rem"}}>{r.contactName||r.customerCompany||"（無題）"}</div>
+                    <div style={{fontSize:".65rem",color:"rgba(240,232,208,0.4)",display:"flex",gap:".75rem",flexWrap:"wrap"}}>
+                      {r.desiredDate&&<span>📅 {r.desiredDate}</span>}
+                      <span>削除：{r._deletedAt?new Date(r._deletedAt).toLocaleDateString("ja-JP"):""}</span>
+                      <span style={{color:daysLeft<7?"#f4a261":"rgba(240,232,208,0.5)"}}>あと{daysLeft}日</span>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",gap:".4rem"}}>
+                    <button style={{...S.btn("sm"),borderColor:"rgba(126,200,127,0.4)",color:"#7ec87e"}} onClick={()=>restoreRental(r._id)}>↩ 復元</button>
+                    <button style={S.btn("danger")} onClick={()=>purgeRental(r._id)}>完全削除</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
