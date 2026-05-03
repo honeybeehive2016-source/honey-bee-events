@@ -100,6 +100,9 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   const staffNames = getOrderedStaffNames(shifts);
   // 席選択ポップアップ
   const [showSeatPicker, setShowSeatPicker] = useState(false);
+  // 紐付きチェックモーダル
+  const [showLinkCheck, setShowLinkCheck] = useState(false);
+  const [linkCheckResult, setLinkCheckResult] = useState(null);
 
   useEffect(() => {
     const TRASH_TTL = 30 * 24 * 60 * 60 * 1000;
@@ -679,6 +682,16 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
     win.document.close();
   };
 
+  const handleLinkCheck = () => {
+    const activeRes = reservations; // _deleted除外済み
+    const unlinked = activeRes.filter(r => {
+      if (!r.eventName || !r.date) return true;
+      return !events.some(e => e.date === r.date && e.name === r.eventName);
+    });
+    setLinkCheckResult({ total: activeRes.length, unlinked });
+    setShowLinkCheck(true);
+  };
+
   const printReservationList = () => {
     const dt = new Date(calSelectedDate + "T00:00:00");
     const dowJp = ["日","月","火","水","木","金","土"][dt.getDay()];
@@ -769,6 +782,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
           {onGoSeatLayout && (
             <button style={{...S.btn("sm"),padding:".4rem .8rem"}} onClick={onGoSeatLayout}>🪑 席レイアウト</button>
           )}
+          <button style={{...S.btn("sm"),padding:".4rem .8rem"}} onClick={handleLinkCheck}>📊 紐付き確認</button>
           <button style={{...S.btn("sm"),padding:".4rem .8rem"}} onClick={()=>setShowImport(true)}>📥 CSVインポート</button>
           <button style={{...S.btn("sm"),padding:".4rem .8rem"}} onClick={()=>setShowTrash(true)}>🗑 ゴミ箱{trashReservations.length>0?` (${trashReservations.length})`:""}</button>
           <button style={S.btn("gold")} onClick={startNew}>＋ 電話予約を追加</button>
@@ -1228,6 +1242,51 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* 紐付きチェックモーダル */}
+      {showLinkCheck && linkCheckResult && (
+        <div style={{position:"fixed",top:0,left:0,width:"100%",height:"100%",background:"rgba(0,0,0,0.85)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}} onClick={()=>setShowLinkCheck(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.27)",borderRadius:8,padding:"1.5rem",maxWidth:640,width:"100%",maxHeight:"85vh",overflowY:"auto"}}>
+            <h3 style={{fontFamily:"Georgia,serif",color:"#c9a84c",margin:"0 0 1rem 0",fontSize:"1rem"}}>📊 イベントと予約の紐付き状況</h3>
+            <div style={{fontSize:".82rem",color:"#f0e8d0",marginBottom:".75rem"}}>
+              全予約 <strong>{linkCheckResult.total}</strong> 件 / うち紐付くイベントなし <strong style={{color: linkCheckResult.unlinked.length > 0 ? "#e24b4a" : "#7ec87e"}}>{linkCheckResult.unlinked.length}</strong> 件
+            </div>
+            {linkCheckResult.unlinked.length > 0 ? (
+              <>
+                <div style={{padding:".6rem .8rem",background:"rgba(226,75,74,0.12)",border:"1px solid rgba(226,75,74,0.35)",borderRadius:4,fontSize:".75rem",color:"#f4a261",marginBottom:"1rem",lineHeight:1.6}}>
+                  ⚠️ 紐付かない予約は、Today画面やレイアウト印刷でイベント名が正しく表示されません。<br/>
+                  イベントのCSV再取り込み後、予約の「イベント名」が一致しているか確認・修正してください。
+                </div>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:".75rem"}}>
+                  <thead>
+                    <tr style={{borderBottom:"1px solid rgba(201,168,76,0.2)"}}>
+                      <th style={{textAlign:"left",padding:".4rem .5rem",color:"rgba(201,168,76,0.7)",fontWeight:500}}>日付</th>
+                      <th style={{textAlign:"left",padding:".4rem .5rem",color:"rgba(201,168,76,0.7)",fontWeight:500}}>予約のイベント名</th>
+                      <th style={{textAlign:"left",padding:".4rem .5rem",color:"rgba(201,168,76,0.7)",fontWeight:500}}>予約者名</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {linkCheckResult.unlinked.map((r,i) => (
+                      <tr key={r._id||i} style={{borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
+                        <td style={{padding:".4rem .5rem",color:"#f0e8d0"}}>{r.date||"―"}</td>
+                        <td style={{padding:".4rem .5rem",color: r.eventName ? "#f4a261" : "rgba(240,232,208,0.35)"}}>{r.eventName||"（未設定）"}</td>
+                        <td style={{padding:".4rem .5rem",color:"#f0e8d0"}}>{r.customerName||"―"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            ) : (
+              <div style={{padding:".75rem",background:"rgba(126,200,126,0.1)",border:"1px solid rgba(126,200,126,0.3)",borderRadius:4,fontSize:".8rem",color:"#7ec87e"}}>
+                ✅ すべての予約がイベントと正しく紐付いています。
+              </div>
+            )}
+            <div style={{marginTop:"1.25rem",textAlign:"right"}}>
+              <button style={S.btn("ghost")} onClick={()=>setShowLinkCheck(false)}>閉じる</button>
+            </div>
           </div>
         </div>
       )}
