@@ -37,6 +37,10 @@ export const emptyRental = {
   depositMemo: "",
   staff: "",
   documentHistory: [],
+  /** 喫煙可否: unknown | no | yes（未設定ドキュメントは unknown 扱い） */
+  smokingPolicy: "unknown",
+  /** 見積明細の単価・行金額の表示: exclusive=税抜（保存の price は常に税抜単価）/ inclusive=税込相当の参考表示 */
+  documentTaxMode: "exclusive",
 };
 
 // 担当者リスト
@@ -91,6 +95,32 @@ const Field = ({ label, children, full }) => (
   </div>
 );
 
+function normalizeSmokingPolicy(v) {
+  if (v === "no" || v === "yes" || v === "unknown") return v;
+  return "unknown";
+}
+
+function smokingPolicyLabel(v) {
+  const t = { unknown: "未確認", no: "喫煙不可", yes: "喫煙可" };
+  return t[normalizeSmokingPolicy(v)] || "未確認";
+}
+
+/** 明細・PDF の単価列表示モード（Firestore の price は常に税抜単価） */
+function normalizeDocumentTaxMode(v) {
+  return v === "inclusive" ? "inclusive" : "exclusive";
+}
+
+function quoteSubtotalExTax(items) {
+  return (items || []).reduce((s, i) => s + Number(i.qty || 0) * Number(i.price || 0), 0);
+}
+
+const DetailRow = ({ label, value }) => (
+  <div style={{ display: "grid", gridTemplateColumns: "minmax(120px, 160px) 1fr", gap: ".75rem", padding: ".5rem 0", borderBottom: "1px solid rgba(201,168,76,0.08)", alignItems: "start" }}>
+    <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.65)", letterSpacing: ".08em" }}>{label}</div>
+    <div style={{ fontSize: ".86rem", color: "#f0e8d0", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{value !== undefined && value !== null && value !== "" ? value : "—"}</div>
+  </div>
+);
+
 // 連番取得（Firestoreで集中管理）
 async function getNextNumber(type) {
   const ref = doc(db, "counters", type);
@@ -137,19 +167,29 @@ function buildDocumentHTMLFromSnapshot(snap) {
 
   const customerName = snap.customerName || "";
   const items = snap.items || [];
+  const lineMode = normalizeDocumentTaxMode(snap.linePriceMode);
+  const priceTh = lineMode === "inclusive" ? "単価（税込）" : "単価（税抜）";
+  const amountTh = lineMode === "inclusive" ? "金額（税込相当）" : "金額";
 
   const minRows = 15;
   const itemRows = [];
   for (let i = 0; i < Math.max(minRows, items.length); i++) {
     const it = items[i];
     if (it) {
+      const q = Number(it.qty || 0);
+      const p = Number(it.price || 0);
+      const unitDisp = lineMode === "inclusive" && p ? Math.round(p * 1.1) : (p || "");
+      const amtEx = q && p ? q * p : 0;
+      const amtDisp = lineMode === "inclusive" && amtEx ? Math.round(amtEx * 1.1) : (amtEx || "");
+      const unitStr = unitDisp === "" ? "" : (typeof unitDisp === "number" ? unitDisp.toLocaleString() : String(unitDisp));
+      const amtStr = amtDisp === "" ? "" : (typeof amtDisp === "number" ? amtDisp.toLocaleString() : String(amtDisp));
       itemRows.push(`
         <tr>
           <td class="desc">${escapeHtml(it.name||"")}</td>
           <td class="num">${it.qty||""}</td>
           <td class="num">${it.unit||""}</td>
-          <td class="num">${it.price?Number(it.price).toLocaleString():""}</td>
-          <td class="num">${it.qty&&it.price?(Number(it.qty)*Number(it.price)).toLocaleString():""}</td>
+          <td class="num">${unitStr}</td>
+          <td class="num">${amtStr}</td>
         </tr>`);
     } else {
       itemRows.push(`<tr><td class="desc">　</td><td></td><td></td><td></td><td></td></tr>`);
@@ -259,14 +299,16 @@ function buildDocumentHTMLFromSnapshot(snap) {
     合計金額 ¥${total.toLocaleString()}（税込）から、ご入金済み予約金 ¥${depositAmount.toLocaleString()}${snap.depositDate?`（${new Date(snap.depositDate).getFullYear()}/${new Date(snap.depositDate).getMonth()+1}/${new Date(snap.depositDate).getDate()}受領）`:""} を差し引いた残額となります。
   </div>`:""}
 
+  ${lineMode === "inclusive" ? `<p style="font-size:8.5pt;margin:0 0 .5em;line-height:1.45;">※明細の単価・金額は税込相当額（税抜単価に10%を加えた額を四捨五入）の参考表示です。小計・消費税・合計は従来どおり税抜基準で計算しています。</p>` : ""}
+
   <table>
     <thead>
       <tr>
         <th class="desc" style="width: 50%;">摘要</th>
         <th style="width: 10%;">数量</th>
         <th style="width: 10%;">単位</th>
-        <th style="width: 15%;">単価（税抜）</th>
-        <th style="width: 15%;">金額</th>
+        <th style="width: 15%;">${priceTh}</th>
+        <th style="width: 15%;">${amountTh}</th>
       </tr>
     </thead>
     <tbody>
@@ -360,6 +402,7 @@ async function openDocumentWindow(type, rental, setRental) {
   snapshot.tax = Math.round(snapshot.subtotal * 0.1);
   snapshot.total = snapshot.subtotal + snapshot.tax;
   snapshot.balance = snapshot.total - snapshot.depositAmount;
+  snapshot.linePriceMode = normalizeDocumentTaxMode(rental.documentTaxMode);
 
   // フォームに現在のNoと履歴を保存
   setRental(r => {
@@ -454,7 +497,7 @@ async function generateReplyAI(rental, apiKey, type) {
 
 export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, initialOpenId, onConsumeOpenId, events = [], onConvertToEvent, onBulkImport }) {
   const [rentals, setRentals] = useState([]);
-  const [view, setView] = useState("list"); // list | edit
+  const [view, setView] = useState("list"); // list | detail | edit
   const [form, setForm] = useState(emptyRental);
   const [editingId, setEditingId] = useState(null);
   const [filter, setFilter] = useState("all");
@@ -539,6 +582,13 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
     setView("edit");
   };
 
+  const startDetail = (r) => {
+    setForm({ ...emptyRental, ...r });
+    setEditingId(r._id);
+    setAiReply("");
+    setView("detail");
+  };
+
   const startEdit = (r) => {
     setForm({ ...emptyRental, ...r });
     setEditingId(r._id);
@@ -575,7 +625,73 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
   });
   const sorted = [...filtered].sort((a, b) => (b.inquiryDate || "").localeCompare(a.inquiryDate || ""));
 
+  if (view === "detail") {
+    const nameLine = [form.customerCompany, form.contactName].filter(Boolean).join(" ／ ") || "（無題）";
+    const optYes = (on) => (on ? "利用" : "—");
+    return (
+      <div style={{ padding: "1.5rem 2rem", maxWidth: 720, margin: "0 auto" }} className="hb-view">
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.25rem", flexWrap: "wrap", gap: ".75rem" }}>
+          <h2 style={{ fontFamily: "Georgia,serif", fontSize: "1.15rem", color: "#c9a84c", letterSpacing: ".12em", margin: 0 }}>
+            🍽 貸切の詳細
+          </h2>
+          <div style={{ display: "flex", gap: ".5rem", flexWrap: "wrap" }}>
+            <button type="button" style={S.btn("sm")} onClick={() => { setView("list"); setForm(emptyRental); setEditingId(null); }}>← 一覧</button>
+            <button type="button" style={S.btn("gold")} onClick={() => setView("edit")}>✏ 編集</button>
+          </div>
+        </div>
+
+        <div style={{ ...S.card, display: "block", marginBottom: "1rem", padding: "1.25rem 1.5rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: ".6rem", marginBottom: "1rem", flexWrap: "wrap" }}>
+            <span style={{ fontFamily: "Georgia,serif", fontSize: "1.05rem", color: "#f0e8d0" }}>{nameLine}</span>
+            <StatusBadge status={form.status} />
+          </div>
+
+          <div style={S.secTitle}>基本情報</div>
+          <DetailRow label="利用日" value={form.desiredDate || ""} />
+          <DetailRow label="利用時間" value={form.desiredTime || ""} />
+          <DetailRow label="人数" value={form.people ? `${form.people}名` : ""} />
+          <DetailRow label="利用目的" value={form.purpose} />
+          <DetailRow label="店舗担当者" value={form.staff || "未割当"} />
+
+          <div style={{ ...S.secTitle, marginTop: "1.25rem" }}>予約金</div>
+          <DetailRow
+            label="予約金の有無"
+            value={
+              form.depositPolicy === "waived"
+                ? "もらわない"
+                : `もらう${form.depositReceived ? "（受領済み）" : "（未受領）"}${form.depositPolicy === "required" && form.depositAmount ? ` ／ ¥${Number(form.depositAmount).toLocaleString()}` : ""}`
+            }
+          />
+
+          <div style={{ ...S.secTitle, marginTop: "1.25rem" }}>喫煙可否</div>
+          <DetailRow label="状態" value={smokingPolicyLabel(form.smokingPolicy)} />
+
+          <div style={{ ...S.secTitle, marginTop: "1.25rem" }}>設備・オプション</div>
+          <DetailRow label="ステージ使用" value={optYes(!!form.stage)} />
+          <DetailRow label="音響使用" value={optYes(!!form.sound)} />
+          <DetailRow label="マイク使用" value={optYes(!!form.mic)} />
+          <DetailRow label="プロジェクター使用" value={optYes(!!form.projector)} />
+
+          <div style={{ ...S.secTitle, marginTop: "1.25rem" }}>メモ</div>
+          <div style={{ fontSize: ".86rem", color: "#f0e8d0", lineHeight: 1.65, whiteSpace: "pre-wrap", wordBreak: "break-word", padding: ".5rem 0" }}>
+            {form.memo || "—"}
+          </div>
+
+          <div style={{ ...S.secTitle, marginTop: "1.25rem" }}>見積／請求の状況</div>
+          <DetailRow label="返信状況" value={form.replyStatus} />
+          <DetailRow label="見積状況" value={form.quoteStatus} />
+          <DetailRow label="見積No." value={form.quoteNo} />
+          <DetailRow label="請求No." value={form.invoiceNo} />
+          <DetailRow label="発行履歴" value={(form.documentHistory || []).length ? `${(form.documentHistory || []).length}件` : "—"} />
+        </div>
+      </div>
+    );
+  }
+
   if (view === "edit") {
+    const docTax = normalizeDocumentTaxMode(form.documentTaxMode);
+    const unitColLabel = docTax === "inclusive" ? "単価(税込)" : "単価(税抜)";
+    const amountColLabel = docTax === "inclusive" ? "金額(税込相当)" : "金額";
     return (
       <div style={{padding:"1.5rem 2rem",maxWidth:1100,margin:"0 auto"}} className="hb-view">
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1rem"}}>
@@ -601,10 +717,10 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
               </Field>
             </div>
 
-            <div style={S.secTitle}>希望条件</div>
+            <div style={S.secTitle}>利用条件</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:".7rem"}} className="hb-form-grid">
-              <Field label="希望日"><input type="date" style={S.inp} value={form.desiredDate} onChange={e=>setField("desiredDate",e.target.value)}/></Field>
-              <Field label="希望時間"><input style={S.inp} value={form.desiredTime} onChange={e=>setField("desiredTime",e.target.value)} placeholder="例：18:00〜21:00"/></Field>
+              <Field label="利用日"><input type="date" style={S.inp} value={form.desiredDate} onChange={e=>setField("desiredDate",e.target.value)}/></Field>
+              <Field label="利用時間"><input style={S.inp} value={form.desiredTime} onChange={e=>setField("desiredTime",e.target.value)} placeholder="例：18:00〜21:00"/></Field>
               <Field label="人数"><input type="number" style={S.inp} value={form.people} onChange={e=>setField("people",e.target.value)} placeholder="30"/></Field>
               <Field label="予算"><input style={S.inp} value={form.budget} onChange={e=>setField("budget",e.target.value)} placeholder="例：¥150,000"/></Field>
               <Field label="利用目的" full><input style={S.inp} value={form.purpose} onChange={e=>setField("purpose",e.target.value)} placeholder="例：歓送迎会・誕生日・発表会"/></Field>
@@ -622,6 +738,34 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
                   </label>
                 ))}
               </div></Field>
+            </div>
+
+            <div style={S.secTitle}>喫煙可否</div>
+            <div style={{display:"flex",gap:".35rem",flexWrap:"wrap",marginTop:".25rem"}}>
+              {[
+                { k: "unknown", l: "未確認" },
+                { k: "no", l: "喫煙不可" },
+                { k: "yes", l: "喫煙可" },
+              ].map(({ k, l }) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setField("smokingPolicy", k)}
+                  style={{
+                    padding: ".4rem .75rem",
+                    borderRadius: 4,
+                    border: `1px solid ${normalizeSmokingPolicy(form.smokingPolicy) === k ? "#c9a84c" : "rgba(201,168,76,0.28)"}`,
+                    background: normalizeSmokingPolicy(form.smokingPolicy) === k ? "#c9a84c" : "transparent",
+                    color: normalizeSmokingPolicy(form.smokingPolicy) === k ? "#0a0a0a" : "rgba(201,168,76,0.85)",
+                    fontSize: ".72rem",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    letterSpacing: ".04em",
+                  }}
+                >
+                  {l}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -674,7 +818,13 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
             </div>
 
             <div style={S.secTitle}>メモ</div>
-            <textarea style={{...S.inp,resize:"vertical",lineHeight:1.5}} rows={4} value={form.memo} onChange={e=>setField("memo",e.target.value)} placeholder="自由記述"/>
+            <textarea
+              style={{...S.inp, resize:"vertical", lineHeight:1.6, minHeight:"14rem", fontSize:".85rem"}}
+              rows={14}
+              value={form.memo}
+              onChange={e=>setField("memo",e.target.value)}
+              placeholder="自由記述"
+            />
 
             <div style={S.secTitle}>✨ AI返信文生成</div>
             <div style={{display:"flex",gap:".4rem",flexWrap:"wrap",marginBottom:".75rem"}}>
@@ -694,6 +844,38 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
         {/* ===== 見積書・請求書セクション ===== */}
         <div style={{marginTop:"2rem",padding:"1.25rem",background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.2)",borderRadius:8}}>
           <div style={{...S.secTitle,marginTop:0,fontSize:".75rem"}}>📄 見積書・請求書</div>
+
+          <div style={{marginBottom:"1rem"}}>
+            <label style={S.lbl}>明細の金額表示</label>
+            <div style={{display:"flex",gap:".35rem",flexWrap:"wrap",marginTop:".35rem"}}>
+              {[
+                { k: "exclusive", l: "税抜表示" },
+                { k: "inclusive", l: "税込表示" },
+              ].map(({ k, l }) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setField("documentTaxMode", k)}
+                  style={{
+                    padding: ".4rem .75rem",
+                    borderRadius: 4,
+                    border: `1px solid ${normalizeDocumentTaxMode(form.documentTaxMode) === k ? "#c9a84c" : "rgba(201,168,76,0.28)"}`,
+                    background: normalizeDocumentTaxMode(form.documentTaxMode) === k ? "#c9a84c" : "transparent",
+                    color: normalizeDocumentTaxMode(form.documentTaxMode) === k ? "#0a0a0a" : "rgba(201,168,76,0.85)",
+                    fontSize: ".72rem",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    letterSpacing: ".04em",
+                  }}
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
+            <div style={{ fontSize: ".58rem", color: "rgba(240,232,208,0.38)", marginTop: ".35rem", lineHeight: 1.45 }}>
+              入力する単価は税抜です。税込表示では単価・行金額を税込相当（税抜×1.1を四捨五入）で示します。小計・消費税・合計の計算は税抜基準で変わりません。
+            </div>
+          </div>
 
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:".7rem",marginBottom:"1rem"}} className="hb-form-grid">
             <Field label="法人/団体名（顧客名）"><input style={S.inp} value={form.customerCompany||""} onChange={e=>setField("customerCompany",e.target.value)} placeholder="個人の場合は空欄でOK"/></Field>
@@ -723,10 +905,15 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
           {/* 明細テーブル */}
           <div style={{marginBottom:".75rem"}}>
             <div style={{display:"grid",gridTemplateColumns:"3fr 60px 60px 100px 100px 30px",gap:".35rem",marginBottom:".3rem",fontSize:".62rem",color:"rgba(201,168,76,0.5)",letterSpacing:".05em"}}>
-              <div>摘要</div><div>数量</div><div>単位</div><div>単価(税抜)</div><div>金額</div><div></div>
+              <div>摘要</div><div>数量</div><div>単位</div><div>{unitColLabel}</div><div>{amountColLabel}</div><div></div>
             </div>
             {(form.quoteItems||[]).map((it,i)=>{
-              const total = (Number(it.qty||0) * Number(it.price||0)).toLocaleString();
+              const q = Number(it.qty || 0);
+              const p = Number(it.price || 0);
+              const lineEx = q * p;
+              const rawDisp = docTax === "inclusive" ? Math.round(lineEx * 1.1) : lineEx;
+              const lineDisp = Number.isFinite(rawDisp) ? rawDisp : 0;
+              const total = lineDisp.toLocaleString();
               return (
                 <div key={i} style={{display:"grid",gridTemplateColumns:"3fr 60px 60px 100px 100px 30px",gap:".35rem",marginBottom:".3rem",alignItems:"center"}}>
                   <input style={{...S.inp,padding:".4rem .55rem",fontSize:".78rem"}} value={it.name||""} onChange={e=>{
@@ -761,17 +948,22 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
 
           {/* 合計プレビュー */}
           {(form.quoteItems||[]).length > 0 && (() => {
-            const sub = (form.quoteItems||[]).reduce((s,i)=>s+(Number(i.qty||0)*Number(i.price||0)),0);
+            const sub = quoteSubtotalExTax(form.quoteItems);
             const tax = Math.round(sub * 0.1);
             const total = sub + tax;
             const dep = (form.depositPolicy==="required" && form.depositReceived) ? Number(form.depositAmount||0) : 0;
             const balance = total - dep;
             return (
               <div style={{padding:".75rem 1rem",background:"#111",borderRadius:5,marginBottom:"1rem",fontSize:".82rem"}}>
+                {docTax === "inclusive" && (
+                  <div style={{ fontSize: ".58rem", color: "rgba(240,232,208,0.4)", marginBottom: ".45rem", lineHeight: 1.45 }}>
+                    明細の税込相当額は参考表示です。以下の小計・税・合計は税抜基準の計算です。
+                  </div>
+                )}
                 <div style={{display:"flex",gap:"1.5rem",justifyContent:"flex-end",alignItems:"baseline",flexWrap:"wrap"}}>
-                  <span style={{color:"rgba(240,232,208,0.55)"}}>小計: <strong style={{color:"#f0e8d0"}}>¥{sub.toLocaleString()}</strong></span>
+                  <span style={{color:"rgba(240,232,208,0.55)"}}>小計（税抜）: <strong style={{color:"#f0e8d0"}}>¥{sub.toLocaleString()}</strong></span>
                   <span style={{color:"rgba(240,232,208,0.55)"}}>消費税(10%): <strong style={{color:"#f0e8d0"}}>¥{tax.toLocaleString()}</strong></span>
-                  <span style={{color:"#c9a84c"}}>合計: <strong style={{fontSize:"1.05rem"}}>¥{total.toLocaleString()}</strong></span>
+                  <span style={{color:"#c9a84c"}}>合計（税込）: <strong style={{fontSize:"1.05rem"}}>¥{total.toLocaleString()}</strong></span>
                 </div>
                 {dep > 0 && (
                   <div style={{display:"flex",gap:"1.5rem",justifyContent:"flex-end",alignItems:"baseline",flexWrap:"wrap",marginTop:".4rem",paddingTop:".4rem",borderTop:"1px dashed rgba(201,168,76,0.15)"}}>
@@ -899,7 +1091,7 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
       )}
       {sorted.map(r=>(
         <div key={r._id} style={S.card} className="hb-card">
-          <div onClick={()=>startEdit(r)} style={{cursor:"pointer"}}>
+          <div onClick={()=>startDetail(r)} style={{cursor:"pointer"}}>
             <div style={{display:"flex",alignItems:"center",gap:".5rem",marginBottom:".35rem",flexWrap:"wrap"}}>
               <span style={{fontFamily:"Georgia,serif",fontSize:"1rem"}}>{r.contactName||"（無題）"}</span>
               <StatusBadge status={r.status}/>
@@ -916,16 +1108,16 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
                 <span style={{display:"inline-block",padding:".1rem .4rem",borderRadius:2,fontSize:".55rem",letterSpacing:".08em",background:"rgba(126,200,227,0.13)",color:"#7ec8e3"}}>📄 {r.documentHistory.length}件</span>
               )}
             </div>
-            <div style={{fontSize:".7rem",color:"rgba(240,232,208,0.5)",display:"flex",gap:"1rem",flexWrap:"wrap"}}>
-              {r.desiredDate && <span>📅 希望: {r.desiredDate} {r.desiredTime}</span>}
+            <div style={{fontSize:".7rem",color:"rgba(240,232,208,0.5)",display:"flex",gap:"1rem",flexWrap:"wrap",alignItems:"baseline"}}>
+              {r.desiredDate && <span>📅 利用: {r.desiredDate} {r.desiredTime}</span>}
               {r.people && <span>👥 {r.people}名</span>}
               {r.purpose && <span>📝 {r.purpose}</span>}
-              {r.inquiryDate && <span style={{opacity:.6}}>問合: {r.inquiryDate}</span>}
+              {r.inquiryDate && <span style={{opacity:.38,fontSize:".62rem",letterSpacing:".02em"}}>受付日 {r.inquiryDate}</span>}
             </div>
           </div>
           <div style={{display:"flex",gap:".4rem"}}>
-            <button style={S.btn("sm")} onClick={()=>startEdit(r)}>編集</button>
-            <button style={S.btn("danger")} onClick={()=>handleDelete(r._id)}>削除</button>
+            <button type="button" style={S.btn("sm")} onClick={(e)=>{ e.stopPropagation(); startEdit(r); }}>編集</button>
+            <button type="button" style={S.btn("danger")} onClick={(e)=>{ e.stopPropagation(); handleDelete(r._id); }}>削除</button>
           </div>
         </div>
       ))}
