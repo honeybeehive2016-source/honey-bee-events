@@ -678,14 +678,13 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
   };
 
   const handleRentalAttachmentsInputChange = async (e) => {
-    const picked = e.target.files;
-    e.target.value = "";
-    if (!picked || !picked.length) return;
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
     const rentalId = ensureUploadRentalId();
     setAttachmentUploading(true);
     const next = [...(form.attachments || [])];
     try {
-      for (const file of Array.from(picked)) {
+      for (const file of files) {
         if (!isAllowedRentalAttachmentMime(file)) {
           alert(`画像またはPDFのみアップロードできます: ${file.name}`);
           continue;
@@ -700,8 +699,10 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
       setField("attachments", next);
     } catch (err) {
       alert("アップロード失敗：" + (err.message || String(err)));
+    } finally {
+      e.target.value = "";
+      setAttachmentUploading(false);
     }
-    setAttachmentUploading(false);
   };
 
   const removeRentalAttachmentAt = async (index) => {
