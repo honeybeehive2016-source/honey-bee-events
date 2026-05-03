@@ -20,6 +20,8 @@ export const emptyRental = {
   food: "", drinks: "", stage: false, sound: false, mic: false, projector: false,
   contactName: "", phone: "", email: "",
   customerCompany: "",
+  /** 一覧・詳細の表示名（未設定時は法人/団体名・担当者名から自動） */
+  rentalTitle: "",
   status: "new",
   replyStatus: "", quoteStatus: "",
   outcome: "",
@@ -169,6 +171,15 @@ function localTodayYmd() {
   return `${y}-${m}-${d}`;
 }
 
+/** 一覧・詳細で表示する貸切名（rentalTitle 優先、なければ従来どおり） */
+function displayRentalTitle(r) {
+  const t = String(r.rentalTitle || "").trim();
+  if (t) return t;
+  const parts = [r.customerCompany, r.contactName].filter((x) => String(x || "").trim());
+  if (parts.length) return parts.join(" ／ ");
+  return (r.contactName || "").trim() || "（無題）";
+}
+
 /** filtered 済みリストを、今後 / 過去 / 日付未設定に分割（各配列はソート済み） */
 function partitionRentalsByDesiredDate(filteredList) {
   const todayYmd = localTodayYmd();
@@ -190,27 +201,40 @@ function partitionRentalsByDesiredDate(filteredList) {
   return { upcoming, past, undated };
 }
 
+const attachmentOpenLinkStyle = {
+  ...S.btn("gold"),
+  fontSize: ".68rem",
+  textDecoration: "none",
+  display: "inline-block",
+  textAlign: "center",
+  padding: ".48rem 1rem",
+  letterSpacing: ".06em",
+  width: "100%",
+  boxSizing: "border-box",
+};
+
 function RentalAttachmentTile({ att, idx, readOnly, onRemove }) {
-  const [pdfPreviewOff, setPdfPreviewOff] = useState(false);
+  const [pdfPreviewOn, setPdfPreviewOn] = useState(false);
   const url = att.downloadURL || "#";
   const isImg = isImageAttachmentRecord(att);
   const isPdf = isPdfAttachmentRecord(att);
   const wrapStyle = {
-    width: 260,
+    width: 280,
     maxWidth: "100%",
-    padding: ".5rem",
+    padding: ".55rem",
     background: "rgba(201,168,76,0.05)",
     borderRadius: 8,
     border: "1px solid rgba(201,168,76,0.15)",
     display: "flex",
     flexDirection: "column",
-    gap: ".4rem",
+    gap: ".5rem",
+    boxSizing: "border-box",
   };
 
   const removeBtn = !readOnly && onRemove ? (
     <button
       type="button"
-      style={{ ...S.btn("sm"), fontSize: ".58rem", padding: ".2rem .45rem", color: "#e24b4a", borderColor: "rgba(226,75,74,0.35)", alignSelf: "flex-start" }}
+      style={{ ...S.btn("sm"), fontSize: ".58rem", padding: ".2rem .45rem", color: "#e24b4a", borderColor: "rgba(226,75,74,0.35)", alignSelf: "stretch" }}
       onClick={() => onRemove(idx)}
     >
       削除
@@ -220,28 +244,41 @@ function RentalAttachmentTile({ att, idx, readOnly, onRemove }) {
   if (isImg) {
     return (
       <div style={wrapStyle}>
-        <a href={url} target="_blank" rel="noopener noreferrer" style={{ display: "block", textAlign: "center" }}>
-          <img
-            src={url}
-            alt=""
-            style={{
-              maxWidth: 220,
-              maxHeight: 220,
-              width: "100%",
-              height: "auto",
-              objectFit: "contain",
-              borderRadius: 6,
-              border: "1px solid rgba(201,168,76,0.22)",
-              display: "block",
-              margin: "0 auto",
-              cursor: "zoom-in",
-            }}
-          />
-        </a>
-        <div style={{ fontSize: ".62rem", color: "rgba(240,232,208,0.55)", wordBreak: "break-all" }}>{att.originalName || "画像"}</div>
-        <div style={{ fontSize: ".58rem", color: "rgba(240,232,208,0.4)" }}>{formatAttachmentSizeBytes(att.sizeBytes)}</div>
-        <a href={url} target="_blank" rel="noopener noreferrer" style={{ fontSize: ".65rem", color: "#7ec8e3" }}>
-          新しいタブで開く
+        <div
+          style={{
+            height: 200,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "#101010",
+            borderRadius: 8,
+            border: "1px solid rgba(201,168,76,0.15)",
+            overflow: "hidden",
+            padding: ".4rem",
+            boxSizing: "border-box",
+          }}
+        >
+          <a href={url} target="_blank" rel="noopener noreferrer" style={{ display: "block", maxWidth: "100%", maxHeight: "100%" }}>
+            <img
+              src={url}
+              alt=""
+              style={{
+                maxWidth: "100%",
+                maxHeight: 188,
+                width: "auto",
+                height: "auto",
+                objectFit: "contain",
+                display: "block",
+                margin: "0 auto",
+                cursor: "zoom-in",
+              }}
+            />
+          </a>
+        </div>
+        <div style={{ fontSize: ".65rem", color: "rgba(240,232,208,0.55)", wordBreak: "break-all", lineHeight: 1.35 }}>{att.originalName || "画像"}</div>
+        <div style={{ fontSize: ".6rem", color: "rgba(240,232,208,0.4)" }}>{formatAttachmentSizeBytes(att.sizeBytes)}</div>
+        <a href={url} target="_blank" rel="noopener noreferrer" style={attachmentOpenLinkStyle}>
+          画像を開く
         </a>
         {removeBtn}
       </div>
@@ -251,34 +288,41 @@ function RentalAttachmentTile({ att, idx, readOnly, onRemove }) {
   if (isPdf) {
     return (
       <div style={wrapStyle}>
-        {!pdfPreviewOff && url !== "#" ? (
-          <iframe
-            title={att.originalName || "PDF"}
-            src={url}
-            style={{
-              width: "100%",
-              height: 200,
-              border: "1px solid rgba(201,168,76,0.2)",
-              borderRadius: 6,
-              background: "#0d0d0d",
-            }}
-          />
-        ) : null}
-        <div style={{ fontSize: ".72rem", color: "#f0e8d0", fontWeight: 500, wordBreak: "break-all" }}>{att.originalName || "PDF"}</div>
-        <div style={{ fontSize: ".62rem", color: "rgba(240,232,208,0.45)" }}>PDF ・ {formatAttachmentSizeBytes(att.sizeBytes)}</div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: ".35rem", alignItems: "center" }}>
-          <a href={url} target="_blank" rel="noopener noreferrer" style={{ ...S.btn("sm"), fontSize: ".62rem", textDecoration: "none", display: "inline-block", color: "#0a0a0a" }}>
-            開く
+        <div
+          style={{
+            padding: ".65rem .75rem",
+            background: "#121212",
+            borderRadius: 8,
+            border: "1px solid rgba(201,168,76,0.22)",
+            display: "flex",
+            flexDirection: "column",
+            gap: ".45rem",
+          }}
+        >
+          <div style={{ fontSize: ".85rem", color: "#f0e8d0", fontWeight: 600, wordBreak: "break-all", lineHeight: 1.35 }}>{att.originalName || "PDF"}</div>
+          <div style={{ fontSize: ".65rem", color: "rgba(240,232,208,0.5)" }}>PDF ・ {formatAttachmentSizeBytes(att.sizeBytes)}</div>
+          <a href={url} target="_blank" rel="noopener noreferrer" style={attachmentOpenLinkStyle}>
+            PDFを開く
           </a>
-          {!pdfPreviewOff && url !== "#" ? (
-            <button type="button" style={{ ...S.btn("sm"), fontSize: ".58rem" }} onClick={() => setPdfPreviewOff(true)}>
-              プレビューを閉じる
+          {url !== "#" ? (
+            <button type="button" style={{ ...S.btn("sm"), fontSize: ".6rem", width: "100%", marginTop: ".15rem" }} onClick={() => setPdfPreviewOn((v) => !v)}>
+              {pdfPreviewOn ? "プレビューを閉じる" : "プレビューを表示"}
             </button>
-          ) : !pdfPreviewOff ? null : (
-            <button type="button" style={{ ...S.btn("sm"), fontSize: ".58rem" }} onClick={() => setPdfPreviewOff(false)}>
-              プレビューを表示
-            </button>
-          )}
+          ) : null}
+          {pdfPreviewOn && url !== "#" ? (
+            <div
+              style={{
+                marginTop: ".35rem",
+                height: 150,
+                borderRadius: 6,
+                overflow: "hidden",
+                border: "1px solid rgba(201,168,76,0.2)",
+                background: "#0a0a0a",
+              }}
+            >
+              <iframe title={att.originalName || "PDF"} src={url} style={{ width: "100%", height: "100%", border: "none", display: "block" }} />
+            </div>
+          ) : null}
         </div>
         {removeBtn}
       </div>
@@ -287,11 +331,11 @@ function RentalAttachmentTile({ att, idx, readOnly, onRemove }) {
 
   return (
     <div style={wrapStyle}>
-      <div style={{ fontSize: "2rem", lineHeight: 1 }}>📎</div>
-      <div style={{ fontSize: ".72rem", color: "#f0e8d0", wordBreak: "break-all" }}>{att.originalName || "ファイル"}</div>
-      <div style={{ fontSize: ".62rem", color: "rgba(240,232,208,0.45)" }}>{formatAttachmentSizeBytes(att.sizeBytes)}</div>
-      <a href={url} target="_blank" rel="noopener noreferrer" style={{ ...S.btn("sm"), fontSize: ".62rem", textDecoration: "none", display: "inline-block", color: "#0a0a0a", width: "fit-content" }}>
-        開く
+      <div style={{ fontSize: "2rem", lineHeight: 1, textAlign: "center" }}>📎</div>
+      <div style={{ fontSize: ".78rem", color: "#f0e8d0", fontWeight: 500, wordBreak: "break-all", lineHeight: 1.35 }}>{att.originalName || "ファイル"}</div>
+      <div style={{ fontSize: ".65rem", color: "rgba(240,232,208,0.45)" }}>{formatAttachmentSizeBytes(att.sizeBytes)}</div>
+      <a href={url} target="_blank" rel="noopener noreferrer" style={attachmentOpenLinkStyle}>
+        ファイルを開く
       </a>
       {removeBtn}
     </div>
@@ -320,48 +364,93 @@ function RentalAttachmentsGallery({ attachments, readOnly, onRemove, uploading }
 }
 
 function RentalListCard({ r, onOpenDetail, onOpenEdit, onTrash }) {
+  const ymd = (r.desiredDate || "").trim();
+  const dated = isValidDesiredDateYmd(ymd);
+  const [yy, mm, dd] = dated ? ymd.split("-") : ["", "", ""];
+  const timeStr = String(r.desiredTime || "").trim();
+  const title = displayRentalTitle(r);
+
   return (
     <div style={S.card} className="hb-card">
       <div onClick={onOpenDetail} style={{ cursor: "pointer" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: ".5rem", marginBottom: ".35rem", flexWrap: "wrap" }}>
-          <span style={{ fontFamily: "Georgia,serif", fontSize: "1rem" }}>{r.contactName || "（無題）"}</span>
-          <StatusBadge status={r.status} />
-          {r.staff && (
-            <span style={{ display: "inline-block", padding: ".1rem .4rem", borderRadius: 2, fontSize: ".55rem", letterSpacing: ".08em", background: "rgba(201,168,76,0.1)", color: "rgba(201,168,76,0.8)" }}>
-              👤 {r.staff}
-            </span>
-          )}
-          {r.depositPolicy === "required" && (
-            <span
-              style={{
-                display: "inline-block",
-                padding: ".1rem .4rem",
-                borderRadius: 2,
-                fontSize: ".55rem",
-                letterSpacing: ".08em",
-                background: r.depositReceived ? "rgba(126,200,127,0.13)" : "rgba(244,162,97,0.13)",
-                color: r.depositReceived ? "#7ec87e" : "#f4a261",
-              }}
-            >
-              {r.depositReceived ? "💰 受領済" : "💰 未受領"}
-            </span>
-          )}
-          {r.depositPolicy === "waived" && (
-            <span style={{ display: "inline-block", padding: ".1rem .4rem", borderRadius: 2, fontSize: ".55rem", letterSpacing: ".08em", background: "rgba(255,255,255,0.05)", color: "rgba(240,232,208,0.5)" }}>
-              予約金なし
-            </span>
-          )}
-          {(r.documentHistory || []).length > 0 && (
-            <span style={{ display: "inline-block", padding: ".1rem .4rem", borderRadius: 2, fontSize: ".55rem", letterSpacing: ".08em", background: "rgba(126,200,227,0.13)", color: "#7ec8e3" }}>
-              📄 {r.documentHistory.length}件
-            </span>
-          )}
-        </div>
-        <div style={{ fontSize: ".7rem", color: "rgba(240,232,208,0.5)", display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "baseline" }}>
-          {r.desiredDate && <span>📅 利用: {r.desiredDate} {r.desiredTime}</span>}
-          {r.people && <span>👥 {r.people}名</span>}
-          {r.purpose && <span>📝 {r.purpose}</span>}
-          {r.inquiryDate && <span style={{ opacity: 0.38, fontSize: ".62rem", letterSpacing: ".02em" }}>受付日 {r.inquiryDate}</span>}
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(92px, 108px) 1fr", gap: ".85rem", alignItems: "start", marginBottom: ".35rem" }}>
+          <div
+            style={{
+              textAlign: "center",
+              padding: ".45rem .35rem",
+              background: dated ? "rgba(201,168,76,0.14)" : "rgba(244,162,97,0.1)",
+              borderRadius: 8,
+              border: `1px solid ${dated ? "rgba(201,168,76,0.35)" : "rgba(244,162,97,0.35)"}`,
+              minHeight: 88,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: ".15rem",
+            }}
+          >
+            {dated ? (
+              <>
+                <div style={{ fontSize: "1.5rem", fontWeight: 700, color: "#c9a84c", lineHeight: 1.05, letterSpacing: ".02em" }}>
+                  {mm}/{dd}
+                </div>
+                <div style={{ fontSize: ".62rem", color: "rgba(240,232,208,0.55)", fontWeight: 500 }}>{yy}</div>
+                {timeStr ? (
+                  <div style={{ fontSize: ".58rem", color: "rgba(240,232,208,0.65)", marginTop: ".15rem", lineHeight: 1.25, wordBreak: "break-all" }}>{timeStr}</div>
+                ) : null}
+              </>
+            ) : (
+              <div style={{ fontSize: ".78rem", fontWeight: 700, color: "#f4a261", lineHeight: 1.25, letterSpacing: ".04em" }}>
+                日付
+                <br />
+                未設定
+              </div>
+            )}
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: ".45rem", marginBottom: ".35rem", flexWrap: "wrap" }}>
+              <span style={{ fontFamily: "Georgia,serif", fontSize: "1.02rem", color: "#f0e8d0", wordBreak: "break-word" }}>{title}</span>
+              <StatusBadge status={r.status} />
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: ".35rem", marginBottom: ".25rem" }}>
+              {r.staff && (
+                <span style={{ display: "inline-block", padding: ".1rem .4rem", borderRadius: 2, fontSize: ".55rem", letterSpacing: ".08em", background: "rgba(201,168,76,0.1)", color: "rgba(201,168,76,0.8)" }}>
+                  👤 {r.staff}
+                </span>
+              )}
+              {r.depositPolicy === "required" && (
+                <span
+                  style={{
+                    display: "inline-block",
+                    padding: ".1rem .4rem",
+                    borderRadius: 2,
+                    fontSize: ".55rem",
+                    letterSpacing: ".08em",
+                    background: r.depositReceived ? "rgba(126,200,127,0.13)" : "rgba(244,162,97,0.13)",
+                    color: r.depositReceived ? "#7ec87e" : "#f4a261",
+                  }}
+                >
+                  {r.depositReceived ? "💰 受領済" : "💰 未受領"}
+                </span>
+              )}
+              {r.depositPolicy === "waived" && (
+                <span style={{ display: "inline-block", padding: ".1rem .4rem", borderRadius: 2, fontSize: ".55rem", letterSpacing: ".08em", background: "rgba(255,255,255,0.05)", color: "rgba(240,232,208,0.5)" }}>
+                  予約金なし
+                </span>
+              )}
+              {(r.documentHistory || []).length > 0 && (
+                <span style={{ display: "inline-block", padding: ".1rem .4rem", borderRadius: 2, fontSize: ".55rem", letterSpacing: ".08em", background: "rgba(126,200,227,0.13)", color: "#7ec8e3" }}>
+                  📄 {r.documentHistory.length}件
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: ".68rem", color: "rgba(240,232,208,0.48)", display: "flex", gap: ".75rem", flexWrap: "wrap", alignItems: "baseline" }}>
+              {dated && <span style={{ fontWeight: 500, color: "rgba(240,232,208,0.55)" }}>{ymd.replace(/-/g, "/")}</span>}
+              {r.people && <span>👥 {r.people}名</span>}
+              {r.purpose && <span>📝 {r.purpose}</span>}
+              {r.inquiryDate && <span style={{ opacity: 0.38, fontSize: ".6rem", letterSpacing: ".02em" }}>受付日 {r.inquiryDate}</span>}
+            </div>
+          </div>
         </div>
       </div>
       <div style={{ display: "flex", gap: ".4rem" }}>
@@ -968,7 +1057,7 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
   const listIsEmpty = rentalsUpcoming.length === 0 && rentalsPast.length === 0 && rentalsUndated.length === 0;
 
   if (view === "detail") {
-    const nameLine = [form.customerCompany, form.contactName].filter(Boolean).join(" ／ ") || "（無題）";
+    const nameLine = displayRentalTitle(form);
     const optYes = (on) => (on ? "利用" : "—");
     return (
       <div style={{ padding: "1.5rem 2rem", maxWidth: 720, margin: "0 auto" }} className="hb-view">
@@ -1050,6 +1139,9 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
           <div>
             <div style={S.secTitle}>お客様情報</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:".7rem"}} className="hb-form-grid">
+              <Field label="貸切タイトル" full>
+                <input style={S.inp} value={form.rentalTitle || ""} onChange={(e) => setField("rentalTitle", e.target.value)} placeholder="一覧・詳細に表示（空なら法人名・担当者名を使用）"/>
+              </Field>
               <Field label="担当者名" full><input style={S.inp} value={form.contactName} onChange={e=>setField("contactName",e.target.value)} placeholder="例：山田太郎"/></Field>
               <Field label="電話番号"><input style={S.inp} value={form.phone} onChange={e=>setField("phone",e.target.value)} placeholder="090-..."/></Field>
               <Field label="メール"><input type="email" style={S.inp} value={form.email} onChange={e=>setField("email",e.target.value)} placeholder="@..."/></Field>
@@ -1539,7 +1631,7 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
               return (
                 <div key={r._id} style={{padding:".75rem 1rem",background:"#111",borderRadius:5,marginBottom:".5rem",display:"grid",gridTemplateColumns:"1fr auto",gap:".5rem",alignItems:"center"}}>
                   <div>
-                    <div style={{fontSize:".88rem",marginBottom:".2rem"}}>{r.contactName||r.customerCompany||"（無題）"}</div>
+                    <div style={{fontSize:".88rem",marginBottom:".2rem"}}>{displayRentalTitle(r)}</div>
                     <div style={{fontSize:".65rem",color:"rgba(240,232,208,0.4)",display:"flex",gap:".75rem",flexWrap:"wrap"}}>
                       {r.desiredDate&&<span>📅 {r.desiredDate}</span>}
                       <span>削除：{r._deletedAt?new Date(r._deletedAt).toLocaleDateString("ja-JP"):""}</span>
