@@ -824,8 +824,15 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                 >
                   <div style={{fontSize:".72rem",fontWeight:isToday?700:500,marginBottom:"2px"}}>{cell.day}</div>
                   {hasEvent && (
-                    <div style={{fontSize:".5rem",lineHeight:1.2,padding:"1px 3px",background:"rgba(201,168,76,0.13)",borderRadius:2,color:"#c9a84c",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis",marginBottom:"2px"}}>
-                      🎵 {cell.events[0].name}
+                    <div style={{marginBottom:"2px",display:"flex",flexDirection:"column",gap:1}}>
+                      {cell.events.slice(0,2).map((ev,i)=>(
+                        <div key={i} style={{fontSize:".5rem",lineHeight:1.2,padding:"1px 3px",background:"rgba(201,168,76,0.13)",borderRadius:2,color:"#c9a84c",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>
+                          🎵 {ev.name}
+                        </div>
+                      ))}
+                      {cell.events.length > 2 && (
+                        <div style={{fontSize:".48rem",color:"rgba(201,168,76,0.5)",paddingLeft:3}}>…他{cell.events.length-2}件</div>
+                      )}
                     </div>
                   )}
                   {cell.reservations.length > 0 && (
