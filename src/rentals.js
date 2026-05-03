@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
-import { db } from "./firebase";
+import { useState, useEffect, useRef } from "react";
+import { db, storage } from "./firebase";
 import { collection, doc, setDoc, deleteDoc, onSnapshot, getDoc } from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 
 export const RENTAL_STATUSES = [
   { key: "new", label: "未対応", color: "#e24b4a" },
@@ -41,6 +42,8 @@ export const emptyRental = {
   smokingPolicy: "unknown",
   /** 見積明細の単価・行金額の表示: exclusive=税抜（保存の price は常に税抜単価）/ inclusive=税込相当の参考表示 */
   documentTaxMode: "exclusive",
+  /** 添付: { storagePath, downloadURL, originalName, contentType, sizeBytes, uploadedAt }[] */
+  attachments: [],
 };
 
 // 担当者リスト
@@ -120,6 +123,55 @@ const DetailRow = ({ label, value }) => (
     <div style={{ fontSize: ".86rem", color: "#f0e8d0", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{value !== undefined && value !== null && value !== "" ? value : "—"}</div>
   </div>
 );
+
+const MAX_RENTAL_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+
+function sanitizeRentalFileName(name) {
+  const base = String(name || "file").replace(/[/\\?%*:|"<>]/g, "_").replace(/^\.+/, "").trim();
+  return (base || "file").slice(0, 120);
+}
+
+function isAllowedRentalAttachmentMime(file) {
+  const t = (file.type || "").toLowerCase();
+  if (t === "application/pdf") return true;
+  if (t.startsWith("image/")) return true;
+  return false;
+}
+
+function isImageAttachmentRecord(att) {
+  return (att.contentType || "").toLowerCase().startsWith("image/");
+}
+
+async function deleteRentalAttachmentStorageObjects(attachments) {
+  if (!attachments || !attachments.length) return;
+  await Promise.all(
+    attachments.map(async (a) => {
+      if (!a || !a.storagePath) return;
+      try {
+        await deleteObject(ref(storage, a.storagePath));
+      } catch (e) {
+        console.warn("rental attachment storage delete:", a.storagePath, e);
+      }
+    })
+  );
+}
+
+async function uploadRentalAttachmentFile(rentalId, file) {
+  const safe = sanitizeRentalFileName(file.name);
+  const unique = `${Date.now()}_${Math.random().toString(36).slice(2, 9)}_${safe}`;
+  const storagePath = `rentals/${rentalId}/attachments/${unique}`;
+  const storageRef = ref(storage, storagePath);
+  await uploadBytes(storageRef, file);
+  const downloadURL = await getDownloadURL(storageRef);
+  return {
+    storagePath,
+    downloadURL,
+    originalName: file.name || safe,
+    contentType: file.type || "application/octet-stream",
+    sizeBytes: file.size,
+    uploadedAt: Date.now(),
+  };
+}
 
 // 連番取得（Firestoreで集中管理）
 async function getNextNumber(type) {
@@ -508,6 +560,8 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
 
   const [showTrash, setShowTrash] = useState(false);
   const [allRentals, setAllRentals] = useState([]); // 削除済みも含む
+  const [attachmentUploading, setAttachmentUploading] = useState(false);
+  const attachmentInputRef = useRef(null);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "rentals"), (snap) => {
@@ -572,6 +626,10 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
 
   const purgeRental = async (id) => {
     if (!window.confirm("この問い合わせを完全に削除しますか？\nこの操作は取り消せません。")) return;
+    const target = allRentals.find(r => r._id === id);
+    if (target && (target.attachments || []).length) {
+      await deleteRentalAttachmentStorageObjects(target.attachments);
+    }
     await deleteDoc(doc(db, "rentals", id));
   };
 
@@ -610,6 +668,53 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
     navigator.clipboard.writeText(text);
     setCopied(key);
     setTimeout(() => setCopied(""), 1600);
+  };
+
+  const ensureUploadRentalId = () => {
+    if (editingId) return editingId;
+    const nid = `rental_${Date.now().toString(36)}`;
+    setEditingId(nid);
+    return nid;
+  };
+
+  const handleRentalAttachmentsInputChange = async (e) => {
+    const picked = e.target.files;
+    e.target.value = "";
+    if (!picked || !picked.length) return;
+    const rentalId = ensureUploadRentalId();
+    setAttachmentUploading(true);
+    const next = [...(form.attachments || [])];
+    try {
+      for (const file of Array.from(picked)) {
+        if (!isAllowedRentalAttachmentMime(file)) {
+          alert(`画像またはPDFのみアップロードできます: ${file.name}`);
+          continue;
+        }
+        if (file.size > MAX_RENTAL_ATTACHMENT_BYTES) {
+          alert(`1ファイルあたり10MBまでです: ${file.name}`);
+          continue;
+        }
+        const meta = await uploadRentalAttachmentFile(rentalId, file);
+        next.push(meta);
+      }
+      setField("attachments", next);
+    } catch (err) {
+      alert("アップロード失敗：" + (err.message || String(err)));
+    }
+    setAttachmentUploading(false);
+  };
+
+  const removeRentalAttachmentAt = async (index) => {
+    const list = [...(form.attachments || [])];
+    const att = list[index];
+    if (!att || !window.confirm("この添付ファイルを削除しますか？")) return;
+    try {
+      if (att.storagePath) await deleteObject(ref(storage, att.storagePath));
+    } catch (err) {
+      console.warn(err);
+    }
+    list.splice(index, 1);
+    setField("attachments", list);
   };
 
   // ステータス別件数
@@ -676,6 +781,50 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
           <div style={{ fontSize: ".86rem", color: "#f0e8d0", lineHeight: 1.65, whiteSpace: "pre-wrap", wordBreak: "break-word", padding: ".5rem 0" }}>
             {form.memo || "—"}
           </div>
+
+          <div style={{ ...S.secTitle, marginTop: "1.25rem" }}>添付ファイル</div>
+          {(form.attachments || []).length === 0 ? (
+            <div style={{ fontSize: ".78rem", color: "rgba(240,232,208,0.35)", padding: ".25rem 0 .75rem" }}>添付はありません</div>
+          ) : (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: ".85rem", padding: ".35rem 0 1rem" }}>
+              {(form.attachments || []).map((att, idx) => (
+                <a
+                  key={att.storagePath || `${att.uploadedAt}-${idx}`}
+                  href={att.downloadURL || "#"}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ textDecoration: "none", color: "inherit", display: "flex", flexDirection: "column", alignItems: "center", gap: ".3rem", maxWidth: 120 }}
+                >
+                  {isImageAttachmentRecord(att) ? (
+                    <img
+                      src={att.downloadURL}
+                      alt=""
+                      style={{ width: 88, height: 88, objectFit: "cover", borderRadius: 6, border: "1px solid rgba(201,168,76,0.25)" }}
+                    />
+                  ) : (
+                    <div
+                      style={{
+                        width: 88,
+                        height: 88,
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        background: "#161616",
+                        borderRadius: 6,
+                        border: "1px solid rgba(201,168,76,0.25)",
+                        fontSize: "2rem",
+                        lineHeight: 1,
+                      }}
+                    >
+                      📄
+                    </div>
+                  )}
+                  <span style={{ fontSize: ".62rem", color: "rgba(240,232,208,0.65)", textAlign: "center", wordBreak: "break-all" }}>{att.originalName || "PDF"}</span>
+                </a>
+              ))}
+            </div>
+          )}
 
           <div style={{ ...S.secTitle, marginTop: "1.25rem" }}>見積／請求の状況</div>
           <DetailRow label="返信状況" value={form.replyStatus} />
@@ -825,6 +974,86 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
               onChange={e=>setField("memo",e.target.value)}
               placeholder="自由記述"
             />
+
+            <div style={S.secTitle}>📎 添付ファイル</div>
+            <div style={{ fontSize: ".62rem", color: "rgba(240,232,208,0.45)", marginBottom: ".5rem", lineHeight: 1.45 }}>
+              画像・PDFのみ、1ファイル10MBまで。複数選択できます。
+            </div>
+            <input
+              ref={attachmentInputRef}
+              type="file"
+              accept="image/*,application/pdf"
+              multiple
+              style={{ display: "none" }}
+              onChange={handleRentalAttachmentsInputChange}
+            />
+            <button
+              type="button"
+              style={{ ...S.btn("sm"), marginBottom: ".65rem" }}
+              disabled={attachmentUploading}
+              onClick={() => attachmentInputRef.current?.click()}
+            >
+              {attachmentUploading ? "アップロード中..." : "＋ ファイルを追加"}
+            </button>
+            {(form.attachments || []).length === 0 && !attachmentUploading ? (
+              <div style={{ fontSize: ".68rem", color: "rgba(240,232,208,0.3)", marginBottom: ".75rem" }}>添付はまだありません</div>
+            ) : null}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: ".75rem", alignItems: "flex-start", marginBottom: ".5rem" }}>
+              {(form.attachments || []).map((att, idx) => (
+                <div
+                  key={att.storagePath || `${att.uploadedAt}-${idx}`}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: ".35rem",
+                    padding: ".4rem",
+                    background: "rgba(201,168,76,0.04)",
+                    borderRadius: 8,
+                    border: "1px solid rgba(201,168,76,0.12)",
+                  }}
+                >
+                  <a href={att.downloadURL || "#"} target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none", color: "inherit" }}>
+                    {isImageAttachmentRecord(att) ? (
+                      <img
+                        src={att.downloadURL}
+                        alt=""
+                        style={{ width: 88, height: 88, objectFit: "cover", borderRadius: 6, border: "1px solid rgba(201,168,76,0.2)", display: "block" }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          width: 88,
+                          height: 88,
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          background: "#141414",
+                          borderRadius: 6,
+                          border: "1px solid rgba(201,168,76,0.2)",
+                          fontSize: "2rem",
+                          lineHeight: 1,
+                        }}
+                      >
+                        📄
+                      </div>
+                    )}
+                  </a>
+                  <a
+                    href={att.downloadURL || "#"}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ fontSize: ".62rem", color: "#7ec8e3", maxWidth: 110, textAlign: "center", wordBreak: "break-all" }}
+                  >
+                    {att.originalName || "ファイル"}
+                  </a>
+                  <button type="button" style={{ ...S.btn("sm"), fontSize: ".58rem", padding: ".2rem .45rem", color: "#e24b4a", borderColor: "rgba(226,75,74,0.35)" }} onClick={() => removeRentalAttachmentAt(idx)}>
+                    削除
+                  </button>
+                </div>
+              ))}
+            </div>
 
             <div style={S.secTitle}>✨ AI返信文生成</div>
             <div style={{display:"flex",gap:".4rem",flexWrap:"wrap",marginBottom:".75rem"}}>
