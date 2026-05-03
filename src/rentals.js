@@ -142,6 +142,240 @@ function isImageAttachmentRecord(att) {
   return (att.contentType || "").toLowerCase().startsWith("image/");
 }
 
+function isPdfAttachmentRecord(att) {
+  if ((att.contentType || "").toLowerCase() === "application/pdf") return true;
+  const name = String(att.originalName || "").toLowerCase();
+  return name.endsWith(".pdf");
+}
+
+function formatAttachmentSizeBytes(bytes) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n < 0) return "—";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+/** YYYY-MM-DD の利用日が有効か */
+function isValidDesiredDateYmd(s) {
+  return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s.trim());
+}
+
+function localTodayYmd() {
+  const n = new Date();
+  const y = n.getFullYear();
+  const m = String(n.getMonth() + 1).padStart(2, "0");
+  const d = String(n.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+/** filtered 済みリストを、今後 / 過去 / 日付未設定に分割（各配列はソート済み） */
+function partitionRentalsByDesiredDate(filteredList) {
+  const todayYmd = localTodayYmd();
+  const upcoming = [];
+  const past = [];
+  const undated = [];
+  for (const r of filteredList) {
+    const ymd = (r.desiredDate || "").trim();
+    if (!isValidDesiredDateYmd(ymd)) {
+      undated.push(r);
+      continue;
+    }
+    if (ymd >= todayYmd) upcoming.push(r);
+    else past.push(r);
+  }
+  upcoming.sort((a, b) => (a.desiredDate || "").localeCompare(b.desiredDate || ""));
+  past.sort((a, b) => (b.desiredDate || "").localeCompare(a.desiredDate || ""));
+  undated.sort((a, b) => (b.inquiryDate || "").localeCompare(a.inquiryDate || ""));
+  return { upcoming, past, undated };
+}
+
+function RentalAttachmentTile({ att, idx, readOnly, onRemove }) {
+  const [pdfPreviewOff, setPdfPreviewOff] = useState(false);
+  const url = att.downloadURL || "#";
+  const isImg = isImageAttachmentRecord(att);
+  const isPdf = isPdfAttachmentRecord(att);
+  const wrapStyle = {
+    width: 260,
+    maxWidth: "100%",
+    padding: ".5rem",
+    background: "rgba(201,168,76,0.05)",
+    borderRadius: 8,
+    border: "1px solid rgba(201,168,76,0.15)",
+    display: "flex",
+    flexDirection: "column",
+    gap: ".4rem",
+  };
+
+  const removeBtn = !readOnly && onRemove ? (
+    <button
+      type="button"
+      style={{ ...S.btn("sm"), fontSize: ".58rem", padding: ".2rem .45rem", color: "#e24b4a", borderColor: "rgba(226,75,74,0.35)", alignSelf: "flex-start" }}
+      onClick={() => onRemove(idx)}
+    >
+      削除
+    </button>
+  ) : null;
+
+  if (isImg) {
+    return (
+      <div style={wrapStyle}>
+        <a href={url} target="_blank" rel="noopener noreferrer" style={{ display: "block", textAlign: "center" }}>
+          <img
+            src={url}
+            alt=""
+            style={{
+              maxWidth: 220,
+              maxHeight: 220,
+              width: "100%",
+              height: "auto",
+              objectFit: "contain",
+              borderRadius: 6,
+              border: "1px solid rgba(201,168,76,0.22)",
+              display: "block",
+              margin: "0 auto",
+              cursor: "zoom-in",
+            }}
+          />
+        </a>
+        <div style={{ fontSize: ".62rem", color: "rgba(240,232,208,0.55)", wordBreak: "break-all" }}>{att.originalName || "画像"}</div>
+        <div style={{ fontSize: ".58rem", color: "rgba(240,232,208,0.4)" }}>{formatAttachmentSizeBytes(att.sizeBytes)}</div>
+        <a href={url} target="_blank" rel="noopener noreferrer" style={{ fontSize: ".65rem", color: "#7ec8e3" }}>
+          新しいタブで開く
+        </a>
+        {removeBtn}
+      </div>
+    );
+  }
+
+  if (isPdf) {
+    return (
+      <div style={wrapStyle}>
+        {!pdfPreviewOff && url !== "#" ? (
+          <iframe
+            title={att.originalName || "PDF"}
+            src={url}
+            style={{
+              width: "100%",
+              height: 200,
+              border: "1px solid rgba(201,168,76,0.2)",
+              borderRadius: 6,
+              background: "#0d0d0d",
+            }}
+          />
+        ) : null}
+        <div style={{ fontSize: ".72rem", color: "#f0e8d0", fontWeight: 500, wordBreak: "break-all" }}>{att.originalName || "PDF"}</div>
+        <div style={{ fontSize: ".62rem", color: "rgba(240,232,208,0.45)" }}>PDF ・ {formatAttachmentSizeBytes(att.sizeBytes)}</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: ".35rem", alignItems: "center" }}>
+          <a href={url} target="_blank" rel="noopener noreferrer" style={{ ...S.btn("sm"), fontSize: ".62rem", textDecoration: "none", display: "inline-block", color: "#0a0a0a" }}>
+            開く
+          </a>
+          {!pdfPreviewOff && url !== "#" ? (
+            <button type="button" style={{ ...S.btn("sm"), fontSize: ".58rem" }} onClick={() => setPdfPreviewOff(true)}>
+              プレビューを閉じる
+            </button>
+          ) : !pdfPreviewOff ? null : (
+            <button type="button" style={{ ...S.btn("sm"), fontSize: ".58rem" }} onClick={() => setPdfPreviewOff(false)}>
+              プレビューを表示
+            </button>
+          )}
+        </div>
+        {removeBtn}
+      </div>
+    );
+  }
+
+  return (
+    <div style={wrapStyle}>
+      <div style={{ fontSize: "2rem", lineHeight: 1 }}>📎</div>
+      <div style={{ fontSize: ".72rem", color: "#f0e8d0", wordBreak: "break-all" }}>{att.originalName || "ファイル"}</div>
+      <div style={{ fontSize: ".62rem", color: "rgba(240,232,208,0.45)" }}>{formatAttachmentSizeBytes(att.sizeBytes)}</div>
+      <a href={url} target="_blank" rel="noopener noreferrer" style={{ ...S.btn("sm"), fontSize: ".62rem", textDecoration: "none", display: "inline-block", color: "#0a0a0a", width: "fit-content" }}>
+        開く
+      </a>
+      {removeBtn}
+    </div>
+  );
+}
+
+function RentalAttachmentsGallery({ attachments, readOnly, onRemove, uploading }) {
+  const list = attachments || [];
+  if (!list.length) {
+    if (uploading) {
+      return <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.65)", padding: ".25rem 0 .75rem" }}>アップロード中...</div>;
+    }
+    return (
+      <div style={{ fontSize: readOnly ? ".78rem" : ".68rem", color: "rgba(240,232,208,0.35)", padding: ".25rem 0 .75rem" }}>
+        {readOnly ? "添付はありません" : "添付はまだありません"}
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "1rem", alignItems: "flex-start", padding: readOnly ? ".35rem 0 1rem" : ".25rem 0 .5rem" }}>
+      {list.map((att, idx) => (
+        <RentalAttachmentTile key={att.storagePath || `${att.uploadedAt}-${idx}`} att={att} idx={idx} readOnly={readOnly} onRemove={onRemove} />
+      ))}
+    </div>
+  );
+}
+
+function RentalListCard({ r, onOpenDetail, onOpenEdit, onTrash }) {
+  return (
+    <div style={S.card} className="hb-card">
+      <div onClick={onOpenDetail} style={{ cursor: "pointer" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: ".5rem", marginBottom: ".35rem", flexWrap: "wrap" }}>
+          <span style={{ fontFamily: "Georgia,serif", fontSize: "1rem" }}>{r.contactName || "（無題）"}</span>
+          <StatusBadge status={r.status} />
+          {r.staff && (
+            <span style={{ display: "inline-block", padding: ".1rem .4rem", borderRadius: 2, fontSize: ".55rem", letterSpacing: ".08em", background: "rgba(201,168,76,0.1)", color: "rgba(201,168,76,0.8)" }}>
+              👤 {r.staff}
+            </span>
+          )}
+          {r.depositPolicy === "required" && (
+            <span
+              style={{
+                display: "inline-block",
+                padding: ".1rem .4rem",
+                borderRadius: 2,
+                fontSize: ".55rem",
+                letterSpacing: ".08em",
+                background: r.depositReceived ? "rgba(126,200,127,0.13)" : "rgba(244,162,97,0.13)",
+                color: r.depositReceived ? "#7ec87e" : "#f4a261",
+              }}
+            >
+              {r.depositReceived ? "💰 受領済" : "💰 未受領"}
+            </span>
+          )}
+          {r.depositPolicy === "waived" && (
+            <span style={{ display: "inline-block", padding: ".1rem .4rem", borderRadius: 2, fontSize: ".55rem", letterSpacing: ".08em", background: "rgba(255,255,255,0.05)", color: "rgba(240,232,208,0.5)" }}>
+              予約金なし
+            </span>
+          )}
+          {(r.documentHistory || []).length > 0 && (
+            <span style={{ display: "inline-block", padding: ".1rem .4rem", borderRadius: 2, fontSize: ".55rem", letterSpacing: ".08em", background: "rgba(126,200,227,0.13)", color: "#7ec8e3" }}>
+              📄 {r.documentHistory.length}件
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: ".7rem", color: "rgba(240,232,208,0.5)", display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "baseline" }}>
+          {r.desiredDate && <span>📅 利用: {r.desiredDate} {r.desiredTime}</span>}
+          {r.people && <span>👥 {r.people}名</span>}
+          {r.purpose && <span>📝 {r.purpose}</span>}
+          {r.inquiryDate && <span style={{ opacity: 0.38, fontSize: ".62rem", letterSpacing: ".02em" }}>受付日 {r.inquiryDate}</span>}
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: ".4rem" }}>
+        <button type="button" style={S.btn("sm")} onClick={(e) => { e.stopPropagation(); onOpenEdit(); }}>
+          編集
+        </button>
+        <button type="button" style={S.btn("danger")} onClick={(e) => { e.stopPropagation(); onTrash(); }}>
+          削除
+        </button>
+      </div>
+    </div>
+  );
+}
+
 async function deleteRentalAttachmentStorageObjects(attachments) {
   if (!attachments || !attachments.length) return;
   await Promise.all(
@@ -562,6 +796,7 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
   const [allRentals, setAllRentals] = useState([]); // 削除済みも含む
   const [attachmentUploading, setAttachmentUploading] = useState(false);
   const attachmentInputRef = useRef(null);
+  const [showPastRentals, setShowPastRentals] = useState(false);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "rentals"), (snap) => {
@@ -729,7 +964,8 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
     if (staffFilter !== "all" && (r.staff||"") !== staffFilter) return false;
     return true;
   });
-  const sorted = [...filtered].sort((a, b) => (b.inquiryDate || "").localeCompare(a.inquiryDate || ""));
+  const { upcoming: rentalsUpcoming, past: rentalsPast, undated: rentalsUndated } = partitionRentalsByDesiredDate(filtered);
+  const listIsEmpty = rentalsUpcoming.length === 0 && rentalsPast.length === 0 && rentalsUndated.length === 0;
 
   if (view === "detail") {
     const nameLine = [form.customerCompany, form.contactName].filter(Boolean).join(" ／ ") || "（無題）";
@@ -784,48 +1020,7 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
           </div>
 
           <div style={{ ...S.secTitle, marginTop: "1.25rem" }}>添付ファイル</div>
-          {(form.attachments || []).length === 0 ? (
-            <div style={{ fontSize: ".78rem", color: "rgba(240,232,208,0.35)", padding: ".25rem 0 .75rem" }}>添付はありません</div>
-          ) : (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: ".85rem", padding: ".35rem 0 1rem" }}>
-              {(form.attachments || []).map((att, idx) => (
-                <a
-                  key={att.storagePath || `${att.uploadedAt}-${idx}`}
-                  href={att.downloadURL || "#"}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ textDecoration: "none", color: "inherit", display: "flex", flexDirection: "column", alignItems: "center", gap: ".3rem", maxWidth: 120 }}
-                >
-                  {isImageAttachmentRecord(att) ? (
-                    <img
-                      src={att.downloadURL}
-                      alt=""
-                      style={{ width: 88, height: 88, objectFit: "cover", borderRadius: 6, border: "1px solid rgba(201,168,76,0.25)" }}
-                    />
-                  ) : (
-                    <div
-                      style={{
-                        width: 88,
-                        height: 88,
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        background: "#161616",
-                        borderRadius: 6,
-                        border: "1px solid rgba(201,168,76,0.25)",
-                        fontSize: "2rem",
-                        lineHeight: 1,
-                      }}
-                    >
-                      📄
-                    </div>
-                  )}
-                  <span style={{ fontSize: ".62rem", color: "rgba(240,232,208,0.65)", textAlign: "center", wordBreak: "break-all" }}>{att.originalName || "PDF"}</span>
-                </a>
-              ))}
-            </div>
-          )}
+          <RentalAttachmentsGallery attachments={form.attachments} readOnly onRemove={null} />
 
           <div style={{ ...S.secTitle, marginTop: "1.25rem" }}>見積／請求の状況</div>
           <DetailRow label="返信状況" value={form.replyStatus} />
@@ -996,65 +1191,7 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
             >
               {attachmentUploading ? "アップロード中..." : "＋ ファイルを追加"}
             </button>
-            {(form.attachments || []).length === 0 && !attachmentUploading ? (
-              <div style={{ fontSize: ".68rem", color: "rgba(240,232,208,0.3)", marginBottom: ".75rem" }}>添付はまだありません</div>
-            ) : null}
-            <div style={{ display: "flex", flexWrap: "wrap", gap: ".75rem", alignItems: "flex-start", marginBottom: ".5rem" }}>
-              {(form.attachments || []).map((att, idx) => (
-                <div
-                  key={att.storagePath || `${att.uploadedAt}-${idx}`}
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    gap: ".35rem",
-                    padding: ".4rem",
-                    background: "rgba(201,168,76,0.04)",
-                    borderRadius: 8,
-                    border: "1px solid rgba(201,168,76,0.12)",
-                  }}
-                >
-                  <a href={att.downloadURL || "#"} target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none", color: "inherit" }}>
-                    {isImageAttachmentRecord(att) ? (
-                      <img
-                        src={att.downloadURL}
-                        alt=""
-                        style={{ width: 88, height: 88, objectFit: "cover", borderRadius: 6, border: "1px solid rgba(201,168,76,0.2)", display: "block" }}
-                      />
-                    ) : (
-                      <div
-                        style={{
-                          width: 88,
-                          height: 88,
-                          display: "flex",
-                          flexDirection: "column",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          background: "#141414",
-                          borderRadius: 6,
-                          border: "1px solid rgba(201,168,76,0.2)",
-                          fontSize: "2rem",
-                          lineHeight: 1,
-                        }}
-                      >
-                        📄
-                      </div>
-                    )}
-                  </a>
-                  <a
-                    href={att.downloadURL || "#"}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ fontSize: ".62rem", color: "#7ec8e3", maxWidth: 110, textAlign: "center", wordBreak: "break-all" }}
-                  >
-                    {att.originalName || "ファイル"}
-                  </a>
-                  <button type="button" style={{ ...S.btn("sm"), fontSize: ".58rem", padding: ".2rem .45rem", color: "#e24b4a", borderColor: "rgba(226,75,74,0.35)" }} onClick={() => removeRentalAttachmentAt(idx)}>
-                    削除
-                  </button>
-                </div>
-              ))}
-            </div>
+            <RentalAttachmentsGallery attachments={form.attachments} readOnly={false} onRemove={removeRentalAttachmentAt} uploading={attachmentUploading} />
 
             <div style={S.secTitle}>✨ AI返信文生成</div>
             <div style={{display:"flex",gap:".4rem",flexWrap:"wrap",marginBottom:".75rem"}}>
@@ -1313,44 +1450,76 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
         <button onClick={()=>setStaffFilter("")} style={{padding:".3rem .7rem",borderRadius:3,border:"1px solid "+(staffFilter===""?"#c9a84c":"rgba(201,168,76,0.2)"),background:staffFilter===""?"#c9a84c":"transparent",color:staffFilter===""?"#0a0a0a":"rgba(201,168,76,0.7)",fontSize:".65rem",cursor:"pointer",fontFamily:"inherit",letterSpacing:".05em"}}>未割当</button>
       </div>
 
-      {/* 一覧 */}
-      {sorted.length === 0 && (
+      {/* 一覧（利用日ベース：今後 / 過去は折りたたみ / 日付未設定） */}
+      {listIsEmpty && (
         <div style={{textAlign:"center",padding:"3rem",color:"rgba(240,232,208,0.25)",fontSize:".85rem"}}>
           🍽 該当する問い合わせはありません
         </div>
       )}
-      {sorted.map(r=>(
-        <div key={r._id} style={S.card} className="hb-card">
-          <div onClick={()=>startDetail(r)} style={{cursor:"pointer"}}>
-            <div style={{display:"flex",alignItems:"center",gap:".5rem",marginBottom:".35rem",flexWrap:"wrap"}}>
-              <span style={{fontFamily:"Georgia,serif",fontSize:"1rem"}}>{r.contactName||"（無題）"}</span>
-              <StatusBadge status={r.status}/>
-              {r.staff && <span style={{display:"inline-block",padding:".1rem .4rem",borderRadius:2,fontSize:".55rem",letterSpacing:".08em",background:"rgba(201,168,76,0.1)",color:"rgba(201,168,76,0.8)"}}>👤 {r.staff}</span>}
-              {r.depositPolicy==="required" && (
-                <span style={{display:"inline-block",padding:".1rem .4rem",borderRadius:2,fontSize:".55rem",letterSpacing:".08em",background:r.depositReceived?"rgba(126,200,127,0.13)":"rgba(244,162,97,0.13)",color:r.depositReceived?"#7ec87e":"#f4a261"}}>
-                  {r.depositReceived?"💰 受領済":"💰 未受領"}
-                </span>
-              )}
-              {r.depositPolicy==="waived" && (
-                <span style={{display:"inline-block",padding:".1rem .4rem",borderRadius:2,fontSize:".55rem",letterSpacing:".08em",background:"rgba(255,255,255,0.05)",color:"rgba(240,232,208,0.5)"}}>予約金なし</span>
-              )}
-              {(r.documentHistory||[]).length>0 && (
-                <span style={{display:"inline-block",padding:".1rem .4rem",borderRadius:2,fontSize:".55rem",letterSpacing:".08em",background:"rgba(126,200,227,0.13)",color:"#7ec8e3"}}>📄 {r.documentHistory.length}件</span>
-              )}
-            </div>
-            <div style={{fontSize:".7rem",color:"rgba(240,232,208,0.5)",display:"flex",gap:"1rem",flexWrap:"wrap",alignItems:"baseline"}}>
-              {r.desiredDate && <span>📅 利用: {r.desiredDate} {r.desiredTime}</span>}
-              {r.people && <span>👥 {r.people}名</span>}
-              {r.purpose && <span>📝 {r.purpose}</span>}
-              {r.inquiryDate && <span style={{opacity:.38,fontSize:".62rem",letterSpacing:".02em"}}>受付日 {r.inquiryDate}</span>}
-            </div>
-          </div>
-          <div style={{display:"flex",gap:".4rem"}}>
-            <button type="button" style={S.btn("sm")} onClick={(e)=>{ e.stopPropagation(); startEdit(r); }}>編集</button>
-            <button type="button" style={S.btn("danger")} onClick={(e)=>{ e.stopPropagation(); handleDelete(r._id); }}>削除</button>
-          </div>
+      {!listIsEmpty && rentalsUpcoming.length > 0 && (
+        <>
+          <div style={{ ...S.secTitle, marginTop: 0, marginBottom: ".65rem" }}>今後の貸切</div>
+          {rentalsUpcoming.map((r) => (
+            <RentalListCard
+              key={r._id}
+              r={r}
+              onOpenDetail={() => startDetail(r)}
+              onOpenEdit={() => startEdit(r)}
+              onTrash={() => handleDelete(r._id)}
+            />
+          ))}
+        </>
+      )}
+      {!listIsEmpty && rentalsPast.length > 0 && (
+        <div style={{ marginTop: rentalsUpcoming.length ? "1.25rem" : 0, marginBottom: "1rem" }}>
+          <button
+            type="button"
+            onClick={() => setShowPastRentals((v) => !v)}
+            style={{
+              width: "100%",
+              textAlign: "left",
+              padding: ".55rem .75rem",
+              marginBottom: showPastRentals ? ".5rem" : ".15rem",
+              background: "#111",
+              border: "1px solid rgba(201,168,76,0.18)",
+              borderRadius: 6,
+              color: "#c9a84c",
+              fontFamily: "inherit",
+              fontSize: ".72rem",
+              cursor: "pointer",
+              letterSpacing: ".06em",
+            }}
+          >
+            {showPastRentals ? "▼" : "▶"} 過去の貸切（{rentalsPast.length}件）
+          </button>
+          {showPastRentals &&
+            rentalsPast.map((r) => (
+              <RentalListCard
+                key={r._id}
+                r={r}
+                onOpenDetail={() => startDetail(r)}
+                onOpenEdit={() => startEdit(r)}
+                onTrash={() => handleDelete(r._id)}
+              />
+            ))}
         </div>
-      ))}
+      )}
+      {!listIsEmpty && rentalsUndated.length > 0 && (
+        <>
+          <div style={{ ...S.secTitle, marginTop: rentalsUpcoming.length || rentalsPast.length ? "1.25rem" : 0, marginBottom: ".65rem" }}>
+            日付未設定
+          </div>
+          {rentalsUndated.map((r) => (
+            <RentalListCard
+              key={r._id}
+              r={r}
+              onOpenDetail={() => startDetail(r)}
+              onOpenEdit={() => startEdit(r)}
+              onTrash={() => handleDelete(r._id)}
+            />
+          ))}
+        </>
+      )}
 
       {/* ゴミ箱モーダル */}
       {showTrash && (
