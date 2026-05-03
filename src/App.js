@@ -1568,7 +1568,8 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
       )}
 
       {view==="events_form"&&(
-        <div style={{padding:"1.5rem 2rem"}} className="hb-view">
+        <div style={{padding:"1.5rem 2rem 7rem"}} className="hb-view">
+          {/* テンプレート読み込み */}
           {templates.length>0&&(
             <div style={{display:"flex",alignItems:"center",gap:".75rem",padding:".7rem 1rem",background:"#111",border:"1px solid rgba(201,168,76,0.1)",borderRadius:5,marginBottom:"1.25rem"}}>
               <label style={{...S.lbl,margin:0,whiteSpace:"nowrap"}}>テンプレートから読み込み：</label>
@@ -1579,40 +1580,39 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
             </div>
           )}
 
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1.5rem"}} className="hb-form-layout">
-            <div>
-              <div style={S.secTitle}>イベント情報</div>
+          {/* ===== ブロック1: 基本情報（ゴールド系） ===== */}
+          <div style={{border:"1px solid rgba(201,168,76,0.45)",borderRadius:8,marginBottom:"1.25rem",overflow:"hidden"}}>
+            <div style={{background:"rgba(201,168,76,0.12)",borderBottom:"1px solid rgba(201,168,76,0.3)",padding:".55rem 1rem",display:"flex",alignItems:"center",gap:".5rem"}}>
+              <span style={{color:"#c9a84c",fontFamily:"Georgia,serif",fontSize:".82rem",letterSpacing:".15em",fontWeight:600}}>📋 基本情報</span>
+            </div>
+            <div style={{padding:"1rem 1.1rem",background:"rgba(201,168,76,0.03)"}}>
               <div style={S.fgrid} className="hb-form-grid">
-                <Field label="イベント名" full><input style={S.inp} value={form.name} onChange={e=>setField("name",e.target.value)} placeholder="例：Jazz Night Premium"/></Field>
                 <Field label="日程"><input type="date" style={S.inp} value={form.date} onChange={e=>setField("date",e.target.value)}/></Field>
                 <Field label="曜日"><input style={{...S.inp,color:"rgba(201,168,76,0.6)"}} value={form.day} readOnly placeholder="自動入力"/></Field>
+                <Field label="イベント名" full><input style={S.inp} value={form.name} onChange={e=>setField("name",e.target.value)} placeholder="例：Jazz Night Premium"/></Field>
                 <Field label="開場時間"><input type="time" style={S.inp} value={form.open} onChange={e=>setField("open",e.target.value)}/></Field>
                 <Field label="開演時間"><input type="time" style={S.inp} value={form.start} onChange={e=>setField("start",e.target.value)}/></Field>
-                <Field label="料金"><input style={S.inp} value={form.price} onChange={e=>setField("price",e.target.value)} placeholder="例：¥3,000（1ドリンク付）"/></Field>
+                <Field label="料金" full><input style={S.inp} value={form.price} onChange={e=>setField("price",e.target.value)} placeholder="例：¥3,000（1ドリンク付）"/></Field>
+                <Field label="出演者" full><input style={S.inp} value={form.perf} onChange={e=>setField("perf",e.target.value)} placeholder="例：山田太郎（Gt）/ 田中花子（Vo）"/></Field>
                 <Field label="定員（予約フォーム用）">
                   <select style={S.inp} value={form.cap} onChange={e=>setField("cap",e.target.value)}>
                     <option value="">指定なし</option>
                     {[5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80].map(n=><option key={n} value={n}>{n}名</option>)}
                   </select>
                 </Field>
-                <Field label="ジャンル（SEO用）" full><input style={S.inp} value={form.genre} onChange={e=>setField("genre",e.target.value)} placeholder="例：ジャズ / ロック / アコースティック"/></Field>
-                <Field label="出演者" full><input style={S.inp} value={form.perf} onChange={e=>setField("perf",e.target.value)} placeholder="例：山田太郎（Gt）/ 田中花子（Vo）"/></Field>
-                <Field label="📝 参考情報（AI用・任意）" full>
-                  <textarea style={{...S.inp,resize:"vertical",lineHeight:1.5}} rows={3} value={form.reference} onChange={e=>setField("reference",e.target.value)} placeholder="出演者のプロフィール・SNSの紹介文・経歴など、ネットで調べた情報をここに貼り付けるとAIが説明文に活かしてくれます"/>
-                </Field>
-                <Field label="イベント説明" full>
-                  <div style={{position:"relative"}}>
-                    <textarea style={{...S.inp,resize:"vertical",lineHeight:1.5,paddingBottom:"2.5rem"}} rows={4} value={form.desc} onChange={e=>setField("desc",e.target.value)} placeholder="イベントの雰囲気・内容（下のボタンでAI自動生成も可）"/>
-                    <button onClick={handleAIDesc} disabled={aiLoading} style={{position:"absolute",bottom:".5rem",right:".5rem",...S.btn("ai"),opacity:aiLoading?0.6:1}}>
-                      {aiLoading?"⏳ 生成中...":(form.poster?"✨ AI生成（ポスター読込）":"✨ AIで自動生成")}
-                    </button>
-                  </div>
-                  {aiError&&<div style={{fontSize:".68rem",color:"#e24b4a",marginTop:".3rem"}}>{aiError}</div>}
-                </Field>
-                <Field label="予約URL" full><input type="url" style={S.inp} value={form.url} onChange={e=>setField("url",e.target.value)} placeholder="https://..."/></Field>
-                <Field label="注意事項（スタッフ向け）" full><textarea style={{...S.inp,resize:"vertical",lineHeight:1.5}} rows={2} value={form.notes} onChange={e=>setField("notes",e.target.value)} placeholder="未成年者入場不可 / etc."/></Field>
+                <Field label="ジャンル（SEO用）"><input style={S.inp} value={form.genre} onChange={e=>setField("genre",e.target.value)} placeholder="例：ジャズ / ロック"/></Field>
+              </div>
+            </div>
+          </div>
 
-                {/* 予約関連の設定 */}
+          {/* ===== ブロック2: 予約・運営（オレンジ系） ===== */}
+          <div style={{border:"1px solid rgba(244,162,97,0.45)",borderRadius:8,marginBottom:"1.25rem",overflow:"hidden"}}>
+            <div style={{background:"rgba(244,162,97,0.1)",borderBottom:"1px solid rgba(244,162,97,0.3)",padding:".55rem 1rem"}}>
+              <span style={{color:"#f4a261",fontFamily:"Georgia,serif",fontSize:".82rem",letterSpacing:".15em",fontWeight:600}}>🛡 予約・運営（スタッフ向け）</span>
+            </div>
+            <div style={{padding:"1rem 1.1rem",background:"rgba(244,162,97,0.02)"}}>
+              <div style={S.fgrid} className="hb-form-grid">
+                {/* 予約フラグ */}
                 <Field label="🎟 予約設定" full>
                   <label style={{display:"flex",alignItems:"center",gap:".5rem",cursor:"pointer",fontSize:".85rem",padding:".4rem 0",color:form.noBooking?"#e24b4a":"rgba(240,232,208,0.7)"}}>
                     <input type="checkbox" checked={!!form.noBooking} onChange={e=>setField("noBooking",e.target.checked)} style={{accentColor:"#e24b4a",width:18,height:18}}/>
@@ -1623,113 +1623,91 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
                     席指定可能（外すと「席指定不可」と予約フォームに表示）
                   </label>
                 </Field>
-                {/* 撮影・喫煙の可否 */}
+                {/* 撮影・喫煙 */}
                 <Field label="📸 撮影 / 🚬 喫煙の可否（未設定なら表示しません）" full>
                   <div style={{display:"flex",gap:"1.5rem",flexWrap:"wrap",padding:".3rem 0"}}>
                     <div style={{display:"flex",alignItems:"center",gap:".5rem"}}>
                       <span style={{fontSize:".82rem",color:"rgba(240,232,208,0.85)",minWidth:80}}>📸 撮影</span>
-                      {[
-                        {v:"unset",l:"未設定",c:"rgba(240,232,208,0.4)"},
-                        {v:"ok",l:"○ 可",c:"#7ec87e"},
-                        {v:"ng",l:"× 不可",c:"#e24b4a"},
-                      ].map(o => (
-                        <button key={o.v} type="button" onClick={()=>setField("photoOk",o.v)}
-                          style={{
-                            padding:".3rem .65rem",
-                            borderRadius:3,
-                            border:`1px solid ${form.photoOk===o.v?o.c:"rgba(201,168,76,0.2)"}`,
-                            background: form.photoOk===o.v ? `${o.c}25` : "transparent",
-                            color: form.photoOk===o.v ? o.c : "rgba(240,232,208,0.55)",
-                            fontSize:".7rem",
-                            cursor:"pointer",
-                            fontFamily:"inherit",
-                          }}>{o.l}</button>
+                      {[{v:"unset",l:"未設定",c:"rgba(240,232,208,0.4)"},{v:"ok",l:"○ 可",c:"#7ec87e"},{v:"ng",l:"× 不可",c:"#e24b4a"}].map(o=>(
+                        <button key={o.v} type="button" onClick={()=>setField("photoOk",o.v)} style={{padding:".3rem .65rem",borderRadius:3,border:`1px solid ${form.photoOk===o.v?o.c:"rgba(201,168,76,0.2)"}`,background:form.photoOk===o.v?`${o.c}25`:"transparent",color:form.photoOk===o.v?o.c:"rgba(240,232,208,0.55)",fontSize:".7rem",cursor:"pointer",fontFamily:"inherit"}}>{o.l}</button>
                       ))}
                     </div>
                     <div style={{display:"flex",alignItems:"center",gap:".5rem"}}>
                       <span style={{fontSize:".82rem",color:"rgba(240,232,208,0.85)",minWidth:80}}>🚬 喫煙</span>
-                      {[
-                        {v:"unset",l:"未設定",c:"rgba(240,232,208,0.4)"},
-                        {v:"ok",l:"○ 可",c:"#7ec87e"},
-                        {v:"ng",l:"× 不可",c:"#e24b4a"},
-                      ].map(o => (
-                        <button key={o.v} type="button" onClick={()=>setField("smokeOk",o.v)}
-                          style={{
-                            padding:".3rem .65rem",
-                            borderRadius:3,
-                            border:`1px solid ${form.smokeOk===o.v?o.c:"rgba(201,168,76,0.2)"}`,
-                            background: form.smokeOk===o.v ? `${o.c}25` : "transparent",
-                            color: form.smokeOk===o.v ? o.c : "rgba(240,232,208,0.55)",
-                            fontSize:".7rem",
-                            cursor:"pointer",
-                            fontFamily:"inherit",
-                          }}>{o.l}</button>
+                      {[{v:"unset",l:"未設定",c:"rgba(240,232,208,0.4)"},{v:"ok",l:"○ 可",c:"#7ec87e"},{v:"ng",l:"× 不可",c:"#e24b4a"}].map(o=>(
+                        <button key={o.v} type="button" onClick={()=>setField("smokeOk",o.v)} style={{padding:".3rem .65rem",borderRadius:3,border:`1px solid ${form.smokeOk===o.v?o.c:"rgba(201,168,76,0.2)"}`,background:form.smokeOk===o.v?`${o.c}25`:"transparent",color:form.smokeOk===o.v?o.c:"rgba(240,232,208,0.55)",fontSize:".7rem",cursor:"pointer",fontFamily:"inherit"}}>{o.l}</button>
                       ))}
                     </div>
                   </div>
                 </Field>
-                <Field label="📋 予約フォーム用 注意事項（お客様向け）" full>
-                  <textarea style={{...S.inp,resize:"vertical",lineHeight:1.5}} rows={2} value={form.reserveNotes||""} onChange={e=>setField("reserveNotes",e.target.value)} placeholder="例：お席は先着順とさせていただきます / 飲食代は別途お願いします など"/>
-                </Field>
+                <Field label="注意事項（スタッフ向け）" full><textarea style={{...S.inp,resize:"vertical",lineHeight:1.5}} rows={2} value={form.notes} onChange={e=>setField("notes",e.target.value)} placeholder="未成年者入場不可 / etc."/></Field>
                 <Field label="💰 ギャラ条件等（スタッフ内部用）" full>
                   <textarea style={{...S.inp,resize:"vertical",lineHeight:1.5}} rows={2} value={form.galleryNote||""} onChange={e=>setField("galleryNote",e.target.value)} placeholder="例：歩合50%・最低保証3万 / 固定2万 など"/>
                 </Field>
                 <Field label="📌 備考（スタッフ内部用）" full>
                   <textarea style={{...S.inp,resize:"vertical",lineHeight:1.5}} rows={2} value={form.remark||""} onChange={e=>setField("remark",e.target.value)} placeholder="例：前日仕込みあり / 機材持ち込み など"/>
                 </Field>
-                {/* イベント画像（複数枚） */}
-                <Field label="📷 イベント関連画像（最大5枚）" full>
-                  <ImageUploader
-                    images={Array.isArray(form.images) ? form.images : []}
-                    maxCount={5}
-                    onChange={(imgs)=>setField("images", imgs)}
-                  />
-                  <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.4)",marginTop:".4rem",lineHeight:1.5}}>
-                    アップロードした画像は「本日の営業」画面でも表示されます。<br/>
-                    対応：JPG / PNG / GIF / WebP（1枚あたり最大5MB目安）
-                  </div>
-                </Field>
-                {form.rehearsal&&<Field label="バンド入り時間（参考）" full><input style={{...S.inp,color:"rgba(201,168,76,0.5)"}} value={form.rehearsal} readOnly/></Field>}
-                {form.poster&&(
-                  <Field label="🖼 ポスター" full>
-                    <a href={form.poster} target="_blank" rel="noreferrer" style={{display:"block",textAlign:"center",background:"#0f0f0f",border:"1px solid rgba(201,168,76,0.15)",borderRadius:6,padding:".75rem",textDecoration:"none"}}>
-                      <img src={gdriveDirectUrl(form.poster)} alt="ポスター" style={{maxWidth:"100%",maxHeight:340,borderRadius:4,display:"block",margin:"0 auto"}} onError={(e)=>{e.target.style.display="none";e.target.nextSibling.style.display="block";}}/>
-                      <div style={{display:"none",color:"#c9a84c",fontSize:".8rem",padding:"1rem"}}>🖼 ポスターを開く（プレビュー読み込み失敗 - クリックで開く）</div>
-                      <div style={{color:"rgba(201,168,76,0.6)",fontSize:".68rem",marginTop:".5rem",letterSpacing:".1em"}}>クリックで原寸表示</div>
-                    </a>
-                  </Field>
-                )}
-                {form.timetable&&<Field label="タイムテーブル" full><a href={form.timetable} target="_blank" rel="noreferrer" style={{color:"#c9a84c",fontSize:".8rem"}}>📋 タイムテーブルを開く</a></Field>}
-              </div>
-              <div style={{display:"flex",gap:".5rem",marginTop:"1rem",flexWrap:"wrap"}}>
-                <button style={{...S.btn("gold"),flex:1,fontSize:".85rem",padding:".7rem 1rem",fontWeight:700,boxShadow:"0 2px 12px rgba(201,168,76,0.4)"}} onClick={handleSaveEvent}>💾 保存する</button>
-                <button style={{...S.btn("ghost"),padding:".5rem .9rem"}} onClick={handleGenerate}>✦ AIで文章を生成</button>
-                <button style={S.btn("ghost")} onClick={()=>{setTplName(form.name);setShowTplModal(true);}}>⭐ テンプレ保存</button>
-              </div>
-              <div style={{display:"flex",gap:".5rem",marginTop:".5rem",flexWrap:"wrap"}}>
-                <button style={S.btn("sm")} onClick={clearForm}>クリア</button>
-                <button style={S.btn("sm")} onClick={navigateBack}>← 一覧</button>
-                {editingIdx!==null&&(
-                  <button style={{...S.btn("sm"),borderColor:"rgba(126,200,227,0.3)",color:"#7ec8e3"}} onClick={()=>handleConvertToRental(editingIdx)}>🍽 貸切に変換</button>
-                )}
-                {editingIdx!==null&&(
-                  <button style={{...S.btn("danger"),padding:".35rem .7rem",fontSize:".65rem",marginLeft:"auto"}} onClick={()=>{
-                    if(!window.confirm(`「${form.name}」を削除しますか？`))return;
-                    deleteEvent(editingIdx);
-                    navigateBack();
-                  }}>🗑 このイベントを削除</button>
-                )}
+                <Field label="バンド入り時間（リハ）"><input style={S.inp} value={form.rehearsal} onChange={e=>setField("rehearsal",e.target.value)} placeholder="例：17:00"/></Field>
               </div>
             </div>
+          </div>
 
-            <div style={{borderLeft:"1px solid rgba(201,168,76,0.1)",paddingLeft:"1.5rem"}} className="hb-output-panel">
-              <div style={S.secTitle}>生成テキスト</div>
+          {/* ===== ブロック3: お客様向け公開情報（ブルー系） ===== */}
+          <div style={{border:"1px solid rgba(126,200,227,0.4)",borderRadius:8,marginBottom:"1.25rem",overflow:"hidden"}}>
+            <div style={{background:"rgba(126,200,227,0.08)",borderBottom:"1px solid rgba(126,200,227,0.25)",padding:".55rem 1rem"}}>
+              <span style={{color:"#7ec8e3",fontFamily:"Georgia,serif",fontSize:".82rem",letterSpacing:".15em",fontWeight:600}}>🌐 お客様向け公開情報</span>
+            </div>
+            <div style={{padding:"1rem 1.1rem",background:"rgba(126,200,227,0.01)"}}>
+              <div style={S.fgrid} className="hb-form-grid">
+                <Field label="🖼 ポスター URL（Google Drive等）" full>
+                  <input style={S.inp} value={form.poster} onChange={e=>setField("poster",e.target.value)} placeholder="https://drive.google.com/..."/>
+                  {form.poster&&(
+                    <a href={form.poster} target="_blank" rel="noreferrer" style={{display:"block",textAlign:"center",background:"#0f0f0f",border:"1px solid rgba(126,200,227,0.15)",borderRadius:6,padding:".75rem",textDecoration:"none",marginTop:".5rem"}}>
+                      <img src={gdriveDirectUrl(form.poster)} alt="ポスター" style={{maxWidth:"100%",maxHeight:280,borderRadius:4,display:"block",margin:"0 auto"}} onError={(e)=>{e.target.style.display="none";e.target.nextSibling.style.display="block";}}/>
+                      <div style={{display:"none",color:"#7ec8e3",fontSize:".8rem",padding:"1rem"}}>🖼 ポスターを開く（プレビュー読み込み失敗 - クリックで開く）</div>
+                      <div style={{color:"rgba(126,200,227,0.5)",fontSize:".68rem",marginTop:".5rem",letterSpacing:".1em"}}>クリックで原寸表示</div>
+                    </a>
+                  )}
+                </Field>
+                <Field label="予約URL" full><input type="url" style={S.inp} value={form.url} onChange={e=>setField("url",e.target.value)} placeholder="https://..."/></Field>
+                <Field label="📋 予約フォーム用 注意事項（お客様向け）" full>
+                  <textarea style={{...S.inp,resize:"vertical",lineHeight:1.5}} rows={2} value={form.reserveNotes||""} onChange={e=>setField("reserveNotes",e.target.value)} placeholder="例：お席は先着順とさせていただきます / 飲食代は別途お願いします など"/>
+                </Field>
+                <Field label="📷 イベント関連画像（最大5枚）" full>
+                  <ImageUploader images={Array.isArray(form.images)?form.images:[]} maxCount={5} onChange={(imgs)=>setField("images",imgs)}/>
+                  <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.4)",marginTop:".4rem",lineHeight:1.5}}>
+                    アップロードした画像は「本日の営業」画面でも表示されます。対応：JPG / PNG / GIF / WebP（1枚あたり最大5MB目安）
+                  </div>
+                </Field>
+                <Field label="イベント説明" full>
+                  <textarea style={{...S.inp,resize:"vertical",lineHeight:1.5}} rows={4} value={form.desc} onChange={e=>setField("desc",e.target.value)} placeholder="イベントの雰囲気・内容"/>
+                </Field>
+                {form.timetable&&<Field label="タイムテーブル" full><a href={form.timetable} target="_blank" rel="noreferrer" style={{color:"#7ec8e3",fontSize:".8rem"}}>📋 タイムテーブルを開く</a></Field>}
+                <Field label="📝 参考情報（AI用・任意）" full>
+                  <textarea style={{...S.inp,resize:"vertical",lineHeight:1.5}} rows={3} value={form.reference} onChange={e=>setField("reference",e.target.value)} placeholder="出演者のプロフィール・SNSの紹介文・経歴など、ネットで調べた情報をここに貼り付けるとAIが説明文に活かしてくれます"/>
+                </Field>
+              </div>
+            </div>
+          </div>
+
+          {/* ===== ブロック4: AI文章生成（グリーン系） ===== */}
+          <div style={{border:"1px solid rgba(126,200,126,0.4)",borderRadius:8,marginBottom:"1.25rem",overflow:"hidden"}}>
+            <div style={{background:"rgba(126,200,126,0.08)",borderBottom:"1px solid rgba(126,200,126,0.25)",padding:".55rem 1rem",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:".5rem"}}>
+              <span style={{color:"#7ec87e",fontFamily:"Georgia,serif",fontSize:".82rem",letterSpacing:".15em",fontWeight:600}}>✨ AI文章生成</span>
+              <div style={{display:"flex",gap:".5rem",flexWrap:"wrap"}}>
+                <button style={{...S.btn("ghost"),padding:".35rem .8rem",fontSize:".72rem",borderColor:"rgba(126,200,126,0.35)",color:"#7ec87e"}} onClick={handleGenerate}>✦ AIで文章を生成</button>
+                <button style={{...S.btn("ghost"),padding:".35rem .8rem",fontSize:".72rem",borderColor:"rgba(126,200,126,0.25)",color:"rgba(126,200,126,0.7)"}} onClick={()=>{setTplName(form.name);setShowTplModal(true);}}>⭐ テンプレ保存</button>
+                <button style={{...S.btn("ghost"),padding:".35rem .8rem",fontSize:".72rem",borderColor:"rgba(201,168,76,0.25)",color:"rgba(201,168,76,0.7)"}} onClick={handleAIDesc} disabled={aiLoading}>
+                  {aiLoading?"⏳ 生成中...":(form.poster?"📄 説明文AI生成（ポスター読込）":"📄 説明文だけAI生成")}
+                </button>
+              </div>
+            </div>
+            <div style={{padding:"1rem 1.1rem",background:"rgba(126,200,126,0.01)"}}>
+              {aiError&&<div style={{fontSize:".68rem",color:"#e24b4a",marginBottom:".75rem"}}>{aiError}</div>}
               <div style={{display:"flex",gap:".35rem",marginBottom:"1rem",flexWrap:"wrap"}}>
                 {OUTPUT_TABS.map(t=>(<button key={t.key} style={S.outTab(activeOut===t.key)} onClick={()=>setActiveOut(t.key)}>{t.label}</button>))}
               </div>
-
-              {!outputs&&activeOut!=="tt"&&<div style={{textAlign:"center",padding:"2.5rem 1rem",color:"rgba(240,232,208,0.2)",fontSize:".8rem"}}>「文章を生成」を押してください 🍯</div>}
-
+              {!outputs&&activeOut!=="tt"&&<div style={{textAlign:"center",padding:"2rem 1rem",color:"rgba(240,232,208,0.2)",fontSize:".8rem"}}>「AIで文章を生成」を押してください 🍯</div>}
               {outputs&&activeOut!=="wix"&&activeOut!=="flyer"&&(
                 <div style={{position:"relative"}}>
                   <div style={S.outTxt}>{currentOut}</div>
@@ -1737,7 +1715,6 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
                   {activeOut==="ig"&&<div style={{fontSize:".62rem",color:"rgba(201,168,76,0.4)",textAlign:"right",marginTop:".25rem"}}>文字数：{currentOut.length}（目安：2,200字以内）</div>}
                 </div>
               )}
-
               {outputs&&activeOut==="wix"&&(
                 <div>
                   <div style={{fontSize:".7rem",color:"#7ec8e3",marginBottom:"1rem",padding:".5rem .75rem",background:"rgba(126,200,227,0.06)",borderRadius:4,borderLeft:"2px solid rgba(126,200,227,0.4)"}}>🌐 Wixサイト更新用テキスト</div>
@@ -1750,15 +1727,26 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
                   ))}
                 </div>
               )}
-
-              {outputs&&activeOut==="flyer"&&(
-                <FlyerTab outputs={outputs} copied={copied} copyText={copyText}/>
-              )}
-
-              {activeOut==="tt"&&(
-                <TimeTableTab form={form} copyText={copyText} copied={copied}/>
-              )}
+              {outputs&&activeOut==="flyer"&&(<FlyerTab outputs={outputs} copied={copied} copyText={copyText}/>)}
+              {activeOut==="tt"&&(<TimeTableTab form={form} copyText={copyText} copied={copied}/>)}
             </div>
+          </div>
+
+          {/* ===== Sticky保存バー ===== */}
+          <div style={{position:"fixed",bottom:0,left:0,width:"100%",zIndex:60,background:"rgba(10,10,10,0.97)",borderTop:"1px solid rgba(201,168,76,0.25)",padding:".75rem 2rem",display:"flex",gap:".75rem",alignItems:"center",flexWrap:"wrap",backdropFilter:"blur(8px)"}}>
+            <button style={{...S.btn("gold"),fontSize:".9rem",padding:".65rem 2rem",fontWeight:700,boxShadow:"0 2px 16px rgba(201,168,76,0.4)",letterSpacing:".08em"}} onClick={handleSaveEvent}>💾 保存する</button>
+            <button style={{...S.btn("ghost"),padding:".55rem 1rem"}} onClick={navigateBack}>← キャンセル</button>
+            <button style={{...S.btn("sm"),padding:".45rem .9rem"}} onClick={clearForm}>クリア</button>
+            {editingIdx!==null&&(
+              <button style={{...S.btn("sm"),borderColor:"rgba(126,200,227,0.3)",color:"#7ec8e3",padding:".45rem .9rem"}} onClick={()=>handleConvertToRental(editingIdx)}>🍽 貸切に変換</button>
+            )}
+            {editingIdx!==null&&(
+              <button style={{...S.btn("danger"),padding:".45rem .9rem",marginLeft:"auto"}} onClick={()=>{
+                if(!window.confirm(`「${form.name}」を削除しますか？`))return;
+                deleteEvent(editingIdx);
+                navigateBack();
+              }}>🗑 このイベントを削除</button>
+            )}
           </div>
         </div>
       )}
