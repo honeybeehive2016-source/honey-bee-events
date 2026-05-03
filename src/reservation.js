@@ -688,7 +688,9 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
       if (!r.eventName || !r.date) return true;
       return !events.some(e => e.date === r.date && e.name === r.eventName);
     });
-    setLinkCheckResult({ total: activeRes.length, unlinked });
+    const unlinkedPast = unlinked.filter(r => r.date && r.date < todayLocal);
+    const unlinkedFuture = unlinked.filter(r => !r.date || r.date >= todayLocal);
+    setLinkCheckResult({ total: activeRes.length, unlinked, unlinkedPast: unlinkedPast.length, unlinkedFuture: unlinkedFuture.length });
     setShowLinkCheck(true);
   };
 
@@ -1254,6 +1256,16 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
             <div style={{fontSize:".82rem",color:"#f0e8d0",marginBottom:".75rem"}}>
               全予約 <strong>{linkCheckResult.total}</strong> 件 / うち紐付くイベントなし <strong style={{color: linkCheckResult.unlinked.length > 0 ? "#e24b4a" : "#7ec87e"}}>{linkCheckResult.unlinked.length}</strong> 件
             </div>
+            {linkCheckResult.unlinked.length > 0 && (
+              <div style={{display:"flex",gap:".6rem",marginBottom:"1rem",flexWrap:"wrap"}}>
+                <div style={{padding:".4rem .75rem",background:"rgba(120,120,120,0.12)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:4,fontSize:".75rem",color:"rgba(240,232,208,0.55)"}}>
+                  🕘 過去（修正不要）：<strong>{linkCheckResult.unlinkedPast}</strong> 件
+                </div>
+                <div style={{padding:".4rem .75rem",background: linkCheckResult.unlinkedFuture > 0 ? "rgba(226,75,74,0.12)" : "rgba(120,120,120,0.12)",border:`1px solid ${linkCheckResult.unlinkedFuture > 0 ? "rgba(226,75,74,0.4)" : "rgba(255,255,255,0.1)"}`,borderRadius:4,fontSize:".75rem",color: linkCheckResult.unlinkedFuture > 0 ? "#f4a261" : "rgba(240,232,208,0.55)"}}>
+                  📅 今日以降（要確認）：<strong>{linkCheckResult.unlinkedFuture}</strong> 件
+                </div>
+              </div>
+            )}
             {linkCheckResult.unlinked.length > 0 ? (
               <>
                 <div style={{padding:".6rem .8rem",background:"rgba(226,75,74,0.12)",border:"1px solid rgba(226,75,74,0.35)",borderRadius:4,fontSize:".75rem",color:"#f4a261",marginBottom:"1rem",lineHeight:1.6}}>
