@@ -28,7 +28,7 @@ const emptyArtist = {
   name: "",
   charge: "",       // 入場料
   attendance: "",   // 動員数
-  method: "rate",   // "rate"=歩合 / "fixed"=固定額
+  method: "rate",   // "fixed"=固定ギャラ / "rate"=一人目から歩合 / "chargeback"=人数条件バック
   ratePercent: "",  // 歩合％
   minGuarantee: "", // 最低保証
   fixedFee: "",     // 固定額
@@ -48,31 +48,45 @@ const emptySettlement = {
   artists: [],
 };
 
-// 計算ヘルパー
+/** 未設定・未知の method は rate（一人目から歩合） */
+function normalizeSettlementMethod(m) {
+  if (m === "fixed" || m === "rate" || m === "chargeback") return m;
+  return "rate";
+}
+
+// 計算ヘルパー（3方式は同時加算しない。基本金額 = amount）
 function calcArtist(a) {
+  const method = normalizeSettlementMethod(a.method);
   const charge = Number(a.charge || 0);
   const attendance = Number(a.attendance || 0);
   const sales = charge * attendance;
   let amount = 0;
-  if (a.method === "fixed") {
+  let chargeBackPeople = 0;
+  let chargeBackTotal = 0;
+
+  if (method === "fixed") {
     amount = Number(a.fixedFee || 0);
-  } else {
+  } else if (method === "rate") {
     const rate = Number(a.ratePercent || 0);
     const calc = Math.round(sales * rate / 100);
     const min = Number(a.minGuarantee || 0);
     amount = Math.max(calc, min);
+  } else {
+    const baseN = Number(a.chargeBackBaseCount);
+    const perN = Number(a.chargeBackAmountPerPerson);
+    if (Number.isFinite(baseN) && Number.isFinite(perN) && perN > 0) {
+      chargeBackPeople = Math.max(0, attendance - baseN);
+      amount = chargeBackPeople * perN;
+      chargeBackTotal = amount;
+    } else {
+      amount = 0;
+      chargeBackPeople = 0;
+      chargeBackTotal = 0;
+    }
   }
+
   const deductionTotal = (a.deductions || []).reduce((s, d) => s + Number(d.amount || 0), 0);
-  const baseN = Number(a.chargeBackBaseCount);
-  const perN = Number(a.chargeBackAmountPerPerson);
-  const chargeBackActive = Number.isFinite(baseN) && baseN > 0 && Number.isFinite(perN) && perN > 0;
-  let chargeBackPeople = 0;
-  let chargeBackTotal = 0;
-  if (chargeBackActive) {
-    chargeBackPeople = Math.max(0, attendance - baseN);
-    chargeBackTotal = chargeBackPeople * perN;
-  }
-  const finalAmount = amount + chargeBackTotal - deductionTotal;
+  const finalAmount = amount - deductionTotal;
   return { sales, amount, deductionTotal, chargeBackPeople, chargeBackTotal, finalAmount };
 }
 
@@ -86,6 +100,7 @@ function fmtDate(d) {
 // 精算メモ生成
 function buildSettlementMemo(settlement, artist) {
   const c = calcArtist(artist);
+  const method = normalizeSettlementMethod(artist.method);
   const charge = Number(artist.charge || 0);
   const attendance = Number(artist.attendance || 0);
   const lines = [
@@ -96,7 +111,7 @@ function buildSettlementMemo(settlement, artist) {
     "━━━━━━━━━━━━━━━",
     "",
   ];
-  if (artist.method === "rate") {
+  if (method === "rate") {
     lines.push(`入場料：¥${charge.toLocaleString()} × ${attendance}名`);
     lines.push(`売上：¥${c.sales.toLocaleString()}`);
     lines.push("");
@@ -105,19 +120,16 @@ function buildSettlementMemo(settlement, artist) {
     } else {
       lines.push(`歩合 ${artist.ratePercent}%`);
     }
-    lines.push(`取り分：¥${c.amount.toLocaleString()}`);
+    lines.push(`基本金額（一人目から歩合）：¥${c.amount.toLocaleString()}`);
+  } else if (method === "chargeback") {
+    lines.push(`動員：${attendance}名`);
+    const baseDisp = Number.isFinite(Number(artist.chargeBackBaseCount)) ? String(artist.chargeBackBaseCount) : "—";
+    lines.push(`基準人数：${baseDisp}名を超えた分から`);
+    lines.push(`対象人数：${c.chargeBackPeople}名`);
+    lines.push(`1名あたり：¥${Number(artist.chargeBackAmountPerPerson || 0).toLocaleString()}`);
+    lines.push(`基本金額（人数条件バック）：¥${c.amount.toLocaleString()}`);
   } else {
-    lines.push(`入場料：¥${charge.toLocaleString()} × ${attendance}名`);
-    lines.push(`売上：¥${c.sales.toLocaleString()}`);
-    lines.push("");
-    lines.push(`固定出演料：¥${c.amount.toLocaleString()}`);
-  }
-
-  if (c.chargeBackTotal > 0) {
-    lines.push("");
-    lines.push(`チャージバック対象人数：${c.chargeBackPeople}名（基準 ${artist.chargeBackBaseCount} 名を超えた分）`);
-    lines.push(`1名あたりチャージバック：¥${Number(artist.chargeBackAmountPerPerson || 0).toLocaleString()}`);
-    lines.push(`チャージバック合計：¥${c.chargeBackTotal.toLocaleString()}`);
+    lines.push(`固定ギャラ：¥${c.amount.toLocaleString()}`);
   }
 
   if ((artist.deductions||[]).length > 0) {
@@ -423,6 +435,7 @@ export default function SettlementModule({ events = [], navigateBack }) {
 
         {(form.artists || []).map((artist, idx) => {
           const c = calcArtist(artist);
+          const artistMethod = normalizeSettlementMethod(artist.method);
           const memo = buildSettlementMemo(form, artist);
           return (
             <div key={idx} style={{...S.card,padding:"1.25rem",marginBottom:"1rem"}}>
@@ -436,55 +449,72 @@ export default function SettlementModule({ events = [], navigateBack }) {
 
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:".7rem",marginBottom:".75rem"}} className="hb-form-grid">
                 <Field label="出演者名" full><input style={S.inp} value={artist.name} onChange={e=>updateArtist(idx,"name",e.target.value)} placeholder="例：山田太郎"/></Field>
-                <Field label="入場料"><input type="number" style={S.inp} value={artist.charge} onChange={e=>updateArtist(idx,"charge",e.target.value)} placeholder="3000"/></Field>
-                <Field label="動員数"><input type="number" style={S.inp} value={artist.attendance} onChange={e=>updateArtist(idx,"attendance",e.target.value)} placeholder="12"/></Field>
-                <Field label="売上合計（自動）"><input style={{...S.inp,color:"rgba(201,168,76,0.7)"}} value={`¥${c.sales.toLocaleString()}`} readOnly/></Field>
               </div>
 
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:".7rem",marginBottom:".75rem"}} className="hb-form-grid">
-                <Field label="チャージバック基準人数（超えた分から対象）">
-                  <input type="number" min={0} style={S.inp} value={artist.chargeBackBaseCount ?? ""} onChange={e=>updateArtist(idx,"chargeBackBaseCount",e.target.value)} placeholder="例：10（空で無効）"/>
-                </Field>
-                <Field label="チャージバック1名あたり（円）">
-                  <input type="number" min={0} style={S.inp} value={artist.chargeBackAmountPerPerson ?? ""} onChange={e=>updateArtist(idx,"chargeBackAmountPerPerson",e.target.value)} placeholder="例：1000（空で無効）"/>
-                </Field>
-                <Field label="対象人数（自動）">
-                  <input style={{...S.inp,color:"rgba(201,168,76,0.7)"}} value={String(c.chargeBackPeople)} readOnly/>
-                </Field>
-                <Field label="チャージバック金額（自動）">
-                  <input style={{...S.inp,color:"rgba(201,168,76,0.7)"}} value={`¥${c.chargeBackTotal.toLocaleString()}`} readOnly/>
-                </Field>
-              </div>
-
-              {/* 精算方式 */}
               <div style={{marginBottom:".75rem"}}>
                 <label style={S.lbl}>精算方式</label>
-                <div style={{display:"flex",gap:"1rem",marginTop:".25rem"}}>
-                  <label style={{display:"flex",alignItems:"center",gap:".4rem",cursor:"pointer",fontSize:".85rem",color:artist.method==="rate"?"#c9a84c":"rgba(240,232,208,0.55)"}}>
-                    <input type="radio" name={`method-${idx}`} checked={artist.method==="rate"} onChange={()=>updateArtist(idx,"method","rate")} style={{accentColor:"#c9a84c"}}/>
-                    歩合
-                  </label>
-                  <label style={{display:"flex",alignItems:"center",gap:".4rem",cursor:"pointer",fontSize:".85rem",color:artist.method==="fixed"?"#c9a84c":"rgba(240,232,208,0.55)"}}>
-                    <input type="radio" name={`method-${idx}`} checked={artist.method==="fixed"} onChange={()=>updateArtist(idx,"method","fixed")} style={{accentColor:"#c9a84c"}}/>
-                    固定額
-                  </label>
+                <div style={{display:"flex",gap:".35rem",marginTop:".35rem",flexWrap:"wrap"}}>
+                  {[
+                    { k: "fixed", l: "固定ギャラ" },
+                    { k: "rate", l: "一人目から歩合" },
+                    { k: "chargeback", l: "人数条件バック" },
+                  ].map(({ k, l }) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => updateArtist(idx, "method", k)}
+                      style={{
+                        padding: ".4rem .75rem",
+                        borderRadius: 4,
+                        border: `1px solid ${artistMethod === k ? "#c9a84c" : "rgba(201,168,76,0.28)"}`,
+                        background: artistMethod === k ? "#c9a84c" : "transparent",
+                        color: artistMethod === k ? "#0a0a0a" : "rgba(201,168,76,0.85)",
+                        fontSize: ".72rem",
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                        letterSpacing: ".04em",
+                      }}
+                    >
+                      {l}
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              {artist.method === "rate" ? (
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:".7rem",marginBottom:".75rem"}} className="hb-form-grid">
+              {artistMethod === "rate" && (
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:".7rem",marginBottom:".75rem"}} className="hb-form-grid">
+                  <Field label="入場料"><input type="number" style={S.inp} value={artist.charge} onChange={e=>updateArtist(idx,"charge",e.target.value)} placeholder="3000"/></Field>
+                  <Field label="動員数"><input type="number" style={S.inp} value={artist.attendance} onChange={e=>updateArtist(idx,"attendance",e.target.value)} placeholder="12"/></Field>
+                  <Field label="売上合計（自動）"><input style={{...S.inp,color:"rgba(201,168,76,0.7)"}} value={`¥${c.sales.toLocaleString()}`} readOnly/></Field>
                   <Field label="歩合％"><input type="number" style={S.inp} value={artist.ratePercent} onChange={e=>updateArtist(idx,"ratePercent",e.target.value)} placeholder="50"/></Field>
                   <Field label="最低保証（任意）"><input type="number" style={S.inp} value={artist.minGuarantee} onChange={e=>updateArtist(idx,"minGuarantee",e.target.value)} placeholder="¥0なら未設定"/></Field>
                 </div>
-              ) : (
-                <div style={{display:"grid",gridTemplateColumns:"1fr",gap:".7rem",marginBottom:".75rem"}}>
-                  <Field label="固定出演料"><input type="number" style={S.inp} value={artist.fixedFee} onChange={e=>updateArtist(idx,"fixedFee",e.target.value)} placeholder="30000"/></Field>
+              )}
+
+              {artistMethod === "chargeback" && (
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:".7rem",marginBottom:".75rem"}} className="hb-form-grid">
+                  <Field label="動員数"><input type="number" style={S.inp} value={artist.attendance} onChange={e=>updateArtist(idx,"attendance",e.target.value)} placeholder="12"/></Field>
+                  <Field label="基準人数（超えた分が対象）">
+                    <input type="number" min={0} style={S.inp} value={artist.chargeBackBaseCount ?? ""} onChange={e=>updateArtist(idx,"chargeBackBaseCount",e.target.value)} placeholder="例：10"/>
+                  </Field>
+                  <Field label="1名あたり（円）">
+                    <input type="number" min={0} style={S.inp} value={artist.chargeBackAmountPerPerson ?? ""} onChange={e=>updateArtist(idx,"chargeBackAmountPerPerson",e.target.value)} placeholder="例：1000"/>
+                  </Field>
+                  <Field label="対象人数（自動）">
+                    <input style={{...S.inp,color:"rgba(201,168,76,0.7)"}} value={String(c.chargeBackPeople)} readOnly/>
+                  </Field>
                 </div>
               )}
 
-              {/* 計算結果（取り分） */}
+              {artistMethod === "fixed" && (
+                <div style={{display:"grid",gridTemplateColumns:"1fr",gap:".7rem",marginBottom:".75rem"}} className="hb-form-grid">
+                  <Field label="固定ギャラ（円）"><input type="number" style={S.inp} value={artist.fixedFee} onChange={e=>updateArtist(idx,"fixedFee",e.target.value)} placeholder="30000"/></Field>
+                </div>
+              )}
+
+              {/* 計算結果（基本金額） */}
               <div style={{padding:".55rem .8rem",background:"rgba(201,168,76,0.06)",borderRadius:4,marginBottom:".75rem",fontSize:".82rem"}}>
-                <span style={{color:"rgba(240,232,208,0.55)"}}>取り分：</span>
+                <span style={{color:"rgba(240,232,208,0.55)"}}>基本金額：</span>
                 <strong style={{color:"#c9a84c",fontSize:".95rem"}}>¥{c.amount.toLocaleString()}</strong>
               </div>
 
