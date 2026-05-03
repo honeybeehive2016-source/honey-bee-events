@@ -4,6 +4,7 @@ import { collection, doc, setDoc, deleteDoc, onSnapshot } from "firebase/firesto
 import { getOrderedStaffNames } from "./shift";
 import { sendReservationEmails } from "./email";
 import { SeatPicker, DayLayoutView, getDefaultLayout, sortLayouts } from "./seatLayout";
+import { isCustomerBookingStatusOpen } from "./eventBooking";
 
 const S = {
   card: { background:"#111", border:"1px solid rgba(201,168,76,0.1)", borderRadius:6, padding:"1rem 1.25rem", marginBottom:".75rem" },
@@ -1565,7 +1566,7 @@ export function CustomerReservationForm({ events = [] }) {
     const dd = String(d.getDate()).padStart(2, "0");
     return `${yy}-${mm}-${dd}`;
   })();
-  const upcomingEvents = events.filter(e => e.date && e.date >= today && !/貸切|貸し切り/.test(e.name||"") && !e.noBooking);
+  const upcomingEvents = events.filter(e => e.date && e.date >= today && !/貸切|貸し切り/.test(e.name||"") && !e.noBooking && isCustomerBookingStatusOpen(e));
   const eventsByDate = {};
   upcomingEvents.forEach(e => {
     if (!eventsByDate[e.date]) eventsByDate[e.date] = [];
