@@ -415,8 +415,9 @@ function CalendarView({events,rentals=[],onEdit,onEditRental}){
               <div className="hb-cal-day-num" style={{fontSize:".72rem",fontWeight:500,marginBottom:".2rem",color:isToday?"#c9a84c":dow===0?"#e24b4a":dow===6?"#7ec8e3":"rgba(240,232,208,0.55)"}}>{day}</div>
               {items.map((it,ei)=>{
                 const isRental=it._kind==="rental";
+                const rentalName = (it.customerCompany || it.contactName || "").trim();
                 const label=isRental
-                  ? `🍽 ${it.customerCompany||it.contactName||"貸切"}`
+                  ? (rentalName ? `🍽 貸切 ${rentalName}` : `🍽 貸切`)
                   : it.name;
                 const calBooking = !isRental && bookingStatusCalStyle(it._orig);
                 return (
