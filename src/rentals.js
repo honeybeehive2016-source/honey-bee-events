@@ -177,7 +177,41 @@ function displayRentalTitle(r) {
   if (t) return t;
   const parts = [r.customerCompany, r.contactName].filter((x) => String(x || "").trim());
   if (parts.length) return parts.join(" ／ ");
-  return (r.contactName || "").trim() || "（無題）";
+  return "（無題）";
+}
+
+/** 既存貸切から新規用フォームを組み立て（Firestore 未保存の下書き用） */
+function buildDuplicatedRentalForm(source) {
+  let next;
+  try {
+    next = JSON.parse(JSON.stringify({ ...emptyRental, ...source }));
+  } catch {
+    next = { ...emptyRental, ...source };
+  }
+  const rt = String(source.rentalTitle ?? "").trim();
+  next.rentalTitle = rt ? `${rt}（コピー）` : "（コピー）";
+  delete next._id;
+  delete next._deleted;
+  delete next._deletedAt;
+  delete next.savedAt;
+  next.desiredDate = "";
+  next.desiredTime = String(source.desiredTime ?? "");
+  next.inquiryDate = new Date().toISOString().split("T")[0];
+  next.status = "new";
+  next.replyStatus = "";
+  next.quoteStatus = "";
+  next.outcome = "";
+  next.documentHistory = [];
+  next.quoteNo = "";
+  next.invoiceNo = "";
+  next.quoteSubject = "";
+  next.invoiceSubject = "";
+  next.validityDate = "";
+  next.attachments = [];
+  next.depositReceived = false;
+  next.depositDate = "";
+  next.depositMemo = "";
+  return { ...emptyRental, ...next, rentalTitle: next.rentalTitle ?? "" };
 }
 
 /** filtered 済みリストを、今後 / 過去 / 日付未設定に分割（各配列はソート済み） */
@@ -447,7 +481,7 @@ function RentalAttachmentsGallery({ attachments, readOnly, onRemove, uploading }
   );
 }
 
-function RentalListCard({ r, onOpenDetail, onOpenEdit, onTrash }) {
+function RentalListCard({ r, onOpenDetail, onOpenEdit, onTrash, onDuplicate }) {
   const ymd = (r.desiredDate || "").trim();
   const dated = isValidDesiredDateYmd(ymd);
   const [yy, mm, dd] = dated ? ymd.split("-") : ["", "", ""];
@@ -539,10 +573,15 @@ function RentalListCard({ r, onOpenDetail, onOpenEdit, onTrash }) {
           </div>
         </div>
       </div>
-      <div style={{ display: "flex", gap: ".4rem" }}>
+      <div style={{ display: "flex", gap: ".4rem", flexWrap: "wrap", justifyContent: "flex-end" }}>
         <button type="button" style={S.btn("sm")} onClick={(e) => { e.stopPropagation(); onOpenEdit(); }}>
           編集
         </button>
+        {onDuplicate ? (
+          <button type="button" style={{ ...S.btn("sm"), borderColor: "rgba(201,168,76,0.35)", color: "#c9a84c" }} onClick={(e) => { e.stopPropagation(); onDuplicate(); }}>
+            📋 複製
+          </button>
+        ) : null}
         <button type="button" style={S.btn("danger")} onClick={(e) => { e.stopPropagation(); onTrash(); }}>
           削除
         </button>
@@ -1002,7 +1041,6 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
   const setField = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   const handleSave = async () => {
-    if (!form.contactName) { alert("担当者名を入力してください"); return; }
     try {
       const id = editingId || `rental_${Date.now().toString(36)}`;
       const { _id, ...data } = form;
@@ -1064,6 +1102,16 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
     setEditingId(r._id);
     setAiReply("");
     setView("edit");
+  };
+
+  const canDuplicateRental = Boolean(editingId && rentals.some((r) => r._id === editingId));
+
+  const applyDuplicatedRental = (src) => {
+    setForm(buildDuplicatedRentalForm(src));
+    setEditingId(null);
+    setAiReply("");
+    setView("edit");
+    alert("複製しました。内容を確認して保存すると新規案件として登録されます。");
   };
 
   const handleAIReply = async (type) => {
@@ -1155,6 +1203,11 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
           </h2>
           <div style={{ display: "flex", gap: ".5rem", flexWrap: "wrap" }}>
             <button type="button" style={S.btn("sm")} onClick={() => { setView("list"); setForm(emptyRental); setEditingId(null); }}>← 一覧</button>
+            {canDuplicateRental ? (
+              <button type="button" style={{ ...S.btn("sm"), borderColor: "rgba(201,168,76,0.35)", color: "#c9a84c" }} onClick={() => applyDuplicatedRental(form)}>
+                📋 複製
+              </button>
+            ) : null}
             <button type="button" style={S.btn("gold")} onClick={() => setView("edit")}>✏ 編集</button>
           </div>
         </div>
@@ -1218,11 +1271,18 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
     const amountColLabel = docTax === "inclusive" ? "金額(税込相当)" : "金額";
     return (
       <div style={{padding:"1.5rem 2rem",maxWidth:1100,margin:"0 auto"}} className="hb-view">
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1rem"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1rem",flexWrap:"wrap",gap:".5rem"}}>
           <h2 style={{fontFamily:"Georgia,serif",fontSize:"1.2rem",color:"#c9a84c",letterSpacing:".15em",margin:0}}>
             🍽 {editingId ? "貸切お問い合わせ編集" : "新規お問い合わせ"}
           </h2>
-          <button style={S.btn("sm")} onClick={()=>setView("list")}>← 一覧</button>
+          <div style={{ display: "flex", gap: ".5rem", flexWrap: "wrap" }}>
+            {canDuplicateRental ? (
+              <button type="button" style={{ ...S.btn("sm"), borderColor: "rgba(201,168,76,0.35)", color: "#c9a84c" }} onClick={() => applyDuplicatedRental(form)}>
+                📋 複製
+              </button>
+            ) : null}
+            <button type="button" style={S.btn("sm")} onClick={()=>setView("list")}>← 一覧</button>
+          </div>
         </div>
 
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1.5rem"}} className="hb-form-layout">
@@ -1649,6 +1709,7 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
               onOpenDetail={() => startDetail(r)}
               onOpenEdit={() => startEdit(r)}
               onTrash={() => handleDelete(r._id)}
+              onDuplicate={() => applyDuplicatedRental(r)}
             />
           ))}
         </>
@@ -1690,6 +1751,7 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
               onOpenDetail={() => startDetail(r)}
               onOpenEdit={() => startEdit(r)}
               onTrash={() => handleDelete(r._id)}
+              onDuplicate={() => applyDuplicatedRental(r)}
             />
           ))}
         {showPastRentals && rentalsPast.length === 0 && (
@@ -1712,6 +1774,7 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
               onOpenDetail={() => startDetail(r)}
               onOpenEdit={() => startEdit(r)}
               onTrash={() => handleDelete(r._id)}
+              onDuplicate={() => applyDuplicatedRental(r)}
             />
           ))}
         </>
