@@ -4,7 +4,7 @@ import { collection, doc, setDoc, deleteDoc, onSnapshot } from "firebase/firesto
 import { getOrderedStaffNames } from "./shift";
 import { sendReservationEmails } from "./email";
 import { SeatPicker, DayLayoutView, getDefaultLayout, sortLayouts } from "./seatLayout";
-import { isCustomerBookingStatusOpen } from "./eventBooking";
+import { isCustomerBookingStatusOpen, effectiveBookingStatus } from "./eventBooking";
 
 const S = {
   card: { background:"#111", border:"1px solid rgba(201,168,76,0.1)", borderRadius:6, padding:"1rem 1.25rem", marginBottom:".75rem" },
@@ -86,6 +86,23 @@ function resolveTargetArtistValue(value, event) {
   const v = String(value || "").trim();
   if (v && options.includes(v)) return v;
   return TARGET_ARTIST_NONE;
+}
+
+/** スタッフ向け予約受付ステータス注意（open / 未設定は null） */
+function getStaffBookingStatusNotice(ev) {
+  if (!ev) return null;
+  const s = effectiveBookingStatus(ev);
+  if (s === "open") return null;
+  if (s === "pending_detail") {
+    return "⚠ 詳細確認中のイベントです。電話予約時は、内容変更の可能性をお客様へお伝えください。";
+  }
+  if (s === "pending_booking") {
+    return "⚠ このイベントは予約受付前です。アーティスト経由・関係者予約などの場合のみ登録してください。";
+  }
+  if (s === "closed") {
+    return "⚠ このイベントは受付終了です。追加登録する場合は、席数・主催確認を行ってください。";
+  }
+  return null;
 }
 function summarizeTargetArtistPeople(list) {
   const m = {};
@@ -537,6 +554,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   if (view === "edit") {
     // 選択日のイベント候補（貸切は電話予約の対象外）
     const candidateEvents = staffReservationEventsForDate(events, form.date);
+    const staffBookingNotice = getStaffBookingStatusNotice(selectedFormEvent);
     return (
       <div style={{padding:"1.5rem 2rem",maxWidth:800,margin:"0 auto"}} className="hb-view">
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1rem",flexWrap:"wrap",gap:".5rem"}}>
@@ -598,6 +616,11 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
               <input style={S.inp} value={form.eventName} onChange={e=>setField("eventName",e.target.value)} placeholder={candidateEvents.length===0?"日付を選んでください or 手動入力":"イベント名"}/>
             )}
           </Field>
+          {staffBookingNotice && (
+            <div style={{ gridColumn: "1 / -1", padding:".55rem .7rem", background:"rgba(244,162,97,0.1)", border:"1px solid rgba(244,162,97,0.35)", borderRadius:4, fontSize:".72rem", color:"#f4a261", lineHeight:1.55, marginBottom:".1rem" }}>
+              {staffBookingNotice}
+            </div>
+          )}
           {selectedFormEvent && isMultiArtistEvent(selectedFormEvent) && formTargetArtistOptions.length > 1 && (
             <Field label="ご予約アーティスト" full>
               <select style={S.inp} value={resolveTargetArtistValue(form.targetArtist, selectedFormEvent)} onChange={e=>setField("targetArtist",e.target.value)}>
@@ -1015,7 +1038,9 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
               {/* イベントごとの詳細カード（複数あれば縦に並ぶ） */}
               {dayEvents.length > 0 && (
                 <div style={{display:"flex",flexDirection:"column",gap:".5rem",marginBottom:".75rem"}}>
-                  {dayEvents.map((ev, idx) => (
+                  {dayEvents.map((ev, idx) => {
+                    const evBookingNotice = getStaffBookingStatusNotice(ev);
+                    return (
                     <div key={ev._id || idx} style={{
                       padding:".7rem .9rem",
                       background: ev.noBooking
@@ -1048,6 +1073,11 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                           fontWeight:600,
                         }}>🎵 {ev.name}</span>
                       </div>
+                      {evBookingNotice && (
+                        <div style={{ marginBottom:".35rem", padding:".45rem .6rem", background:"rgba(244,162,97,0.1)", border:"1px solid rgba(244,162,97,0.35)", borderRadius:4, fontSize:".7rem", color:"#f4a261", lineHeight:1.5 }}>
+                          {evBookingNotice}
+                        </div>
+                      )}
                       {/* 時間情報 */}
                       {(ev.open || ev.start) && (
                         <div style={{fontSize:".72rem",color:"rgba(240,232,208,0.7)",marginBottom:".15rem"}}>
@@ -1089,7 +1119,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                         </div>
                       )}
                     </div>
-                  ))}
+                  );})}
                 </div>
               )}
 
@@ -1186,6 +1216,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                   const totalP = g.reservations.reduce((s,r)=>s+Number(r.people||0),0);
                   const arrivedC = g.reservations.filter(r=>r.arrived).length;
                   const artistSummary = summarizeTargetArtistPeople(g.reservations);
+                  const groupBookingNotice = getStaffBookingStatusNotice(g.event);
                   // 複数イベント時は、イベント名をキーに付けて席レイアウトを分ける
                   const eventScopedKey = (dayEvents.length > 1 && g.eventName)
                     ? `${calSelectedDate}::${g.eventName}`
@@ -1210,6 +1241,11 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                           （{g.reservations.length}組 / 計{totalP}名 / 来店 {arrivedC}/{g.reservations.length}）
                         </span>
                       </div>
+                      {groupBookingNotice && (
+                        <div style={{ marginBottom:".45rem", padding:".45rem .65rem", background:"rgba(244,162,97,0.1)", border:"1px solid rgba(244,162,97,0.35)", borderRadius:4, fontSize:".7rem", color:"#f4a261", lineHeight:1.5 }}>
+                          {groupBookingNotice}
+                        </div>
+                      )}
                       {g.event && isMultiArtistEvent(g.event) && artistSummary.length > 0 && (
                         <div style={{fontSize:".66rem",color:"rgba(126,200,227,0.82)",marginBottom:".45rem",paddingLeft:dayEvents.length > 1 ? ".2rem" : 0}}>
                           🎤 ご予約アーティスト別：
