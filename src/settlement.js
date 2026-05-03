@@ -147,8 +147,6 @@ export default function SettlementModule({ events = [], navigateBack }) {
   const [filter, setFilter] = useState("all"); // all | unpaid | paid
   const [copied, setCopied] = useState("");
   const [showTrash, setShowTrash] = useState(false);
-  // 過去履歴ビュー：current（直近・今後）/ history（過去）
-  const [period, setPeriod] = useState("current");
   // パスワードモーダル
   const [showPwdModal, setShowPwdModal] = useState(false);
   const [pwdInput, setPwdInput] = useState("");
@@ -243,7 +241,7 @@ export default function SettlementModule({ events = [], navigateBack }) {
       data.savedAt = new Date().toLocaleDateString("ja-JP");
       await setDoc(doc(db, "settlements", id), data);
       alert("✓ 保存しました");
-      setView("list");
+      if (editingId) { setView("list"); } else { startNew(); }
     } catch (e) { alert("保存失敗：" + e.message); }
   };
 
@@ -315,25 +313,8 @@ export default function SettlementModule({ events = [], navigateBack }) {
     setTimeout(() => setCopied(""), 1600);
   };
 
-  // 履歴判定の基準日（今日からHISTORY_DAYS_AGO日前）
-  const historyCutoffDate = (() => {
-    const d = new Date();
-    d.setDate(d.getDate() - HISTORY_DAYS_AGO);
-    const yy = d.getFullYear();
-    const mm = String(d.getMonth()+1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    return `${yy}-${mm}-${dd}`;
-  })();
-
-  // 一覧フィルタリング
+  // 一覧フィルタリング（全期間・全件）
   const filtered = settlements.filter(s => {
-    // 期間フィルタ：current は基準日より新しい、history は基準日以前
-    const eventDate = s.eventDate || "";
-    if (period === "current") {
-      if (eventDate && eventDate < historyCutoffDate) return false;
-    } else { // history
-      if (!eventDate || eventDate >= historyCutoffDate) return false;
-    }
     if (filter === "all") return true;
     const allPaid = (s.artists || []).every(a => a.paid);
     if (filter === "unpaid") return !allPaid;
@@ -342,10 +323,10 @@ export default function SettlementModule({ events = [], navigateBack }) {
   });
   const sorted = [...filtered].sort((a, b) => (b.eventDate || "").localeCompare(a.eventDate || ""));
 
-  // 過去履歴タブを押した時の処理
-  const requestShowHistory = () => {
+  // 精算一覧へ遷移（パスワード認証済みなら即遷移、未認証ならモーダル表示）
+  const goToList = () => {
     if (historyUnlocked) {
-      setPeriod("history");
+      setView("list");
     } else {
       setPwdInput("");
       setPwdError("");
@@ -361,7 +342,7 @@ export default function SettlementModule({ events = [], navigateBack }) {
       setShowPwdModal(false);
       setPwdInput("");
       setPwdError("");
-      setPeriod("history");
+      setView("list");
     } else {
       setPwdError("パスワードが違います");
       setPwdInput("");
@@ -376,7 +357,10 @@ export default function SettlementModule({ events = [], navigateBack }) {
           <h2 style={{fontFamily:"Georgia,serif",fontSize:"1.2rem",color:"#c9a84c",letterSpacing:".15em",margin:0}}>
             💰 {editingId ? "精算編集" : "新規精算"}
           </h2>
-          <button style={S.btn("sm")} onClick={()=>setView("list")}>← 一覧</button>
+          {editingId
+            ? <button style={S.btn("sm")} onClick={()=>setView("list")}>← 一覧に戻る</button>
+            : <button style={S.btn("sm")} onClick={goToList}>📂 過去の精算一覧を見る</button>
+          }
         </div>
 
         {/* イベント情報 */}
@@ -549,7 +533,10 @@ export default function SettlementModule({ events = [], navigateBack }) {
 
         <div style={{display:"flex",gap:".5rem",marginTop:"1.5rem",flexWrap:"wrap"}}>
           <button style={{...S.btn("gold"),flex:1,maxWidth:200}} onClick={handleSave}>💾 保存</button>
-          <button style={S.btn("ghost")} onClick={()=>setView("list")}>キャンセル</button>
+          {editingId
+            ? <button style={S.btn("ghost")} onClick={()=>setView("list")}>← 一覧に戻る</button>
+            : <button style={S.btn("ghost")} onClick={startNew}>🔄 フォームをリセット</button>
+          }
           {editingId && <button style={{...S.btn("danger"),marginLeft:"auto"}} onClick={async()=>{await handleDelete(editingId);setView("list");}}>🗑 削除</button>}
         </div>
       </div>
@@ -557,44 +544,14 @@ export default function SettlementModule({ events = [], navigateBack }) {
   }
 
   // ===== 一覧画面 =====
-  // イベント候補（過去・未来両方）
-  const eventOptions = [...events].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
-
   return (
     <div style={{padding:"1.5rem 2rem",maxWidth:1100,margin:"0 auto"}} className="hb-view">
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1.25rem",flexWrap:"wrap",gap:".5rem"}}>
-        <h2 style={{fontFamily:"Georgia,serif",fontSize:"1.2rem",color:"#c9a84c",letterSpacing:".15em",margin:0}}>💰 アーティスト精算</h2>
+        <h2 style={{fontFamily:"Georgia,serif",fontSize:"1.2rem",color:"#c9a84c",letterSpacing:".15em",margin:0}}>💰 精算一覧</h2>
         <div style={{display:"flex",gap:".5rem",flexWrap:"wrap",alignItems:"center"}}>
           <button style={{...S.btn("sm"),padding:".4rem .8rem"}} onClick={()=>setShowTrash(true)}>🗑 ゴミ箱{trashSettlements.length>0?` (${trashSettlements.length})`:""}</button>
-          {eventOptions.length > 0 && (
-            <select style={{...S.inp,maxWidth:240}} defaultValue="" onChange={e=>{if(e.target.value)startFromEvent(e.target.value);}}>
-              <option value="">＋ イベントから精算作成</option>
-              {eventOptions.map(ev=>(
-                <option key={ev._id} value={ev._id}>{ev.date} {ev.name}</option>
-              ))}
-            </select>
-          )}
-          <button style={S.btn("gold")} onClick={startNew}>＋ 新規精算</button>
+          <button style={S.btn("gold")} onClick={startNew}>← 新規精算に戻る</button>
         </div>
-      </div>
-
-      {/* 期間切替（直近・今後 / 過去の履歴） */}
-      <div style={{display:"flex",gap:".4rem",marginBottom:".75rem",alignItems:"center",flexWrap:"wrap"}}>
-        <button
-          onClick={()=>setPeriod("current")}
-          style={{padding:".45rem 1rem",borderRadius:4,border:"1px solid "+(period==="current"?"#c9a84c":"rgba(201,168,76,0.25)"),background:period==="current"?"#c9a84c":"transparent",color:period==="current"?"#0a0a0a":"rgba(201,168,76,0.7)",fontSize:".75rem",cursor:"pointer",fontFamily:"inherit",letterSpacing:".05em",fontWeight:600}}
-        >📅 直近・今後</button>
-        <button
-          onClick={requestShowHistory}
-          style={{padding:".45rem 1rem",borderRadius:4,border:"1px solid "+(period==="history"?"#c9a84c":"rgba(201,168,76,0.25)"),background:period==="history"?"#c9a84c":"transparent",color:period==="history"?"#0a0a0a":"rgba(201,168,76,0.7)",fontSize:".75rem",cursor:"pointer",fontFamily:"inherit",letterSpacing:".05em",fontWeight:600}}
-        >
-          {historyUnlocked ? "📂" : "🔒"} 過去の精算履歴
-        </button>
-        {period === "history" && (
-          <span style={{fontSize:".65rem",color:"rgba(244,162,97,0.85)",marginLeft:".5rem"}}>
-            ※30日以上前のイベントの精算を表示中
-          </span>
-        )}
       </div>
 
       {/* フィルター */}
@@ -643,10 +600,10 @@ export default function SettlementModule({ events = [], navigateBack }) {
         <div style={{position:"fixed",top:0,left:0,width:"100%",height:"100%",background:"rgba(0,0,0,0.88)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}} onClick={()=>setShowPwdModal(false)}>
           <div onClick={e=>e.stopPropagation()} style={{background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.35)",borderRadius:8,padding:"1.75rem",maxWidth:420,width:"100%"}}>
             <div style={{fontFamily:"Georgia,serif",fontSize:"1rem",color:"#c9a84c",letterSpacing:".15em",marginBottom:".75rem"}}>
-              🔒 過去の精算履歴
+              🔒 精算一覧
             </div>
             <div style={{fontSize:".75rem",color:"rgba(240,232,208,0.7)",lineHeight:1.6,marginBottom:"1.25rem"}}>
-              過去の精算履歴を表示するにはパスワードが必要です。<br/>
+              精算一覧を表示するにはパスワードが必要です。<br/>
               <span style={{fontSize:".68rem",color:"rgba(201,168,76,0.6)"}}>※一度認証すると、ブラウザを閉じるまで再入力は不要です</span>
             </div>
             <input
