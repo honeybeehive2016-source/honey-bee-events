@@ -415,7 +415,16 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   }, [events, form.date, form.eventName]);
 
   const startNew = () => {
-    setForm({ ...emptyReservation, source: "phone", date: dateFilter || calSelectedDate || todayLocal });
+    const date = dateFilter || calSelectedDate || todayLocal;
+    const evs = events.filter(ev => ev.date === date);
+    let nextEventName = "";
+    let nextTargetArtist = TARGET_ARTIST_NONE;
+    if (evs.length === 1) {
+      const ev = evs[0];
+      nextEventName = ev.name;
+      nextTargetArtist = resolveTargetArtistValue(TARGET_ARTIST_NONE, ev);
+    }
+    setForm({ ...emptyReservation, source: "phone", date, eventName: nextEventName, targetArtist: nextTargetArtist });
     setEditingId(null);
     // 「電話予約を追加」ボタンは現在のビューから押されるので、それを覚える
     setReturnView(view);
