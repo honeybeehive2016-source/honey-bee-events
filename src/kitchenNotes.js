@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { db, storage } from "./firebase";
 import { collection, doc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
@@ -8,6 +8,40 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 function sanitizeFileName(name) {
   const base = String(name || "image").replace(/[/\\?%*:|"<>]/g, "_").replace(/^\.+/, "").trim();
   return (base || "image").slice(0, 120);
+}
+
+/** 新規 kitchenNotes ドキュメント用。Storage パス形式は従来どおり。 */
+async function uploadKitchenAttachments(noteId, fileList) {
+  const files = fileList ? Array.from(fileList) : [];
+  const toUpload = [];
+  for (const file of files) {
+    if (!file.type.startsWith("image/")) {
+      alert(`画像以外はアップロードできません: ${file.name}`);
+      continue;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      alert(`1枚あたり5MBまでです（${file.name}）`);
+      continue;
+    }
+    toUpload.push(file);
+  }
+  const attachments = [];
+  for (const file of toUpload) {
+    const safe = sanitizeFileName(file.name);
+    const uniqueSafe = `${Math.random().toString(36).slice(2, 9)}_${safe}`;
+    const storagePath = `kitchenNotes/${noteId}/${Date.now()}_${uniqueSafe}`;
+    const storageRef = ref(storage, storagePath);
+    await uploadBytes(storageRef, file);
+    const downloadURL = await getDownloadURL(storageRef);
+    attachments.push({
+      storagePath,
+      downloadURL,
+      contentType: file.type || "application/octet-stream",
+      sizeBytes: file.size,
+      uploadedAt: Date.now(),
+    });
+  }
+  return attachments;
 }
 
 export const KITCHEN_NOTE_CATEGORIES = [
@@ -26,7 +60,6 @@ const CATEGORY_VISUAL = {
   prep: {
     accent: "#5aa9ff",
     rowBg: "rgba(90, 169, 255, 0.07)",
-    rowBgImportant: "linear-gradient(180deg, rgba(244,162,97,0.1), rgba(90, 169, 255, 0.07))",
     border: "rgba(90, 169, 255, 0.32)",
     badgeBg: "rgba(90, 169, 255, 0.22)",
     badgeColor: "#a8d4ff",
@@ -34,7 +67,6 @@ const CATEGORY_VISUAL = {
   stock: {
     accent: "#e76f51",
     rowBg: "rgba(231, 111, 81, 0.08)",
-    rowBgImportant: "linear-gradient(180deg, rgba(244,162,97,0.11), rgba(231, 111, 81, 0.08))",
     border: "rgba(231, 111, 81, 0.38)",
     badgeBg: "rgba(231, 111, 81, 0.22)",
     badgeColor: "#ffc9b5",
@@ -42,7 +74,6 @@ const CATEGORY_VISUAL = {
   event_prep: {
     accent: "#9b7ed9",
     rowBg: "rgba(155, 126, 217, 0.09)",
-    rowBgImportant: "linear-gradient(180deg, rgba(244,162,97,0.1), rgba(155, 126, 217, 0.09))",
     border: "rgba(155, 126, 217, 0.38)",
     badgeBg: "rgba(155, 126, 217, 0.24)",
     badgeColor: "#dcc9fa",
@@ -50,7 +81,6 @@ const CATEGORY_VISUAL = {
   notice: {
     accent: "#c9a84c",
     rowBg: "rgba(201, 168, 76, 0.1)",
-    rowBgImportant: "linear-gradient(180deg, rgba(244,162,97,0.1), rgba(201, 168, 76, 0.1))",
     border: "rgba(201, 168, 76, 0.38)",
     badgeBg: "rgba(201, 168, 76, 0.22)",
     badgeColor: "#edd89a",
@@ -58,7 +88,6 @@ const CATEGORY_VISUAL = {
   _default: {
     accent: "#7ec8b8",
     rowBg: "rgba(126, 200, 184, 0.06)",
-    rowBgImportant: "linear-gradient(180deg, rgba(244,162,97,0.1), rgba(126, 200, 184, 0.06))",
     border: "rgba(126, 200, 184, 0.28)",
     badgeBg: "rgba(126, 200, 184, 0.18)",
     badgeColor: "#b8ebe0",
@@ -213,10 +242,13 @@ export default function KitchenNotesModule() {
   const [kitchenRangeEnd, setKitchenRangeEnd] = useState("");
   const [newKitchenCategory, setNewKitchenCategory] = useState("prep");
   const [newKitchenAuthor, setNewKitchenAuthor] = useState("");
-  const [newKitchenImportant, setNewKitchenImportant] = useState(false);
   const [newKitchenNote, setNewKitchenNote] = useState("");
   const [newKitchenItem, setNewKitchenItem] = useState("");
-  const [uploadingNoteId, setUploadingNoteId] = useState(null);
+  const [kitchenSubmitting, setKitchenSubmitting] = useState(false);
+  const [pendingNotePhotoCount, setPendingNotePhotoCount] = useState(0);
+  const [pendingItemPhotoCount, setPendingItemPhotoCount] = useState(0);
+  const notePhotoInputRef = useRef(null);
+  const itemPhotoInputRef = useRef(null);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "kitchenNotes"), (snap) => {
@@ -263,7 +295,7 @@ export default function KitchenNotesModule() {
     }
   };
 
-  const saveKitchenEntry = async (type, text) => {
+  const saveKitchenEntry = async (type, text, fileList) => {
     const targetDates = computeTargetDates();
     if (targetDates === null) return;
     if (targetDates.length === 0) {
@@ -279,92 +311,52 @@ export default function KitchenNotesModule() {
       targetDates,
       category: newKitchenCategory,
       author: (newKitchenAuthor || "").trim(),
-      important: !!newKitchenImportant,
       createdAt: now,
       updatedAt: now,
     };
     if (type === "item") {
       base.done = false;
     }
-    await setDoc(doc(db, "kitchenNotes", id), base);
+    const rawFiles = fileList ? Array.from(fileList) : [];
+    const mayUpload = rawFiles.length > 0;
+    if (mayUpload) {
+      setKitchenSubmitting(true);
+    }
+    try {
+      if (mayUpload) {
+        const attachments = await uploadKitchenAttachments(id, fileList);
+        if (attachments.length > 0) {
+          base.attachments = attachments;
+        }
+      }
+      await setDoc(doc(db, "kitchenNotes", id), base);
+    } catch (e) {
+      alert("保存に失敗しました: " + (e.message || String(e)));
+    } finally {
+      if (mayUpload) {
+        setKitchenSubmitting(false);
+      }
+    }
   };
 
   const addKitchenNoteFree = async () => {
     if (!newKitchenNote.trim()) return;
-    await saveKitchenEntry("note", newKitchenNote);
+    await saveKitchenEntry("note", newKitchenNote, notePhotoInputRef.current?.files);
     setNewKitchenNote("");
+    setPendingNotePhotoCount(0);
+    if (notePhotoInputRef.current) notePhotoInputRef.current.value = "";
   };
 
   const addKitchenItemCheck = async () => {
     if (!newKitchenItem.trim()) return;
-    await saveKitchenEntry("item", newKitchenItem);
+    await saveKitchenEntry("item", newKitchenItem, itemPhotoInputRef.current?.files);
     setNewKitchenItem("");
+    setPendingItemPhotoCount(0);
+    if (itemPhotoInputRef.current) itemPhotoInputRef.current.value = "";
   };
 
   const patchKitchenNote = async (id, patch) => {
     await setDoc(doc(db, "kitchenNotes", id), { ...patch, updatedAt: Date.now() }, { merge: true });
-  };
-
-  const uploadPhotosForNote = async (noteId, fileList) => {
-    const files = fileList ? Array.from(fileList) : [];
-    if (files.length === 0) return;
-    const note = allKitchenNotes.find(x => x._id === noteId);
-    if (!note) return;
-    const toUpload = [];
-    for (const file of files) {
-      if (!file.type.startsWith("image/")) {
-        alert(`画像以外はアップロードできません: ${file.name}`);
-        continue;
-      }
-      if (file.size > MAX_IMAGE_BYTES) {
-        alert(`1枚あたり5MBまでです（${file.name}）`);
-        continue;
-      }
-      toUpload.push(file);
-    }
-    if (toUpload.length === 0) return;
-    setUploadingNoteId(noteId);
-    try {
-      const next = Array.isArray(note.attachments) ? [...note.attachments] : [];
-      for (const file of toUpload) {
-        const safe = sanitizeFileName(file.name);
-        const uniqueSafe = `${Math.random().toString(36).slice(2, 9)}_${safe}`;
-        const storagePath = `kitchenNotes/${noteId}/${Date.now()}_${uniqueSafe}`;
-        const storageRef = ref(storage, storagePath);
-        await uploadBytes(storageRef, file);
-        const downloadURL = await getDownloadURL(storageRef);
-        next.push({
-          storagePath,
-          downloadURL,
-          contentType: file.type || "application/octet-stream",
-          sizeBytes: file.size,
-          uploadedAt: Date.now(),
-        });
-      }
-      await setDoc(doc(db, "kitchenNotes", noteId), { attachments: next, updatedAt: Date.now() }, { merge: true });
-    } catch (e) {
-      alert("アップロードに失敗しました: " + (e.message || String(e)));
-    } finally {
-      setUploadingNoteId(null);
-    }
-  };
-
-  const removeAttachment = async (noteId, index) => {
-    const note = allKitchenNotes.find(x => x._id === noteId);
-    if (!note || !Array.isArray(note.attachments)) return;
-    const list = [...note.attachments];
-    if (index < 0 || index >= list.length) return;
-    const att = list[index];
-    if (!window.confirm("この写真を削除しますか？")) return;
-    try {
-      if (att.storagePath) {
-        await deleteObject(ref(storage, att.storagePath));
-      }
-    } catch (e) {
-      console.warn("Storage delete:", e);
-    }
-    list.splice(index, 1);
-    await setDoc(doc(db, "kitchenNotes", noteId), { attachments: list, updatedAt: Date.now() }, { merge: true });
   };
 
   const removeKitchenNote = async (id) => {
@@ -442,8 +434,8 @@ export default function KitchenNotesModule() {
                 const fromLabel = n.sourceDate === selectedDate
                   ? "本日投稿"
                   : `${fmtDate(n.sourceDate || "").replace(/^\d+年/, "")} 投稿`;
-                const rowBackground = n.important ? cv.rowBgImportant : cv.rowBg;
-                const rowBorder = n.important ? "rgba(244,162,97,0.42)" : cv.border;
+                const rowBackground = cv.rowBg;
+                const rowBorder = cv.border;
                 return (
                   <div
                     key={n._id}
@@ -468,15 +460,7 @@ export default function KitchenNotesModule() {
                         <span style={{ fontSize:".62rem", color:"rgba(240,232,208,0.5)" }}>👤 {n.author}</span>
                       ) : null}
                       <span style={{ fontSize:".58rem", color:"rgba(240,232,208,0.38)" }}>{fromLabel}</span>
-                      <label style={{ display:"inline-flex", alignItems:"center", gap:".25rem", marginLeft:"auto", cursor:"pointer", fontSize:".62rem", color:"#f4a261" }}>
-                        <input
-                          type="checkbox"
-                          checked={!!n.important}
-                          onChange={() => patchKitchenNote(n._id, { important: !n.important })}
-                          style={{ accentColor:"#f4a261", width:15, height:15 }}
-                        />
-                        重要
-                      </label>
+                      <span style={{ flex:1, minWidth:".25rem" }} />
                       {nt === "item" && (
                         <label style={{ display:"inline-flex", alignItems:"center", gap:".25rem", cursor:"pointer", fontSize:".62rem", color:"#7ec87e" }}>
                           <input
@@ -496,78 +480,23 @@ export default function KitchenNotesModule() {
                     {Array.isArray(n.attachments) && n.attachments.length > 0 ? (
                       <div style={{ display:"flex", flexWrap:"wrap", gap:".45rem", marginTop:".55rem" }}>
                         {n.attachments.map((att, idx) => (
-                          <div
+                          <a
                             key={att.storagePath || `${n._id}-att-${idx}`}
-                            style={{ position:"relative", width:88, height:88, flexShrink:0 }}
+                            href={att.downloadURL}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="新しいタブで開く"
+                            style={{ display:"block", width:88, height:88, borderRadius:4, overflow:"hidden", border:`1px solid ${cv.border}`, flexShrink:0 }}
                           >
-                            <a
-                              href={att.downloadURL}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              title="新しいタブで開く"
-                              style={{ display:"block", width:88, height:88, borderRadius:4, overflow:"hidden", border:`1px solid ${cv.border}` }}
-                            >
-                              <img
-                                src={att.downloadURL}
-                                alt=""
-                                style={{ width:"100%", height:"100%", objectFit:"cover", display:"block", pointerEvents:"none" }}
-                              />
-                            </a>
-                            <button
-                              type="button"
-                              aria-label="写真を削除"
-                              onClick={() => removeAttachment(n._id, idx)}
-                              style={{
-                                position:"absolute",
-                                top:2,
-                                right:2,
-                                width:22,
-                                height:22,
-                                padding:0,
-                                lineHeight:"20px",
-                                fontSize:".85rem",
-                                borderRadius:3,
-                                border:"1px solid rgba(226,75,74,0.5)",
-                                background:"rgba(10,10,10,0.85)",
-                                color:"#e24b4a",
-                                cursor:"pointer",
-                                fontFamily:"inherit",
-                              }}
-                            >
-                              ×
-                            </button>
-                          </div>
+                            <img
+                              src={att.downloadURL}
+                              alt=""
+                              style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }}
+                            />
+                          </a>
                         ))}
                       </div>
                     ) : null}
-                    <div style={{ marginTop:".5rem", display:"flex", alignItems:"center", gap:".5rem", flexWrap:"wrap" }}>
-                      <label
-                        style={{
-                          ...S.btn("sm"),
-                          cursor: uploadingNoteId === n._id ? "wait" : "pointer",
-                          marginBottom:0,
-                          opacity: uploadingNoteId === n._id ? 0.65 : 1,
-                          pointerEvents: uploadingNoteId === n._id ? "none" : "auto",
-                        }}
-                      >
-                        写真を添付
-                        <input
-                          type="file"
-                          accept="image/*"
-                          multiple
-                          disabled={uploadingNoteId === n._id}
-                          style={{ display:"none" }}
-                          onChange={e => {
-                            const fl = e.target.files;
-                            uploadPhotosForNote(n._id, fl);
-                            e.target.value = "";
-                          }}
-                        />
-                      </label>
-                      {uploadingNoteId === n._id ? (
-                        <span style={{ fontSize:".65rem", color:"rgba(126,200,127,0.85)", letterSpacing:".06em" }}>アップロード中...</span>
-                      ) : null}
-                    </div>
                   </div>
                 );
               })}
@@ -686,10 +615,6 @@ export default function KitchenNotesModule() {
           <label style={{ ...S.lbl, color:"rgba(126,200,127,0.55)" }}>記入者</label>
           <input style={S.inp} value={newKitchenAuthor} onChange={e => setNewKitchenAuthor(e.target.value)} placeholder="名前" />
         </div>
-        <label style={{ display:"flex", alignItems:"center", gap:".5rem", cursor:"pointer", fontSize:".78rem", color:"rgba(240,232,208,0.85)" }}>
-          <input type="checkbox" checked={newKitchenImportant} onChange={e => setNewKitchenImportant(e.target.checked)} style={{ accentColor:"#f4a261", width:18, height:18 }} />
-          重要
-        </label>
       </div>
 
       <div style={{ marginBottom:".75rem" }}>
@@ -701,7 +626,24 @@ export default function KitchenNotesModule() {
             onChange={e => setNewKitchenNote(e.target.value)}
             placeholder="共有メモ（自由記載）"
           />
-          <button type="button" style={{ ...S.btn("gold"), alignSelf:"flex-end" }} onClick={addKitchenNoteFree}>送信</button>
+          <button type="button" style={{ ...S.btn("gold"), alignSelf:"flex-end" }} onClick={addKitchenNoteFree} disabled={kitchenSubmitting}>送信</button>
+        </div>
+        <div style={{ marginTop:".45rem", display:"flex", alignItems:"center", gap:".5rem", flexWrap:"wrap" }}>
+          <label style={{ ...S.btn("sm"), cursor: kitchenSubmitting ? "wait" : "pointer", marginBottom:0, opacity: kitchenSubmitting ? 0.65 : 1, pointerEvents: kitchenSubmitting ? "none" : "auto" }}>
+            写真を添付（任意）
+            <input
+              ref={notePhotoInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              disabled={kitchenSubmitting}
+              style={{ display:"none" }}
+              onChange={e => setPendingNotePhotoCount(e.target.files?.length || 0)}
+            />
+          </label>
+          {pendingNotePhotoCount > 0 ? (
+            <span style={{ fontSize:".62rem", color:"rgba(240,232,208,0.45)" }}>{pendingNotePhotoCount} 枚選択中</span>
+          ) : null}
         </div>
       </div>
 
@@ -715,9 +657,30 @@ export default function KitchenNotesModule() {
             onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addKitchenItemCheck(); } }}
             placeholder="例：〇〇の仕込み確認 / 冷蔵庫の〇〇"
           />
-          <button type="button" style={S.btn("gold")} onClick={addKitchenItemCheck}>送信</button>
+          <button type="button" style={S.btn("gold")} onClick={addKitchenItemCheck} disabled={kitchenSubmitting}>送信</button>
+        </div>
+        <div style={{ marginTop:".45rem", display:"flex", alignItems:"center", gap:".5rem", flexWrap:"wrap" }}>
+          <label style={{ ...S.btn("sm"), cursor: kitchenSubmitting ? "wait" : "pointer", marginBottom:0, opacity: kitchenSubmitting ? 0.65 : 1, pointerEvents: kitchenSubmitting ? "none" : "auto" }}>
+            写真を添付（任意）
+            <input
+              ref={itemPhotoInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              disabled={kitchenSubmitting}
+              style={{ display:"none" }}
+              onChange={e => setPendingItemPhotoCount(e.target.files?.length || 0)}
+            />
+          </label>
+          {pendingItemPhotoCount > 0 ? (
+            <span style={{ fontSize:".62rem", color:"rgba(240,232,208,0.45)" }}>{pendingItemPhotoCount} 枚選択中</span>
+          ) : null}
         </div>
       </div>
+
+      {kitchenSubmitting ? (
+        <div style={{ fontSize:".65rem", color:"rgba(126,200,127,0.85)", letterSpacing:".06em", marginTop:"-.35rem", marginBottom:".75rem" }}>アップロード中...</div>
+      ) : null}
     </div>
   );
 }
