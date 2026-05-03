@@ -32,6 +32,8 @@ const emptyArtist = {
   ratePercent: "",  // 歩合％
   minGuarantee: "", // 最低保証
   fixedFee: "",     // 固定額
+  chargeBackBaseCount: "",       // この人数を超えた分からチャージバック（空/0で無効）
+  chargeBackAmountPerPerson: "", // 1名あたりチャージバック額（空/0で無効）
   deductions: [],   // [{name,amount}]
   paid: false,
   paidDate: "",
@@ -61,8 +63,17 @@ function calcArtist(a) {
     amount = Math.max(calc, min);
   }
   const deductionTotal = (a.deductions || []).reduce((s, d) => s + Number(d.amount || 0), 0);
-  const finalAmount = amount - deductionTotal;
-  return { sales, amount, deductionTotal, finalAmount };
+  const baseN = Number(a.chargeBackBaseCount);
+  const perN = Number(a.chargeBackAmountPerPerson);
+  const chargeBackActive = Number.isFinite(baseN) && baseN > 0 && Number.isFinite(perN) && perN > 0;
+  let chargeBackPeople = 0;
+  let chargeBackTotal = 0;
+  if (chargeBackActive) {
+    chargeBackPeople = Math.max(0, attendance - baseN);
+    chargeBackTotal = chargeBackPeople * perN;
+  }
+  const finalAmount = amount + chargeBackTotal - deductionTotal;
+  return { sales, amount, deductionTotal, chargeBackPeople, chargeBackTotal, finalAmount };
 }
 
 function fmtDate(d) {
@@ -100,6 +111,13 @@ function buildSettlementMemo(settlement, artist) {
     lines.push(`売上：¥${c.sales.toLocaleString()}`);
     lines.push("");
     lines.push(`固定出演料：¥${c.amount.toLocaleString()}`);
+  }
+
+  if (c.chargeBackTotal > 0) {
+    lines.push("");
+    lines.push(`チャージバック対象人数：${c.chargeBackPeople}名（基準 ${artist.chargeBackBaseCount} 名を超えた分）`);
+    lines.push(`1名あたりチャージバック：¥${Number(artist.chargeBackAmountPerPerson || 0).toLocaleString()}`);
+    lines.push(`チャージバック合計：¥${c.chargeBackTotal.toLocaleString()}`);
   }
 
   if ((artist.deductions||[]).length > 0) {
@@ -421,6 +439,21 @@ export default function SettlementModule({ events = [], navigateBack }) {
                 <Field label="入場料"><input type="number" style={S.inp} value={artist.charge} onChange={e=>updateArtist(idx,"charge",e.target.value)} placeholder="3000"/></Field>
                 <Field label="動員数"><input type="number" style={S.inp} value={artist.attendance} onChange={e=>updateArtist(idx,"attendance",e.target.value)} placeholder="12"/></Field>
                 <Field label="売上合計（自動）"><input style={{...S.inp,color:"rgba(201,168,76,0.7)"}} value={`¥${c.sales.toLocaleString()}`} readOnly/></Field>
+              </div>
+
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:".7rem",marginBottom:".75rem"}} className="hb-form-grid">
+                <Field label="チャージバック基準人数（超えた分から対象）">
+                  <input type="number" min={0} style={S.inp} value={artist.chargeBackBaseCount ?? ""} onChange={e=>updateArtist(idx,"chargeBackBaseCount",e.target.value)} placeholder="例：10（空で無効）"/>
+                </Field>
+                <Field label="チャージバック1名あたり（円）">
+                  <input type="number" min={0} style={S.inp} value={artist.chargeBackAmountPerPerson ?? ""} onChange={e=>updateArtist(idx,"chargeBackAmountPerPerson",e.target.value)} placeholder="例：1000（空で無効）"/>
+                </Field>
+                <Field label="対象人数（自動）">
+                  <input style={{...S.inp,color:"rgba(201,168,76,0.7)"}} value={String(c.chargeBackPeople)} readOnly/>
+                </Field>
+                <Field label="チャージバック金額（自動）">
+                  <input style={{...S.inp,color:"rgba(201,168,76,0.7)"}} value={`¥${c.chargeBackTotal.toLocaleString()}`} readOnly/>
+                </Field>
               </div>
 
               {/* 精算方式 */}
