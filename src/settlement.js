@@ -17,6 +17,10 @@ const S = {
   },
 };
 
+/** 精算画面の人数入力欄用（保存キーは attendance のまま） */
+const SETTLEMENT_ATTENDANCE_HINT_TEXT =
+  "アーティスト直接予約・当日申告分を含め、精算に使用する人数を入力してください。";
+
 const Field = ({ label, children, full }) => (
   <div style={{ gridColumn: full ? "1/-1" : undefined, display:"flex", flexDirection:"column" }}>
     <label style={S.lbl}>{label}</label>
@@ -27,7 +31,7 @@ const Field = ({ label, children, full }) => (
 const emptyArtist = {
   name: "",
   charge: "",       // 入場料
-  attendance: "",   // 動員数
+  attendance: "",   // 精算対象人数（Firestore: attendance）
   method: "rate",   // "fixed"=固定ギャラ / "rate"=一人目から歩合 / "chargeback"=人数条件バック
   ratePercent: "",  // 歩合％
   minGuarantee: "", // 最低保証
@@ -122,7 +126,7 @@ function buildSettlementMemo(settlement, artist) {
     }
     lines.push(`基本金額（一人目から歩合）：¥${c.amount.toLocaleString()}`);
   } else if (method === "chargeback") {
-    lines.push(`動員：${attendance}名`);
+    lines.push(`精算対象人数：${attendance}名`);
     const baseDisp = Number.isFinite(Number(artist.chargeBackBaseCount)) ? String(artist.chargeBackBaseCount) : "—";
     lines.push(`基準人数：${baseDisp}名を超えた分から`);
     lines.push(`対象人数：${c.chargeBackPeople}名`);
@@ -484,7 +488,10 @@ export default function SettlementModule({ events = [], navigateBack }) {
               {artistMethod === "rate" && (
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:".7rem",marginBottom:".75rem"}} className="hb-form-grid">
                   <Field label="入場料"><input type="number" style={S.inp} value={artist.charge} onChange={e=>updateArtist(idx,"charge",e.target.value)} placeholder="3000"/></Field>
-                  <Field label="動員数"><input type="number" style={S.inp} value={artist.attendance} onChange={e=>updateArtist(idx,"attendance",e.target.value)} placeholder="12"/></Field>
+                  <Field label="精算対象人数">
+                    <input type="number" style={S.inp} value={artist.attendance} onChange={e=>updateArtist(idx,"attendance",e.target.value)} placeholder="12"/>
+                    <div style={{ fontSize: ".62rem", color: "rgba(240,232,208,0.45)", marginTop: ".35rem", lineHeight: 1.45 }}>{SETTLEMENT_ATTENDANCE_HINT_TEXT}</div>
+                  </Field>
                   <Field label="売上合計（自動）"><input style={{...S.inp,color:"rgba(201,168,76,0.7)"}} value={`¥${c.sales.toLocaleString()}`} readOnly/></Field>
                   <Field label="歩合％"><input type="number" style={S.inp} value={artist.ratePercent} onChange={e=>updateArtist(idx,"ratePercent",e.target.value)} placeholder="50"/></Field>
                   <Field label="最低保証（任意）"><input type="number" style={S.inp} value={artist.minGuarantee} onChange={e=>updateArtist(idx,"minGuarantee",e.target.value)} placeholder="¥0なら未設定"/></Field>
@@ -493,14 +500,17 @@ export default function SettlementModule({ events = [], navigateBack }) {
 
               {artistMethod === "chargeback" && (
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:".7rem",marginBottom:".75rem"}} className="hb-form-grid">
-                  <Field label="動員数"><input type="number" style={S.inp} value={artist.attendance} onChange={e=>updateArtist(idx,"attendance",e.target.value)} placeholder="12"/></Field>
+                  <Field label="精算対象人数">
+                    <input type="number" style={S.inp} value={artist.attendance} onChange={e=>updateArtist(idx,"attendance",e.target.value)} placeholder="12"/>
+                    <div style={{ fontSize: ".62rem", color: "rgba(240,232,208,0.45)", marginTop: ".35rem", lineHeight: 1.45 }}>{SETTLEMENT_ATTENDANCE_HINT_TEXT}</div>
+                  </Field>
                   <Field label="基準人数（超えた分が対象）">
                     <input type="number" min={0} style={S.inp} value={artist.chargeBackBaseCount ?? ""} onChange={e=>updateArtist(idx,"chargeBackBaseCount",e.target.value)} placeholder="例：10"/>
                   </Field>
                   <Field label="1名あたり（円）">
                     <input type="number" min={0} style={S.inp} value={artist.chargeBackAmountPerPerson ?? ""} onChange={e=>updateArtist(idx,"chargeBackAmountPerPerson",e.target.value)} placeholder="例：1000"/>
                   </Field>
-                  <Field label="対象人数（自動）">
+                  <Field label="基準超過分（自動）">
                     <input style={{...S.inp,color:"rgba(201,168,76,0.7)"}} value={String(c.chargeBackPeople)} readOnly/>
                   </Field>
                 </div>
