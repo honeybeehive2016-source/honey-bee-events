@@ -103,6 +103,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   // 紐付きチェックモーダル
   const [showLinkCheck, setShowLinkCheck] = useState(false);
   const [linkCheckResult, setLinkCheckResult] = useState(null);
+  const [linkCheckExpand, setLinkCheckExpand] = useState(null); // "past" | "future" | null
 
   useEffect(() => {
     const TRASH_TTL = 30 * 24 * 60 * 60 * 1000;
@@ -688,10 +689,26 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
       if (!r.eventName || !r.date) return true;
       return !events.some(e => e.date === r.date && e.name === r.eventName);
     });
-    const unlinkedPast = unlinked.filter(r => r.date && r.date < todayLocal);
-    const unlinkedFuture = unlinked.filter(r => !r.date || r.date >= todayLocal);
-    setLinkCheckResult({ total: activeRes.length, unlinked, unlinkedPast: unlinkedPast.length, unlinkedFuture: unlinkedFuture.length });
+    const unlinkedPastList = unlinked.filter(r => r.date && r.date < todayLocal).sort((a,b)=>b.date.localeCompare(a.date));
+    const unlinkedFutureList = unlinked.filter(r => !r.date || r.date >= todayLocal).sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+    setLinkCheckResult({ total: activeRes.length, unlinked, unlinkedPastList, unlinkedFutureList });
+    setLinkCheckExpand(null);
     setShowLinkCheck(true);
+  };
+
+  const handleRelink = async (reservationId, newEventName) => {
+    const r = reservations.find(x => x._id === reservationId);
+    if (!r) return;
+    await setDoc(doc(db, "reservations", reservationId), { ...r, eventName: newEventName }, { merge: true });
+    // チェック結果をその場で更新
+    setLinkCheckResult(prev => {
+      if (!prev) return prev;
+      const patch = list => list.filter(x => x._id !== reservationId);
+      const newFuture = patch(prev.unlinkedFutureList);
+      const newPast = patch(prev.unlinkedPastList);
+      const newUnlinked = patch(prev.unlinked);
+      return { ...prev, unlinked: newUnlinked, unlinkedFutureList: newFuture, unlinkedPastList: newPast };
+    });
   };
 
   const printReservationList = () => {
@@ -1251,51 +1268,110 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
       {/* 紐付きチェックモーダル */}
       {showLinkCheck && linkCheckResult && (
         <div style={{position:"fixed",top:0,left:0,width:"100%",height:"100%",background:"rgba(0,0,0,0.85)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}} onClick={()=>setShowLinkCheck(false)}>
-          <div onClick={e=>e.stopPropagation()} style={{background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.27)",borderRadius:8,padding:"1.5rem",maxWidth:640,width:"100%",maxHeight:"85vh",overflowY:"auto"}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.27)",borderRadius:8,padding:"1.5rem",maxWidth:700,width:"100%",maxHeight:"90vh",overflowY:"auto"}}>
             <h3 style={{fontFamily:"Georgia,serif",color:"#c9a84c",margin:"0 0 1rem 0",fontSize:"1rem"}}>📊 イベントと予約の紐付き状況</h3>
             <div style={{fontSize:".82rem",color:"#f0e8d0",marginBottom:".75rem"}}>
               全予約 <strong>{linkCheckResult.total}</strong> 件 / うち紐付くイベントなし <strong style={{color: linkCheckResult.unlinked.length > 0 ? "#e24b4a" : "#7ec87e"}}>{linkCheckResult.unlinked.length}</strong> 件
             </div>
-            {linkCheckResult.unlinked.length > 0 && (
-              <div style={{display:"flex",gap:".6rem",marginBottom:"1rem",flexWrap:"wrap"}}>
-                <div style={{padding:".4rem .75rem",background:"rgba(120,120,120,0.12)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:4,fontSize:".75rem",color:"rgba(240,232,208,0.55)"}}>
-                  🕘 過去（修正不要）：<strong>{linkCheckResult.unlinkedPast}</strong> 件
-                </div>
-                <div style={{padding:".4rem .75rem",background: linkCheckResult.unlinkedFuture > 0 ? "rgba(226,75,74,0.12)" : "rgba(120,120,120,0.12)",border:`1px solid ${linkCheckResult.unlinkedFuture > 0 ? "rgba(226,75,74,0.4)" : "rgba(255,255,255,0.1)"}`,borderRadius:4,fontSize:".75rem",color: linkCheckResult.unlinkedFuture > 0 ? "#f4a261" : "rgba(240,232,208,0.55)"}}>
-                  📅 今日以降（要確認）：<strong>{linkCheckResult.unlinkedFuture}</strong> 件
-                </div>
-              </div>
-            )}
+
             {linkCheckResult.unlinked.length > 0 ? (
               <>
                 <div style={{padding:".6rem .8rem",background:"rgba(226,75,74,0.12)",border:"1px solid rgba(226,75,74,0.35)",borderRadius:4,fontSize:".75rem",color:"#f4a261",marginBottom:"1rem",lineHeight:1.6}}>
                   ⚠️ 紐付かない予約は、Today画面やレイアウト印刷でイベント名が正しく表示されません。<br/>
                   イベントのCSV再取り込み後、予約の「イベント名」が一致しているか確認・修正してください。
                 </div>
-                <table style={{width:"100%",borderCollapse:"collapse",fontSize:".75rem"}}>
-                  <thead>
-                    <tr style={{borderBottom:"1px solid rgba(201,168,76,0.2)"}}>
-                      <th style={{textAlign:"left",padding:".4rem .5rem",color:"rgba(201,168,76,0.7)",fontWeight:500}}>日付</th>
-                      <th style={{textAlign:"left",padding:".4rem .5rem",color:"rgba(201,168,76,0.7)",fontWeight:500}}>予約のイベント名</th>
-                      <th style={{textAlign:"left",padding:".4rem .5rem",color:"rgba(201,168,76,0.7)",fontWeight:500}}>予約者名</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {linkCheckResult.unlinked.map((r,i) => (
-                      <tr key={r._id||i} style={{borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
-                        <td style={{padding:".4rem .5rem",color:"#f0e8d0"}}>{r.date||"―"}</td>
-                        <td style={{padding:".4rem .5rem",color: r.eventName ? "#f4a261" : "rgba(240,232,208,0.35)"}}>{r.eventName||"（未設定）"}</td>
-                        <td style={{padding:".4rem .5rem",color:"#f0e8d0"}}>{r.customerName||"―"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+
+                {/* 内訳バッジ（クリックで展開） */}
+                <div style={{display:"flex",gap:".6rem",marginBottom:"1rem",flexWrap:"wrap"}}>
+                  {/* 過去バッジ */}
+                  <button
+                    onClick={()=>setLinkCheckExpand(p => p==="past" ? null : "past")}
+                    style={{padding:".4rem .75rem",background: linkCheckExpand==="past" ? "rgba(120,120,120,0.28)" : "rgba(120,120,120,0.12)",border:`1px solid ${linkCheckExpand==="past" ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.1)"}`,borderRadius:4,fontSize:".75rem",color:"rgba(240,232,208,0.65)",cursor:"pointer",fontFamily:"inherit"}}>
+                    🕘 過去（修正不要）：<strong>{linkCheckResult.unlinkedPastList.length}</strong> 件 {linkCheckExpand==="past" ? "▲" : "▼"}
+                  </button>
+                  {/* 今日以降バッジ */}
+                  <button
+                    onClick={()=>setLinkCheckExpand(p => p==="future" ? null : "future")}
+                    style={{padding:".4rem .75rem",background: linkCheckExpand==="future" ? "rgba(226,75,74,0.22)" : (linkCheckResult.unlinkedFutureList.length > 0 ? "rgba(226,75,74,0.12)" : "rgba(120,120,120,0.12)"),border:`1px solid ${linkCheckExpand==="future" ? "rgba(226,75,74,0.6)" : (linkCheckResult.unlinkedFutureList.length > 0 ? "rgba(226,75,74,0.4)" : "rgba(255,255,255,0.1)")}`,borderRadius:4,fontSize:".75rem",color: linkCheckResult.unlinkedFutureList.length > 0 ? "#f4a261" : "rgba(240,232,208,0.55)",cursor:"pointer",fontFamily:"inherit"}}>
+                    📅 今日以降（要確認）：<strong>{linkCheckResult.unlinkedFutureList.length}</strong> 件 {linkCheckExpand==="future" ? "▲" : "▼"}
+                  </button>
+                </div>
+
+                {/* 展開リスト：過去 */}
+                {linkCheckExpand === "past" && (
+                  <div style={{marginBottom:"1rem"}}>
+                    {linkCheckResult.unlinkedPastList.length === 0 ? (
+                      <div style={{fontSize:".75rem",color:"rgba(240,232,208,0.4)",padding:".5rem"}}>該当なし</div>
+                    ) : (
+                      <table style={{width:"100%",borderCollapse:"collapse",fontSize:".73rem"}}>
+                        <thead>
+                          <tr style={{borderBottom:"1px solid rgba(201,168,76,0.2)"}}>
+                            <th style={{textAlign:"left",padding:".35rem .5rem",color:"rgba(201,168,76,0.7)",fontWeight:500}}>日付</th>
+                            <th style={{textAlign:"left",padding:".35rem .5rem",color:"rgba(201,168,76,0.7)",fontWeight:500}}>予約のイベント名</th>
+                            <th style={{textAlign:"left",padding:".35rem .5rem",color:"rgba(201,168,76,0.7)",fontWeight:500}}>予約者名</th>
+                            <th style={{textAlign:"right",padding:".35rem .5rem",color:"rgba(201,168,76,0.7)",fontWeight:500}}>人数</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {linkCheckResult.unlinkedPastList.map((r,i) => (
+                            <tr key={r._id||i} style={{borderBottom:"1px solid rgba(255,255,255,0.04)"}}>
+                              <td style={{padding:".35rem .5rem",color:"rgba(240,232,208,0.6)"}}>{r.date||"―"}</td>
+                              <td style={{padding:".35rem .5rem",color:"rgba(244,162,97,0.7)"}}>{r.eventName||"（未設定）"}</td>
+                              <td style={{padding:".35rem .5rem",color:"rgba(240,232,208,0.7)"}}>{r.customerName||"―"}</td>
+                              <td style={{padding:".35rem .5rem",color:"rgba(240,232,208,0.6)",textAlign:"right"}}>{r.people||"―"}名</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                )}
+
+                {/* 展開リスト：今日以降（編集可） */}
+                {linkCheckExpand === "future" && (
+                  <div style={{marginBottom:"1rem",display:"flex",flexDirection:"column",gap:".6rem"}}>
+                    {linkCheckResult.unlinkedFutureList.length === 0 ? (
+                      <div style={{fontSize:".75rem",color:"#7ec87e",padding:".5rem"}}>✅ 今日以降の未紐付き予約はありません</div>
+                    ) : linkCheckResult.unlinkedFutureList.map((r,i) => {
+                      const candidates = events.filter(e => e.date === r.date && !e._deleted);
+                      return (
+                        <div key={r._id||i} style={{padding:".75rem",background:"#111",border:"1px solid rgba(226,75,74,0.2)",borderRadius:5}}>
+                          <div style={{display:"flex",gap:"1rem",flexWrap:"wrap",marginBottom:".5rem",fontSize:".75rem"}}>
+                            <span style={{color:"#c9a84c"}}>{r.date||"―"}</span>
+                            <span style={{color:"#f0e8d0"}}>{r.customerName||"―"}</span>
+                            <span style={{color:"rgba(240,232,208,0.55)"}}>{r.people||"―"}名</span>
+                          </div>
+                          <div style={{fontSize:".7rem",color:"#f4a261",marginBottom:".5rem"}}>
+                            予約のイベント名：<em>{r.eventName||"（未設定）"}</em>
+                          </div>
+                          {candidates.length === 0 ? (
+                            <div style={{fontSize:".7rem",color:"rgba(240,232,208,0.4)"}}>同じ日付にイベントマスタがありません</div>
+                          ) : (
+                            <div style={{display:"flex",flexDirection:"column",gap:".3rem"}}>
+                              {candidates.map((ev,j) => (
+                                <div key={ev._id||j} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:".5rem",padding:".35rem .5rem",background:"rgba(201,168,76,0.06)",borderRadius:3}}>
+                                  <span style={{fontSize:".72rem",color:"#f0e8d0"}}>🎵 {ev.name}</span>
+                                  <button
+                                    onClick={()=>handleRelink(r._id, ev.name)}
+                                    style={{...S.btn("sm"),padding:".25rem .6rem",fontSize:".65rem",whiteSpace:"nowrap"}}>
+                                    このイベントに紐付ける
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </>
             ) : (
               <div style={{padding:".75rem",background:"rgba(126,200,126,0.1)",border:"1px solid rgba(126,200,126,0.3)",borderRadius:4,fontSize:".8rem",color:"#7ec87e"}}>
                 ✅ すべての予約がイベントと正しく紐付いています。
               </div>
             )}
+
             <div style={{marginTop:"1.25rem",textAlign:"right"}}>
               <button style={S.btn("ghost")} onClick={()=>setShowLinkCheck(false)}>閉じる</button>
             </div>
