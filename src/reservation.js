@@ -77,6 +77,9 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   const [showImport, setShowImport] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
+  // 列マッピング手動選択画面用
+  const [colMappingPending, setColMappingPending] = useState(null); // { headers, preview, lines, map }
+
   const [allReservations, setAllReservations] = useState([]);
   const [layouts, setLayouts] = useState([]);
   const [dayLayoutMap, setDayLayoutMap] = useState({}); // dateKey -> layoutId
@@ -207,26 +210,23 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
     return cells.map(c => c.trim());
   };
 
-  // 日付を「2026/02/01」「2026-02-01」「2026年2月1日」など色々な形式から「2026-02-01」に変換
+  // 日付を「2026/02/01」「2026-02-01」「2026年2月1日」「5/1」「05月01日」など多様な形式から「2026-MM-DD」に変換
   const normalizeDate = (raw) => {
     if (!raw) return "";
     const s = String(raw).trim();
-    // 2026/02/01 / 2026-02-01 / 2026.02.01
-    let m = s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
-    if (m) {
-      const yy = m[1];
-      const mm = String(m[2]).padStart(2, "0");
-      const dd = String(m[3]).padStart(2, "0");
-      return `${yy}-${mm}-${dd}`;
-    }
+    const currentYear = new Date().getFullYear();
+    // 2026/02/01 / 2026-02-01 / 2026.02.01（先頭に時刻があっても可）
+    let m = s.match(/(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
+    if (m) return `${m[1]}-${String(m[2]).padStart(2,"0")}-${String(m[3]).padStart(2,"0")}`;
     // 2026年2月1日
-    m = s.match(/^(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日/);
-    if (m) {
-      const yy = m[1];
-      const mm = String(m[2]).padStart(2, "0");
-      const dd = String(m[3]).padStart(2, "0");
-      return `${yy}-${mm}-${dd}`;
-    }
+    m = s.match(/(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日/);
+    if (m) return `${m[1]}-${String(m[2]).padStart(2,"0")}-${String(m[3]).padStart(2,"0")}`;
+    // 05月01日 / 5月1日（年なし → 今年）
+    m = s.match(/^(\d{1,2})月\s*(\d{1,2})日/);
+    if (m) return `${currentYear}-${String(m[1]).padStart(2,"0")}-${String(m[2]).padStart(2,"0")}`;
+    // 5/1 / 05/01（年なし、スラッシュ区切り）
+    m = s.match(/^(\d{1,2})\/(\d{1,2})$/);
+    if (m) return `${currentYear}-${String(m[1]).padStart(2,"0")}-${String(m[2]).padStart(2,"0")}`;
     return s;
   };
 
@@ -239,89 +239,115 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
     return s;
   };
 
-  // CSVファイルを読み込んで予約として一括追加
+  // 列名マッチング辞書
+  const COL_KEYWORDS = {
+    date:      ["日付","日時","来店日","予約日","来店予定日","visit_date","date","Date","イベント日","開催日","鑑賞日","ご来店日","公演日"],
+    name:      ["お名前","氏名","名前","購入者名","購入者","name","Name","お客様名","お客さま名","ご予約者名","代表者名"],
+    people:    ["人数","枚数","参加人数","ご来店人数","人数(名)","qty","quantity","チケット枚数","ご人数","来場人数","count","Count"],
+    phone:     ["電話番号","電話","TEL","tel","phone","Phone","連絡先","携帯","携帯電話"],
+    email:     ["メールアドレス","メール","email","Email","mail","Mail","e-mail","E-mail"],
+    note:      ["備考","コメント","メッセージ","ご要望","備考欄","note","Note","memo","Memo","その他","ひとこと"],
+    event:     ["イベント名","イベント","ライブ名","ライブ","公演名","アーティスト","演目","公演"],
+    timestamp: ["タイムスタンプ","受付日時","申込日時","timestamp","Timestamp","購入日時","申込日","送信日時"],
+  };
+
+  const autoDetectCols = (header) => {
+    const find = (keys) => {
+      for (let i = 0; i < header.length; i++) {
+        const h = header[i].replace(/[\s　]/g, "").toLowerCase();
+        if (keys.some(k => h.includes(k.replace(/[\s　]/g, "").toLowerCase()))) return i;
+      }
+      return -1;
+    };
+    return {
+      date:      find(COL_KEYWORDS.date),
+      name:      find(COL_KEYWORDS.name),
+      people:    find(COL_KEYWORDS.people),
+      phone:     find(COL_KEYWORDS.phone),
+      email:     find(COL_KEYWORDS.email),
+      note:      find(COL_KEYWORDS.note),
+      event:     find(COL_KEYWORDS.event),
+      timestamp: find(COL_KEYWORDS.timestamp),
+    };
+  };
+
+  // マッピングを使って実際に取り込む（自動検出・手動共通）
+  const doImportWithMap = async (lines, map) => {
+    setImporting(true);
+    setColMappingPending(null);
+    let okCount = 0;
+    const errors = [];
+    for (let r = 1; r < lines.length; r++) {
+      if (!lines[r].trim()) continue;
+      const cells = parseCSVLine(lines[r]);
+      const customerName = map.name >= 0 ? (cells[map.name] || "").trim() : "";
+      const date = normalizeDate(map.date >= 0 ? (cells[map.date] || "") : "");
+      if (!customerName || !date) {
+        errors.push(`${r+1}行目：名前または日付がありません（スキップ）`);
+        continue;
+      }
+      const peopleRaw = map.people >= 0 ? (cells[map.people] || "").trim() : "1";
+      const peopleNum = parseInt(peopleRaw.replace(/[^\d]/g, ""), 10);
+      const reservationData = {
+        eventName:    map.event >= 0 ? (cells[map.event] || "").trim() : "",
+        date,
+        customerName,
+        people:       peopleNum > 0 ? peopleNum : 1,
+        phone:        map.phone >= 0 ? normalizePhone(cells[map.phone] || "") : "",
+        email:        map.email >= 0 ? (cells[map.email] || "").trim() : "",
+        note:         map.note >= 0 ? (cells[map.note] || "").trim() : "",
+        source:       "form",
+        sourceDetail: "CSVインポート",
+        staff:        "",
+        arrived:      false,
+        arrivedAt:    "",
+        seatNumber:   "",
+        createdAt:    Date.now() + r,
+        savedAt:      new Date().toLocaleString("ja-JP"),
+        importedAt:   new Date().toLocaleString("ja-JP"),
+      };
+      if (map.timestamp >= 0 && cells[map.timestamp]) {
+        const ts = new Date(cells[map.timestamp]);
+        if (!isNaN(ts.getTime())) reservationData.createdAt = ts.getTime();
+      }
+      try {
+        const id = `res_imp_${Date.now().toString(36)}_${r}`;
+        await setDoc(doc(db, "reservations", id), reservationData);
+        okCount++;
+      } catch (e) {
+        errors.push(`${r+1}行目：保存失敗（${e.message || e}）`);
+      }
+    }
+    setImportResult({ ok: okCount, errors });
+    setImporting(false);
+  };
+
+  // CSVファイルを読み込む（自動検出 → 必要なら手動マッピング画面へ）
   const handleImportCSV = async (file) => {
     if (!file) return;
     setImporting(true);
     setImportResult(null);
+    setColMappingPending(null);
     try {
       const text = await file.text();
       // BOM除去
       const clean = text.replace(/^\uFEFF/, "");
-      const lines = clean.split(/\r?\n/).filter(l => l.length > 0);
+      const lines = clean.split(/\r?\n/).filter(l => l.trim().length > 0);
       if (lines.length < 2) {
         setImportResult({ ok: 0, errors: ["データ行がありません"] });
         setImporting(false);
         return;
       }
       const header = parseCSVLine(lines[0]);
-      // Googleフォームの想定列を見つける（柔軟マッチ）
-      const findCol = (...keywords) => {
-        for (let i = 0; i < header.length; i++) {
-          const h = header[i];
-          if (keywords.some(k => h.includes(k))) return i;
-        }
-        return -1;
-      };
-      const idxEvent = findCol("イベント", "ライブ", "アーティスト");
-      const idxDate = findCol("日付", "日時");
-      const idxName = findCol("お名前", "氏名", "名前");
-      const idxPeople = findCol("人数", "枚数");
-      const idxPhone = findCol("電話");
-      const idxEmail = findCol("メール", "Email", "email");
-      const idxNote = findCol("備考", "コメント", "メッセージ");
-      const idxTimestamp = findCol("タイムスタンプ", "送信", "受付日時");
-
-      if (idxName < 0 || idxDate < 0) {
-        setImportResult({ ok: 0, errors: ["「お名前」または「日付」の列が見つかりません。CSVの1行目（見出し）を確認してください。"] });
+      const map = autoDetectCols(header);
+      if (map.date >= 0 && map.name >= 0) {
         setImporting(false);
+        await doImportWithMap(lines, map);
         return;
       }
-
-      let okCount = 0;
-      const errors = [];
-      for (let r = 1; r < lines.length; r++) {
-        const cells = parseCSVLine(lines[r]);
-        const customerName = (cells[idxName] || "").trim();
-        const date = normalizeDate(cells[idxDate] || "");
-        if (!customerName || !date) {
-          errors.push(`${r+1}行目：名前または日付がありません（スキップ）`);
-          continue;
-        }
-        const peopleRaw = idxPeople >= 0 ? (cells[idxPeople] || "").trim() : "1";
-        const peopleNum = parseInt(peopleRaw.replace(/[^\d]/g, ""), 10);
-        const reservationData = {
-          eventName: idxEvent >= 0 ? (cells[idxEvent] || "").trim() : "",
-          date,
-          customerName,
-          people: peopleNum > 0 ? peopleNum : 1,
-          phone: idxPhone >= 0 ? normalizePhone(cells[idxPhone] || "") : "",
-          email: idxEmail >= 0 ? (cells[idxEmail] || "").trim() : "",
-          note: idxNote >= 0 ? (cells[idxNote] || "").trim() : "",
-          source: "form",
-          sourceDetail: "Googleフォーム（CSVインポート）",
-          staff: "",
-          arrived: false,
-          arrivedAt: "",
-          seatNumber: "",
-          createdAt: Date.now() + r, // 重複しないように +r
-          savedAt: new Date().toLocaleString("ja-JP"),
-          importedAt: new Date().toLocaleString("ja-JP"),
-        };
-        // タイムスタンプ列があれば createdAt に反映
-        if (idxTimestamp >= 0 && cells[idxTimestamp]) {
-          const ts = new Date(cells[idxTimestamp]);
-          if (!isNaN(ts.getTime())) reservationData.createdAt = ts.getTime();
-        }
-        try {
-          const id = `res_imp_${Date.now().toString(36)}_${r}`;
-          await setDoc(doc(db, "reservations", id), reservationData);
-          okCount++;
-        } catch (e) {
-          errors.push(`${r+1}行目：保存失敗（${e.message || e}）`);
-        }
-      }
-      setImportResult({ ok: okCount, errors });
+      // 必須列が見つからない → 手動マッピング画面へ
+      const preview = lines.slice(1, 6).map(l => parseCSVLine(l));
+      setColMappingPending({ headers: header, preview, lines, map });
     } catch (e) {
       console.error("CSVインポートエラー:", e);
       setImportResult({ ok: 0, errors: [`読み込み失敗：${e.message || e}`] });
@@ -1218,28 +1244,22 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
             </div>
 
             <div style={{fontSize:".78rem",color:"rgba(240,232,208,0.75)",lineHeight:1.7,marginBottom:"1rem"}}>
-              Googleフォームの回答CSVを取り込みます。<br/>
-              対応列：<span style={{color:"rgba(201,168,76,0.85)"}}>タイムスタンプ・イベント・日付・お名前・人数・電話番号・メールアドレス・備考</span>
+              Googleフォーム・LivePocket・Peatix・TIGET・Excel書き出しなど各種CSVに対応。<br/>
+              列名を自動検出します。検出できない場合は手動で割り当てできます。
             </div>
 
             <div style={{padding:".75rem .9rem",background:"rgba(244,162,97,0.1)",border:"1px solid rgba(244,162,97,0.3)",borderRadius:5,fontSize:".72rem",color:"rgba(244,162,97,0.9)",marginBottom:"1rem",lineHeight:1.6}}>
-              ⚠️ 取り込みは <b>1件ずつそのまま追加</b> されます。CSVに重複がある場合は重複したまま登録されますのでご注意ください。<br/>
-              間違って取り込んだ場合は、ゴミ箱から削除できます。
+              ⚠️ 取り込みは <b>1件ずつそのまま追加</b> されます。重複がある場合は重複したまま登録されます。<br/>
+              間違って取り込んだ場合はゴミ箱から削除できます。
             </div>
 
-            {!importing && !importResult && (
+            {/* ファイル選択エリア */}
+            {!importing && !importResult && !colMappingPending && (
               <label style={{display:"block",padding:"1.25rem",border:"2px dashed rgba(201,168,76,0.4)",borderRadius:6,textAlign:"center",cursor:"pointer",background:"#080808"}}>
                 <div style={{fontSize:"1rem",color:"#c9a84c",marginBottom:".5rem"}}>📂 CSVファイルを選択</div>
                 <div style={{fontSize:".7rem",color:"rgba(240,232,208,0.5)"}}>クリックしてファイルを選んでください</div>
-                <input
-                  type="file"
-                  accept=".csv,text/csv"
-                  style={{display:"none"}}
-                  onChange={(e)=>{
-                    const f = e.target.files && e.target.files[0];
-                    if (f) handleImportCSV(f);
-                  }}
-                />
+                <input type="file" accept=".csv,text/csv" style={{display:"none"}}
+                  onChange={(e)=>{ const f = e.target.files && e.target.files[0]; if (f) handleImportCSV(f); }}/>
               </label>
             )}
 
@@ -1248,6 +1268,103 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                 ⏳ 取り込み中...しばらくお待ちください
               </div>
             )}
+
+            {/* 手動列マッピング画面 */}
+            {colMappingPending && !importing && !importResult && (()=>{
+              const FIELD_OPTS = [
+                {v:"date",  l:"📅 日付（必須）"},
+                {v:"name",  l:"👤 名前（必須）"},
+                {v:"people",l:"👥 人数"},
+                {v:"phone", l:"📞 電話番号"},
+                {v:"email", l:"📧 メール"},
+                {v:"note",  l:"📝 備考"},
+                {v:"event", l:"🎵 イベント名"},
+                {v:"timestamp",l:"🕐 タイムスタンプ"},
+                {v:"-1",    l:"（無視）"},
+              ];
+              const pending = colMappingPending;
+              const updateMap = (field, idx) => {
+                setColMappingPending(p => ({ ...p, map: { ...p.map, [field]: idx } }));
+              };
+              const missingRequired = pending.map.date < 0 || pending.map.name < 0;
+              return (
+                <div>
+                  <div style={{fontSize:".78rem",color:"#f4a261",marginBottom:".75rem",padding:".5rem .75rem",background:"rgba(244,162,97,0.1)",border:"1px solid rgba(244,162,97,0.3)",borderRadius:4}}>
+                    ⚠️ 列名を自動検出できませんでした。各列に何のデータが入っているかを指定してください。<br/>
+                    <span style={{color:"#e24b4a",fontWeight:600}}>「日付」と「名前」は必須です。</span>
+                  </div>
+
+                  {/* プレビューテーブル */}
+                  <div style={{overflowX:"auto",marginBottom:".75rem"}}>
+                    <table style={{borderCollapse:"collapse",fontSize:".68rem",minWidth:"100%"}}>
+                      <thead>
+                        <tr>
+                          {pending.headers.map((h,i)=>(
+                            <th key={i} style={{padding:".3rem .4rem",background:"#111",border:"1px solid rgba(201,168,76,0.15)",color:"#c9a84c",whiteSpace:"nowrap",fontWeight:500}}>
+                              {h||`列${i+1}`}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pending.preview.map((row,ri)=>(
+                          <tr key={ri}>
+                            {pending.headers.map((_,ci)=>(
+                              <td key={ci} style={{padding:".25rem .4rem",border:"1px solid rgba(255,255,255,0.05)",color:"rgba(240,232,208,0.7)",maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                                {row[ci]||""}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* 列ごとのドロップダウン */}
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:".5rem",marginBottom:"1rem"}}>
+                    {pending.headers.map((h,i)=>{
+                      const currentField = Object.entries(pending.map).find(([,v])=>v===i)?.[0] || "-1";
+                      return (
+                        <div key={i} style={{background:"#111",border:"1px solid rgba(255,255,255,0.06)",borderRadius:4,padding:".4rem .6rem"}}>
+                          <div style={{fontSize:".62rem",color:"rgba(201,168,76,0.7)",marginBottom:".2rem",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                            列{i+1}：{h||"（無題）"}
+                          </div>
+                          <select
+                            style={{...S.inp,padding:".25rem .4rem",fontSize:".72rem"}}
+                            value={currentField}
+                            onChange={e=>{
+                              const newField = e.target.value;
+                              // 同じフィールドが既に別の列に割り当てられていたらリセット
+                              const newMap = { ...pending.map };
+                              if (newField !== "-1") {
+                                Object.keys(newMap).forEach(k => { if (String(newMap[k]) === String(i) && k !== newField) newMap[k] = -1; });
+                                newMap[newField] = i;
+                              } else {
+                                Object.keys(newMap).forEach(k => { if (String(newMap[k]) === String(i)) newMap[k] = -1; });
+                              }
+                              setColMappingPending(p => ({ ...p, map: newMap }));
+                            }}
+                          >
+                            {FIELD_OPTS.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}
+                          </select>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div style={{display:"flex",gap:".5rem",justifyContent:"flex-end"}}>
+                    <button style={S.btn("ghost")} onClick={()=>setColMappingPending(null)}>← やり直す</button>
+                    <button
+                      style={{...S.btn("gold"), opacity: missingRequired ? 0.4 : 1}}
+                      disabled={missingRequired}
+                      onClick={()=>doImportWithMap(pending.lines, pending.map)}
+                    >
+                      {missingRequired ? "日付と名前の列を指定してください" : "▶ インポート開始"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
 
             {importResult && (
               <div>
@@ -1267,14 +1384,8 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                   )}
                 </div>
                 <div style={{display:"flex",gap:".5rem",justifyContent:"flex-end"}}>
-                  <button
-                    style={S.btn("ghost")}
-                    onClick={()=>{setImportResult(null);}}
-                  >もう一度インポート</button>
-                  <button
-                    style={S.btn("gold")}
-                    onClick={()=>{setShowImport(false);setImportResult(null);}}
-                  >閉じる</button>
+                  <button style={S.btn("ghost")} onClick={()=>{setImportResult(null);setColMappingPending(null);}}>もう一度インポート</button>
+                  <button style={S.btn("gold")} onClick={()=>{setShowImport(false);setImportResult(null);setColMappingPending(null);}}>閉じる</button>
                 </div>
               </div>
             )}
