@@ -1,6 +1,14 @@
 import { useState, useEffect } from "react";
-import { db } from "./firebase";
+import { db, storage } from "./firebase";
 import { collection, doc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
+
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+function sanitizeFileName(name) {
+  const base = String(name || "image").replace(/[/\\?%*:|"<>]/g, "_").replace(/^\.+/, "").trim();
+  return (base || "image").slice(0, 120);
+}
 
 export const KITCHEN_NOTE_CATEGORIES = [
   { key: "prep", label: "仕込みメモ" },
@@ -208,6 +216,7 @@ export default function KitchenNotesModule() {
   const [newKitchenImportant, setNewKitchenImportant] = useState(false);
   const [newKitchenNote, setNewKitchenNote] = useState("");
   const [newKitchenItem, setNewKitchenItem] = useState("");
+  const [uploadingNoteId, setUploadingNoteId] = useState(null);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "kitchenNotes"), (snap) => {
@@ -296,8 +305,80 @@ export default function KitchenNotesModule() {
     await setDoc(doc(db, "kitchenNotes", id), { ...patch, updatedAt: Date.now() }, { merge: true });
   };
 
+  const uploadPhotosForNote = async (noteId, fileList) => {
+    const files = fileList ? Array.from(fileList) : [];
+    if (files.length === 0) return;
+    const note = allKitchenNotes.find(x => x._id === noteId);
+    if (!note) return;
+    const toUpload = [];
+    for (const file of files) {
+      if (!file.type.startsWith("image/")) {
+        alert(`画像以外はアップロードできません: ${file.name}`);
+        continue;
+      }
+      if (file.size > MAX_IMAGE_BYTES) {
+        alert(`1枚あたり5MBまでです（${file.name}）`);
+        continue;
+      }
+      toUpload.push(file);
+    }
+    if (toUpload.length === 0) return;
+    setUploadingNoteId(noteId);
+    try {
+      const next = Array.isArray(note.attachments) ? [...note.attachments] : [];
+      for (const file of toUpload) {
+        const safe = sanitizeFileName(file.name);
+        const uniqueSafe = `${Math.random().toString(36).slice(2, 9)}_${safe}`;
+        const storagePath = `kitchenNotes/${noteId}/${Date.now()}_${uniqueSafe}`;
+        const storageRef = ref(storage, storagePath);
+        await uploadBytes(storageRef, file);
+        const downloadURL = await getDownloadURL(storageRef);
+        next.push({
+          storagePath,
+          downloadURL,
+          contentType: file.type || "application/octet-stream",
+          sizeBytes: file.size,
+          uploadedAt: Date.now(),
+        });
+      }
+      await setDoc(doc(db, "kitchenNotes", noteId), { attachments: next, updatedAt: Date.now() }, { merge: true });
+    } catch (e) {
+      alert("アップロードに失敗しました: " + (e.message || String(e)));
+    } finally {
+      setUploadingNoteId(null);
+    }
+  };
+
+  const removeAttachment = async (noteId, index) => {
+    const note = allKitchenNotes.find(x => x._id === noteId);
+    if (!note || !Array.isArray(note.attachments)) return;
+    const list = [...note.attachments];
+    if (index < 0 || index >= list.length) return;
+    const att = list[index];
+    if (!window.confirm("この写真を削除しますか？")) return;
+    try {
+      if (att.storagePath) {
+        await deleteObject(ref(storage, att.storagePath));
+      }
+    } catch (e) {
+      console.warn("Storage delete:", e);
+    }
+    list.splice(index, 1);
+    await setDoc(doc(db, "kitchenNotes", noteId), { attachments: list, updatedAt: Date.now() }, { merge: true });
+  };
+
   const removeKitchenNote = async (id) => {
     if (!window.confirm("この厨房共有を削除しますか？")) return;
+    const note = allKitchenNotes.find(x => x._id === id);
+    if (note?.attachments?.length) {
+      for (const a of note.attachments) {
+        try {
+          if (a.storagePath) await deleteObject(ref(storage, a.storagePath));
+        } catch (e) {
+          console.warn("Storage delete:", e);
+        }
+      }
+    }
     await deleteDoc(doc(db, "kitchenNotes", id));
   };
 
@@ -411,6 +492,81 @@ export default function KitchenNotesModule() {
                     </div>
                     <div style={{ fontSize:".84rem", color: nt === "item" && n.done ? "rgba(240,232,208,0.45)" : "rgba(240,232,208,0.88)", lineHeight:1.65, whiteSpace:"pre-wrap", wordBreak:"break-word", textDecoration: nt === "item" && n.done ? "line-through" : "none" }}>
                       {bodyText}
+                    </div>
+                    {Array.isArray(n.attachments) && n.attachments.length > 0 ? (
+                      <div style={{ display:"flex", flexWrap:"wrap", gap:".45rem", marginTop:".55rem" }}>
+                        {n.attachments.map((att, idx) => (
+                          <div
+                            key={att.storagePath || `${n._id}-att-${idx}`}
+                            style={{ position:"relative", width:88, height:88, flexShrink:0 }}
+                          >
+                            <a
+                              href={att.downloadURL}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="新しいタブで開く"
+                              style={{ display:"block", width:88, height:88, borderRadius:4, overflow:"hidden", border:`1px solid ${cv.border}` }}
+                            >
+                              <img
+                                src={att.downloadURL}
+                                alt=""
+                                style={{ width:"100%", height:"100%", objectFit:"cover", display:"block", pointerEvents:"none" }}
+                              />
+                            </a>
+                            <button
+                              type="button"
+                              aria-label="写真を削除"
+                              onClick={() => removeAttachment(n._id, idx)}
+                              style={{
+                                position:"absolute",
+                                top:2,
+                                right:2,
+                                width:22,
+                                height:22,
+                                padding:0,
+                                lineHeight:"20px",
+                                fontSize:".85rem",
+                                borderRadius:3,
+                                border:"1px solid rgba(226,75,74,0.5)",
+                                background:"rgba(10,10,10,0.85)",
+                                color:"#e24b4a",
+                                cursor:"pointer",
+                                fontFamily:"inherit",
+                              }}
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                    <div style={{ marginTop:".5rem", display:"flex", alignItems:"center", gap:".5rem", flexWrap:"wrap" }}>
+                      <label
+                        style={{
+                          ...S.btn("sm"),
+                          cursor: uploadingNoteId === n._id ? "wait" : "pointer",
+                          marginBottom:0,
+                          opacity: uploadingNoteId === n._id ? 0.65 : 1,
+                          pointerEvents: uploadingNoteId === n._id ? "none" : "auto",
+                        }}
+                      >
+                        写真を添付
+                        <input
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          disabled={uploadingNoteId === n._id}
+                          style={{ display:"none" }}
+                          onChange={e => {
+                            const fl = e.target.files;
+                            uploadPhotosForNote(n._id, fl);
+                            e.target.value = "";
+                          }}
+                        />
+                      </label>
+                      {uploadingNoteId === n._id ? (
+                        <span style={{ fontSize:".65rem", color:"rgba(126,200,127,0.85)", letterSpacing:".06em" }}>アップロード中...</span>
+                      ) : null}
                     </div>
                   </div>
                 );
