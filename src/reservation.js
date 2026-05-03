@@ -48,6 +48,42 @@ export const SOURCE_OPTIONS = [
 export const sourceIcon = (source) => SOURCE_OPTIONS.find(s => s.value === source)?.icon || "📞";
 export const sourceLabel = (source) => SOURCE_OPTIONS.find(s => s.value === source)?.label || source;
 
+const TARGET_ARTIST_NONE = "指定なし";
+function parseTargetArtistsFromPerf(perf) {
+  const p = String(perf || "").trim();
+  if (!p) return [];
+  if (!p.includes("/")) return [p];
+  return p.split("/").map(s => s.trim()).filter(Boolean);
+}
+function findEventByDateAndName(events, date, eventName) {
+  if (!date || !eventName) return null;
+  return events.find(e => e.date === date && e.name === eventName) || null;
+}
+function getTargetArtistOptions(event) {
+  const artists = parseTargetArtistsFromPerf(event?.perf || "");
+  if (artists.length > 1) return [TARGET_ARTIST_NONE, ...artists];
+  return artists;
+}
+function normalizeTargetArtist(value) {
+  const v = String(value || "").trim();
+  return v || TARGET_ARTIST_NONE;
+}
+function resolveTargetArtistValue(value, event) {
+  const options = getTargetArtistOptions(event);
+  if (options.length <= 1) return options[0] || TARGET_ARTIST_NONE;
+  const v = String(value || "").trim();
+  if (v && options.includes(v)) return v;
+  return TARGET_ARTIST_NONE;
+}
+function summarizeTargetArtistPeople(list) {
+  const m = {};
+  list.forEach(r => {
+    const key = normalizeTargetArtist(r.targetArtist);
+    m[key] = (m[key] || 0) + Number(r.people || 0);
+  });
+  return Object.entries(m).sort((a, b) => b[1] - a[1]);
+}
+
 const emptyReservation = {
   eventName: "",
   date: "",
@@ -59,6 +95,7 @@ const emptyReservation = {
   source: "phone",
   sourceDetail: "", // 「その他」の場合の詳細
   staff: "", // 受付担当者
+  targetArtist: TARGET_ARTIST_NONE, // ご予約アーティスト
   arrived: false,
   arrivedAt: "",
   seatNumber: "",
@@ -289,8 +326,10 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
       }
       const peopleRaw = map.people >= 0 ? (cells[map.people] || "").trim() : "1";
       const peopleNum = parseInt(peopleRaw.replace(/[^\d]/g, ""), 10);
+      const eventName = map.event >= 0 ? (cells[map.event] || "").trim() : "";
+      const linkedEvent = findEventByDateAndName(events, date, eventName);
       const reservationData = {
-        eventName:    map.event >= 0 ? (cells[map.event] || "").trim() : "",
+        eventName,
         date,
         customerName,
         people:       peopleNum > 0 ? peopleNum : 1,
@@ -300,6 +339,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
         source:       "form",
         sourceDetail: "CSVインポート",
         staff:        "",
+        targetArtist: resolveTargetArtistValue("", linkedEvent),
         arrived:      false,
         arrivedAt:    "",
         seatNumber:   "",
@@ -358,6 +398,17 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   };
 
   const setField = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const selectedFormEvent = findEventByDateAndName(events, form.date, form.eventName);
+  const formTargetArtistOptions = getTargetArtistOptions(selectedFormEvent);
+
+  useEffect(() => {
+    setForm(prev => {
+      const event = findEventByDateAndName(events, prev.date, prev.eventName);
+      const nextArtist = resolveTargetArtistValue(prev.targetArtist, event);
+      if (nextArtist === prev.targetArtist) return prev;
+      return { ...prev, targetArtist: nextArtist };
+    });
+  }, [events, form.date, form.eventName]);
 
   const startNew = () => {
     setForm({ ...emptyReservation, source: "phone", date: dateFilter || calSelectedDate || todayLocal });
@@ -381,6 +432,8 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
     try {
       const id = editingId || `res_${Date.now().toString(36)}`;
       const { _id, ...data } = form;
+      const linkedEvent = findEventByDateAndName(events, data.date, data.eventName);
+      data.targetArtist = resolveTargetArtistValue(data.targetArtist, linkedEvent);
       data.savedAt = new Date().toLocaleString("ja-JP");
       if (!data.createdAt) data.createdAt = Date.now();
       await setDoc(doc(db, "reservations", id), data);
@@ -481,8 +534,10 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
               const evs = events.filter(ev => ev.date === newDate);
               if (evs.length === 1) {
                 setField("eventName", evs[0].name);
+                setField("targetArtist", resolveTargetArtistValue(form.targetArtist, evs[0]));
               } else if (evs.length === 0) {
                 setField("eventName", "");
+                setField("targetArtist", TARGET_ARTIST_NONE);
               }
             }}/>
           </Field>
@@ -522,6 +577,21 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
               <input style={S.inp} value={form.eventName} onChange={e=>setField("eventName",e.target.value)} placeholder={candidateEvents.length===0?"日付を選んでください or 手動入力":"イベント名"}/>
             )}
           </Field>
+          {selectedFormEvent && formTargetArtistOptions.length > 1 ? (
+            <Field label="ご予約アーティスト" full>
+              <select style={S.inp} value={resolveTargetArtistValue(form.targetArtist, selectedFormEvent)} onChange={e=>setField("targetArtist",e.target.value)}>
+                {formTargetArtistOptions.map(a => (
+                  <option key={a} value={a}>{a}</option>
+                ))}
+              </select>
+            </Field>
+          ) : (
+            <Field label="ご予約アーティスト" full>
+              <div style={{...S.inp,color:"rgba(240,232,208,0.75)"}}>
+                {normalizeTargetArtist(resolveTargetArtistValue(form.targetArtist, selectedFormEvent))}
+              </div>
+            </Field>
+          )}
           <Field label="お名前" required>
             <input style={S.inp} value={form.customerName} onChange={e=>setField("customerName",e.target.value)} placeholder="例：山田太郎"/>
           </Field>
@@ -773,6 +843,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
         <td style="text-align:center;width:40px"><div style="display:inline-block;width:18px;height:18px;border:1.5px solid #555;border-radius:3px;background:${r.arrived?"#5a8eae":"#fff"};color:#fff;font-weight:700;line-height:18px;text-align:center;font-size:12px">${r.arrived?"✓":""}</div></td>
         <td>${r.customerName||""}</td>
         <td style="text-align:center">${r.people||""}名</td>
+        <td>${normalizeTargetArtist(r.targetArtist)}</td>
         <td>${r.phone||""}</td>
         <td>${sourceLabel(r.source)||""}</td>
         <td>${r.seatNumber||""}</td>
@@ -782,6 +853,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
     const sections = groups.map(g => {
       const totalP = g.reservations.reduce((s,r)=>s+Number(r.people||0),0);
       const arrivedC = g.reservations.filter(r=>r.arrived).length;
+      const artistSummary = summarizeTargetArtistPeople(g.reservations).map(([name, ppl]) => `${name} ${ppl}名`).join(" / ");
       const ev = g.event;
       const evMeta = ev ? `${ev.open?`開店 ${ev.open}`:""}${ev.open&&ev.start?" / ":""}${ev.start?`開演 ${ev.start}`:""}` : "";
       const noBookingBadge = ev && ev.noBooking ? `<span style="background:#e24b4a;color:#fff;padding:2px 8px;border-radius:3px;font-size:11px;margin-left:8px;font-weight:700">🚫 予約不可</span>` : "";
@@ -791,9 +863,10 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
           ${evMeta ? `<div class="section-meta">🕒 ${evMeta}</div>` : ""}
           ${ev && ev.notes ? `<div class="notes">⚠️ <b>スタッフへの注意事項</b><br/>${(ev.notes||"").replace(/[<>]/g,"").replace(/\n/g,"<br/>")}</div>` : ""}
           <div class="section-stat">${g.reservations.length}組 / 計${totalP}名 / 来店 ${arrivedC}/${g.reservations.length}</div>
+          ${artistSummary ? `<div class="section-meta">🎤 ご予約アーティスト別：${artistSummary}</div>` : ""}
           <table>
-            <thead><tr><th>受付</th><th>お名前</th><th>人数</th><th>電話</th><th>経路</th><th>席</th><th>備考</th></tr></thead>
-            <tbody>${renderRows(g.reservations)||'<tr><td colspan="7" style="text-align:center;color:#888;padding:14px">予約はありません</td></tr>'}</tbody>
+            <thead><tr><th>受付</th><th>お名前</th><th>人数</th><th>ご予約アーティスト</th><th>電話</th><th>経路</th><th>席</th><th>備考</th></tr></thead>
+            <tbody>${renderRows(g.reservations)||'<tr><td colspan="8" style="text-align:center;color:#888;padding:14px">予約はありません</td></tr>'}</tbody>
           </table>
         </div>`;
     }).join("");
@@ -1072,6 +1145,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                         <span style={{fontSize:".7rem"}}>{sourceIcon(r.source)}</span>
                         <span style={{fontFamily:"Georgia,serif",fontSize:".92rem"}}>{r.customerName||"（無名）"}</span>
                         <span style={{padding:".1rem .4rem",background:"rgba(201,168,76,0.13)",borderRadius:2,fontSize:".62rem",color:"#c9a84c"}}>{r.people}名</span>
+                        <span style={{padding:".1rem .4rem",background:"rgba(126,200,227,0.13)",borderRadius:2,fontSize:".62rem",color:"#7ec8e3"}}>🎤 {normalizeTargetArtist(r.targetArtist)}</span>
                         {r.seatNumber && <span style={{padding:".1rem .4rem",background:"rgba(126,200,227,0.13)",borderRadius:2,fontSize:".62rem",color:"#7ec8e3"}}>🪑 {r.seatNumber}</span>}
                       </div>
                       <div style={{fontSize:".66rem",color:"rgba(240,232,208,0.55)",display:"flex",gap:".7rem",flexWrap:"wrap"}}>
@@ -1089,6 +1163,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                 return groups.map((g, gi) => {
                   const totalP = g.reservations.reduce((s,r)=>s+Number(r.people||0),0);
                   const arrivedC = g.reservations.filter(r=>r.arrived).length;
+                  const artistSummary = summarizeTargetArtistPeople(g.reservations);
                   // 複数イベント時は、イベント名をキーに付けて席レイアウトを分ける
                   const eventScopedKey = (dayEvents.length > 1 && g.eventName)
                     ? `${calSelectedDate}::${g.eventName}`
@@ -1113,6 +1188,13 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                           （{g.reservations.length}組 / 計{totalP}名 / 来店 {arrivedC}/{g.reservations.length}）
                         </span>
                       </div>
+                      {artistSummary.length > 0 && (
+                        <div style={{fontSize:".66rem",color:"rgba(126,200,227,0.82)",marginBottom:".45rem",paddingLeft:dayEvents.length > 1 ? ".2rem" : 0}}>
+                          🎤 ご予約アーティスト別：
+                          {" "}
+                          {artistSummary.map(([name, ppl]) => `${name} ${ppl}名`).join(" / ")}
+                        </div>
+                      )}
                       {/* 複数イベント時のみ、各イベントに席レイアウト（折りたたみ式） */}
                       {dayEvents.length > 1 && g.event && (
                         <details style={{marginBottom:".75rem"}}>
@@ -1201,6 +1283,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                       <span style={{fontSize:".7rem"}}>{sourceIcon(r.source)}</span>
                       <span style={{fontFamily:"Georgia,serif",fontSize:".95rem"}}>{r.customerName||"（無名）"}</span>
                       <span style={{padding:".1rem .4rem",background:"rgba(201,168,76,0.13)",borderRadius:2,fontSize:".62rem",color:"#c9a84c"}}>{r.people}名</span>
+                      <span style={{padding:".1rem .4rem",background:"rgba(126,200,227,0.13)",borderRadius:2,fontSize:".62rem",color:"#7ec8e3"}}>🎤 {normalizeTargetArtist(r.targetArtist)}</span>
                       {r.seatNumber && <span style={{padding:".1rem .4rem",background:"rgba(126,200,227,0.13)",borderRadius:2,fontSize:".62rem",color:"#7ec8e3"}}>🪑 {r.seatNumber}</span>}
                       {r.staff && <span style={{padding:".1rem .4rem",background:"rgba(201,168,76,0.08)",borderRadius:2,fontSize:".58rem",color:"rgba(201,168,76,0.7)"}}>担当:{r.staff}</span>}
                     </div>
@@ -1548,6 +1631,7 @@ export function CustomerReservationForm({ events = [] }) {
   const [form, setForm] = useState({
     date: "",
     eventName: "",
+    targetArtist: TARGET_ARTIST_NONE,
     customerName: "",
     people: 1,
     phone: "",
@@ -1582,11 +1666,14 @@ export function CustomerReservationForm({ events = [] }) {
     const evs = eventsByDate[newDate] || [];
     if (evs.length === 1) {
       setField("eventName", evs[0].name);
+      setField("targetArtist", resolveTargetArtistValue(form.targetArtist, evs[0]));
     } else if (evs.length > 1) {
       // 複数あったら最初のイベントを自動選択（後で変更可能）
       setField("eventName", evs[0].name);
+      setField("targetArtist", resolveTargetArtistValue(form.targetArtist, evs[0]));
     } else {
       setField("eventName", "");
+      setField("targetArtist", TARGET_ARTIST_NONE);
     }
   };
 
@@ -1596,6 +1683,15 @@ export function CustomerReservationForm({ events = [] }) {
     const evs = eventsByDate[form.date] || [];
     return evs.find(e => e.name === form.eventName);
   })();
+  const targetArtistOptions = getTargetArtistOptions(selectedEvent);
+
+  useEffect(() => {
+    setForm(prev => {
+      const nextArtist = resolveTargetArtistValue(prev.targetArtist, selectedEvent);
+      if (nextArtist === prev.targetArtist) return prev;
+      return { ...prev, targetArtist: nextArtist };
+    });
+  }, [selectedEvent]);
 
   const submit = async () => {
     if (!form.date) { setError("日付を選択してください"); return; }
@@ -1604,6 +1700,10 @@ export function CustomerReservationForm({ events = [] }) {
     if (!form.people) { setError("人数を入力してください"); return; }
     if (!form.phone) { setError("電話番号を入力してください"); return; }
     if (!form.email) { setError("メールアドレスを入力してください"); return; }
+    if (targetArtistOptions.length > 1 && !String(form.targetArtist || "").trim()) {
+      setError("ご予約アーティストを選択してください");
+      return;
+    }
     setError("");
     setSubmitting(true);
     try {
@@ -1611,6 +1711,7 @@ export function CustomerReservationForm({ events = [] }) {
       const reservationData = {
         ...form,
         people: Number(form.people),
+        targetArtist: resolveTargetArtistValue(form.targetArtist, selectedEvent),
         source: "form",
         sourceDetail: "",
         staff: "",
@@ -1651,10 +1752,11 @@ export function CustomerReservationForm({ events = [] }) {
           <div style={{padding:"1rem",background:"#111",borderRadius:6,fontSize:".78rem",color:"rgba(240,232,208,0.7)",lineHeight:1.7,marginBottom:"1rem"}}>
             日付：{fmtDate(form.date)}<br/>
             イベント：{form.eventName}<br/>
+            ご予約アーティスト：{normalizeTargetArtist(form.targetArtist)}<br/>
             お名前：{form.customerName} 様<br/>
             人数：{form.people}名
           </div>
-          <button style={{padding:".7rem 1.5rem",background:"transparent",color:"#c9a84c",border:"1px solid rgba(201,168,76,0.27)",borderRadius:4,cursor:"pointer",fontFamily:"inherit",fontSize:".75rem",letterSpacing:".1em"}} onClick={()=>{setSubmitted(false);setForm({date:"",eventName:"",customerName:"",people:1,phone:"",email:"",note:""});}}>
+          <button style={{padding:".7rem 1.5rem",background:"transparent",color:"#c9a84c",border:"1px solid rgba(201,168,76,0.27)",borderRadius:4,cursor:"pointer",fontFamily:"inherit",fontSize:".75rem",letterSpacing:".1em"}} onClick={()=>{setSubmitted(false);setForm({date:"",eventName:"",targetArtist:TARGET_ARTIST_NONE,customerName:"",people:1,phone:"",email:"",note:""});}}>
             続けて予約する
           </button>
         </div>
@@ -1705,7 +1807,12 @@ export function CustomerReservationForm({ events = [] }) {
               </Field>
             ) : (
               <Field label="イベント" required>
-                <select style={S.inp} value={form.eventName} onChange={e=>setField("eventName",e.target.value)}>
+                <select style={S.inp} value={form.eventName} onChange={e=>{
+                  const newEventName = e.target.value;
+                  setField("eventName", newEventName);
+                  const chosen = (eventsByDate[form.date] || []).find(x => x.name === newEventName) || null;
+                  setField("targetArtist", resolveTargetArtistValue(form.targetArtist, chosen));
+                }}>
                   {eventsByDate[form.date].map((e,i)=>(
                     <option key={i} value={e.name}>{e.name}{e.start?` (${e.start}〜)`:""}</option>
                   ))}
@@ -1728,6 +1835,16 @@ export function CustomerReservationForm({ events = [] }) {
                 </div>
               )}
             </div>
+          )}
+
+          {selectedEvent && targetArtistOptions.length > 1 && (
+            <Field label="ご予約アーティスト" required>
+              <select style={S.inp} value={resolveTargetArtistValue(form.targetArtist, selectedEvent)} onChange={e=>setField("targetArtist", e.target.value)}>
+                {targetArtistOptions.map(a => (
+                  <option key={a} value={a}>{a}</option>
+                ))}
+              </select>
+            </Field>
           )}
 
           <Field label="お名前" required>
