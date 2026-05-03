@@ -16,7 +16,7 @@ export const RENTAL_STATUSES = [
 
 export const emptyRental = {
   inquiryDate: "", desiredDate: "", desiredTime: "",
-  purpose: "", people: "", budget: "",
+  purpose: "", people: "", budget: "", perPersonBudget: "",
   food: "", drinks: "", stage: false, sound: false, mic: false, projector: false,
   contactName: "", phone: "", email: "",
   customerCompany: "",
@@ -158,6 +158,13 @@ function formatAttachmentSizeBytes(bytes) {
   return `${(n / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+/** PDF を埋め込み表示するときの URL（ビューアのツールバー等を抑える試み。未対応ブラウザでは無視される場合あり） */
+function pdfEmbedViewerSrc(url) {
+  if (!url || url === "#") return url;
+  if (url.includes("#")) return url;
+  return `${url}#toolbar=0&navpanes=0`;
+}
+
 /** YYYY-MM-DD の利用日が有効か */
 function isValidDesiredDateYmd(s) {
   return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s.trim());
@@ -214,7 +221,6 @@ const attachmentOpenLinkStyle = {
 };
 
 function RentalAttachmentTile({ att, idx, readOnly, onRemove }) {
-  const [pdfPreviewOn, setPdfPreviewOn] = useState(false);
   const url = att.downloadURL || "#";
   const isImg = isImageAttachmentRecord(att);
   const isPdf = isPdfAttachmentRecord(att);
@@ -247,6 +253,7 @@ function RentalAttachmentTile({ att, idx, readOnly, onRemove }) {
         <div
           style={{
             height: 200,
+            flexShrink: 0,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -286,44 +293,60 @@ function RentalAttachmentTile({ att, idx, readOnly, onRemove }) {
   }
 
   if (isPdf) {
+    const pdfSrc = url !== "#" ? pdfEmbedViewerSrc(url) : url;
     return (
       <div style={wrapStyle}>
-        <div
-          style={{
-            padding: ".65rem .75rem",
-            background: "#121212",
-            borderRadius: 8,
-            border: "1px solid rgba(201,168,76,0.22)",
-            display: "flex",
-            flexDirection: "column",
-            gap: ".45rem",
-          }}
-        >
-          <div style={{ fontSize: ".85rem", color: "#f0e8d0", fontWeight: 600, wordBreak: "break-all", lineHeight: 1.35 }}>{att.originalName || "PDF"}</div>
-          <div style={{ fontSize: ".65rem", color: "rgba(240,232,208,0.5)" }}>PDF ・ {formatAttachmentSizeBytes(att.sizeBytes)}</div>
-          <a href={url} target="_blank" rel="noopener noreferrer" style={attachmentOpenLinkStyle}>
-            PDFを開く
-          </a>
-          {url !== "#" ? (
-            <button type="button" style={{ ...S.btn("sm"), fontSize: ".6rem", width: "100%", marginTop: ".15rem" }} onClick={() => setPdfPreviewOn((v) => !v)}>
-              {pdfPreviewOn ? "プレビューを閉じる" : "プレビューを表示"}
-            </button>
-          ) : null}
-          {pdfPreviewOn && url !== "#" ? (
-            <div
+        {url !== "#" ? (
+          <div
+            onWheel={(e) => e.preventDefault()}
+            style={{
+              height: 200,
+              borderRadius: 8,
+              overflow: "hidden",
+              border: "1px solid rgba(201,168,76,0.2)",
+              background: "#0a0a0a",
+              flexShrink: 0,
+              position: "relative",
+            }}
+          >
+            <iframe
+              title={att.originalName || "PDF"}
+              src={pdfSrc}
+              tabIndex={-1}
               style={{
-                marginTop: ".35rem",
-                height: 150,
-                borderRadius: 6,
-                overflow: "hidden",
-                border: "1px solid rgba(201,168,76,0.2)",
-                background: "#0a0a0a",
+                position: "absolute",
+                inset: 0,
+                width: "100%",
+                height: "100%",
+                border: "none",
+                display: "block",
+                pointerEvents: "none",
               }}
-            >
-              <iframe title={att.originalName || "PDF"} src={url} style={{ width: "100%", height: "100%", border: "none", display: "block" }} />
-            </div>
-          ) : null}
-        </div>
+            />
+          </div>
+        ) : (
+          <div
+            style={{
+              height: 200,
+              borderRadius: 8,
+              overflow: "hidden",
+              border: "1px dashed rgba(201,168,76,0.25)",
+              background: "#101010",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "rgba(240,232,208,0.35)",
+              fontSize: ".68rem",
+            }}
+          >
+            プレビュー不可
+          </div>
+        )}
+        <div style={{ fontSize: ".65rem", color: "rgba(240,232,208,0.55)", wordBreak: "break-all", lineHeight: 1.35 }}>{att.originalName || "PDF"}</div>
+        <div style={{ fontSize: ".6rem", color: "rgba(240,232,208,0.4)" }}>PDF ・ {formatAttachmentSizeBytes(att.sizeBytes)}</div>
+        <a href={url} target="_blank" rel="noopener noreferrer" style={attachmentOpenLinkStyle}>
+          PDFを開く
+        </a>
         {removeBtn}
       </div>
     );
@@ -447,6 +470,8 @@ function RentalListCard({ r, onOpenDetail, onOpenEdit, onTrash }) {
             <div style={{ fontSize: ".68rem", color: "rgba(240,232,208,0.48)", display: "flex", gap: ".75rem", flexWrap: "wrap", alignItems: "baseline" }}>
               {dated && <span style={{ fontWeight: 500, color: "rgba(240,232,208,0.55)" }}>{ymd.replace(/-/g, "/")}</span>}
               {r.people && <span>👥 {r.people}名</span>}
+              {(r.budget || "").trim() ? <span>💴 {r.budget}</span> : null}
+              {(r.perPersonBudget || "").trim() ? <span>👤💴 {r.perPersonBudget}</span> : null}
               {r.purpose && <span>📝 {r.purpose}</span>}
               {r.inquiryDate && <span style={{ opacity: 0.38, fontSize: ".6rem", letterSpacing: ".02em" }}>受付日 {r.inquiryDate}</span>}
             </div>
@@ -811,6 +836,7 @@ async function generateReplyAI(rental, apiKey, type) {
 人数：${rental.people || "未定"}名
 利用目的：${rental.purpose || "未記入"}
 予算：${rental.budget || "未記入"}
+一人当たり予算：${String(rental.perPersonBudget || "").trim() ? rental.perPersonBudget : "未記入"}
 ご希望オプション：${[rental.food && "料理", rental.drinks && "飲み放題", rental.stage && "ステージ", rental.sound && "音響", rental.mic && "マイク", rental.projector && "プロジェクター"].filter(Boolean).join("、") || "なし"}
 備考：${rental.memo || "なし"}
 
@@ -1081,6 +1107,8 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
           <DetailRow label="利用日" value={form.desiredDate || ""} />
           <DetailRow label="利用時間" value={form.desiredTime || ""} />
           <DetailRow label="人数" value={form.people ? `${form.people}名` : ""} />
+          <DetailRow label="予算" value={form.budget} />
+          <DetailRow label="一人当たり予算" value={form.perPersonBudget} />
           <DetailRow label="利用目的" value={form.purpose} />
           <DetailRow label="店舗担当者" value={form.staff || "未割当"} />
 
@@ -1160,6 +1188,7 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
               <Field label="利用時間"><input style={S.inp} value={form.desiredTime} onChange={e=>setField("desiredTime",e.target.value)} placeholder="例：18:00〜21:00"/></Field>
               <Field label="人数"><input type="number" style={S.inp} value={form.people} onChange={e=>setField("people",e.target.value)} placeholder="30"/></Field>
               <Field label="予算"><input style={S.inp} value={form.budget} onChange={e=>setField("budget",e.target.value)} placeholder="例：¥150,000"/></Field>
+              <Field label="一人当たり予算"><input style={S.inp} value={form.perPersonBudget || ""} onChange={(e) => setField("perPersonBudget", e.target.value)} placeholder="例：¥5,000"/></Field>
               <Field label="利用目的" full><input style={S.inp} value={form.purpose} onChange={e=>setField("purpose",e.target.value)} placeholder="例：歓送迎会・誕生日・発表会"/></Field>
             </div>
 
@@ -1582,7 +1611,7 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
               letterSpacing: ".06em",
             }}
           >
-            {showPastRentals ? "▼" : "▶"} 過去の貸切（{rentalsPast.length}件）
+            {showPastRentals ? "▼" : "▶"} 過去の貸切履歴（{rentalsPast.length}件）
           </button>
           {showPastRentals &&
             rentalsPast.map((r) => (
