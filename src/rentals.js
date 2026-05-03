@@ -990,7 +990,7 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
     if (initialOpenId && rentals.length > 0) {
       const target = rentals.find(r => r._id === initialOpenId);
       if (target) {
-        setForm({ ...emptyRental, ...target });
+        setForm({ ...emptyRental, ...target, rentalTitle: target.rentalTitle ?? "" });
         setEditingId(target._id);
         setAiReply("");
         setView("edit");
@@ -1006,6 +1006,7 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
     try {
       const id = editingId || `rental_${Date.now().toString(36)}`;
       const { _id, ...data } = form;
+      data.rentalTitle = String(data.rentalTitle ?? "").trim();
       data.savedAt = new Date().toLocaleDateString("ja-JP");
       if (!data.inquiryDate) data.inquiryDate = new Date().toISOString().split("T")[0];
       await setDoc(doc(db, "rentals", id), data);
@@ -1052,14 +1053,14 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
   };
 
   const startDetail = (r) => {
-    setForm({ ...emptyRental, ...r });
+    setForm({ ...emptyRental, ...r, rentalTitle: r.rentalTitle ?? "" });
     setEditingId(r._id);
     setAiReply("");
     setView("detail");
   };
 
   const startEdit = (r) => {
-    setForm({ ...emptyRental, ...r });
+    setForm({ ...emptyRental, ...r, rentalTitle: r.rentalTitle ?? "" });
     setEditingId(r._id);
     setAiReply("");
     setView("edit");
@@ -1229,7 +1230,7 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
             <div style={S.secTitle}>お客様情報</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:".7rem"}} className="hb-form-grid">
               <Field label="貸切タイトル" full>
-                <input style={S.inp} value={form.rentalTitle || ""} onChange={(e) => setField("rentalTitle", e.target.value)} placeholder="一覧・詳細に表示（空なら法人名・担当者名を使用）"/>
+                <input style={S.inp} value={form.rentalTitle ?? ""} onChange={(e) => setField("rentalTitle", e.target.value)} placeholder="一覧・詳細に表示（空なら法人名・担当者名を使用）"/>
               </Field>
               <Field label="担当者名" full><input style={S.inp} value={form.contactName} onChange={e=>setField("contactName",e.target.value)} placeholder="例：山田太郎"/></Field>
               <Field label="電話番号"><input style={S.inp} value={form.phone} onChange={e=>setField("phone",e.target.value)} placeholder="090-..."/></Field>
