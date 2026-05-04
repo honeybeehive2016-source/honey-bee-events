@@ -113,6 +113,18 @@ function summarizeTargetArtistPeople(list) {
   return Object.entries(m).sort((a, b) => b[1] - a[1]);
 }
 
+const SEAT_LAYOUT_LOCK_MESSAGE =
+  "このイベントは既に席配置済みの予約があるため、レイアウトを変更できません。変更が必要な場合は、先に席配置を解除してください。";
+
+/** スコープ内の予約で seatNumber に1件でも席があれば true（カンマ区切り対応） */
+function reservationsHaveAssignedSeats(list) {
+  if (!Array.isArray(list)) return false;
+  return list.some(r => {
+    const parts = String(r.seatNumber || "").split(",").map(s => s.trim()).filter(Boolean);
+    return parts.length > 0;
+  });
+}
+
 const emptyReservation = {
   eventName: "",
   date: "",
@@ -1139,6 +1151,8 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                       onLayoutChange={(id)=>setDayLayout(calSelectedDate, id)}
                       blockedSeats={dayBlockedMap[calSelectedDate] || []}
                       onToggleBlocked={(seatNumber)=>toggleDayBlockedSeat(calSelectedDate, seatNumber)}
+                      layoutLocked={reservationsHaveAssignedSeats(dayReservations)}
+                      layoutLockMessage={SEAT_LAYOUT_LOCK_MESSAGE}
                     />
                   </div>
                 </details>
@@ -1268,6 +1282,8 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                               onLayoutChange={(id)=>setDayLayout(eventScopedKey, id)}
                               blockedSeats={dayBlockedMap[eventScopedKey] || []}
                               onToggleBlocked={(seatNumber)=>toggleDayBlockedSeat(eventScopedKey, seatNumber)}
+                              layoutLocked={reservationsHaveAssignedSeats(g.reservations)}
+                              layoutLockMessage={SEAT_LAYOUT_LOCK_MESSAGE}
                             />
                           </div>
                         </details>

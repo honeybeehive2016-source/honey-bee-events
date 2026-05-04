@@ -574,7 +574,7 @@ export default function SeatLayoutModule({ navigateBack, reservations = [], onBa
 }
 
 // ===== 日別レイアウト表示（予約管理画面に埋め込み用） =====
-export function DayLayoutView({ reservations, dateKey, layouts, selectedLayoutId, onLayoutChange, blockedSeats = [], onToggleBlocked }) {
+export function DayLayoutView({ reservations, dateKey, layouts, selectedLayoutId, onLayoutChange, blockedSeats = [], onToggleBlocked, layoutLocked = false, layoutLockMessage = "" }) {
   const [internalSelectedId, setInternalSelectedId] = useState("");
   const [blockMode, setBlockMode] = useState(false); // 使用不可席を編集するモード
   const layoutId = selectedLayoutId || internalSelectedId;
@@ -606,9 +606,11 @@ export function DayLayoutView({ reservations, dateKey, layouts, selectedLayoutId
       <div style={{display:"flex",gap:".5rem",alignItems:"center",flexWrap:"wrap",marginBottom:".5rem"}}>
         <span style={{fontSize:".68rem",color:"rgba(201,168,76,0.6)",letterSpacing:".15em"}}>レイアウト：</span>
         <select
-          style={{...S.inp,maxWidth:240,padding:".4rem .6rem"}}
+          style={{...S.inp,maxWidth:240,padding:".4rem .6rem",opacity:layoutLocked?0.65:1}}
           value={layoutId}
+          disabled={!!layoutLocked}
           onChange={e=>{
+            if (layoutLocked) return;
             if (onLayoutChange) onLayoutChange(e.target.value);
             else setInternalSelectedId(e.target.value);
           }}
@@ -642,6 +644,21 @@ export function DayLayoutView({ reservations, dateKey, layouts, selectedLayoutId
           </span>
         )}
       </div>
+      {layoutLocked && layoutLockMessage && (
+        <div style={{
+          width: "100%",
+          marginBottom: ".55rem",
+          padding: ".45rem .6rem",
+          background: "rgba(244,162,97,0.08)",
+          border: "1px solid rgba(244,162,97,0.28)",
+          borderRadius: 4,
+          fontSize: ".65rem",
+          color: "#f4a261",
+          lineHeight: 1.5,
+        }}>
+          {layoutLockMessage}
+        </div>
+      )}
 
       {/* キャンバス */}
       <div style={{position:"relative",overflowX:"auto",background:"#0a0a0a",border:"1px solid rgba(201,168,76,0.15)",borderRadius:6,padding:"1rem"}} className="seat-layout-canvas">
