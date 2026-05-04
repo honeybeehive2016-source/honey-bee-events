@@ -1,7 +1,132 @@
-import { useState, useEffect } from "react";
-import { db } from "./firebase";
+import { useState, useEffect, useRef } from "react";
+import { db, storage } from "./firebase";
 import { collection, doc, setDoc, deleteDoc, onSnapshot, updateDoc } from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { getShiftForDate, getRoleColor, getRoleLabel, isManager } from "./shift";
+
+const MAX_HANDOVER_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+
+function sanitizeHandoverFileName(name) {
+  const base = String(name || "file").replace(/[/\\?%*:|"<>]/g, "_").replace(/^\.+/, "").trim();
+  return (base || "file").slice(0, 120);
+}
+
+function isAllowedHandoverMime(file) {
+  const t = (file.type || "").toLowerCase();
+  if (t === "application/pdf") return true;
+  if (t.startsWith("image/")) return true;
+  return false;
+}
+
+/** handovers/{handoverId}/attachments/{timestamp}_{index}_{safeFileName} */
+async function uploadHandoverAttachments(handoverId, fileList) {
+  const files = fileList ? Array.from(fileList) : [];
+  const attachments = [];
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    if (!isAllowedHandoverMime(file)) {
+      alert(`画像またはPDFのみアップロードできます: ${file.name}`);
+      continue;
+    }
+    if (file.size > MAX_HANDOVER_ATTACHMENT_BYTES) {
+      alert(`1ファイルあたり10MBまでです: ${file.name}`);
+      continue;
+    }
+    const safe = sanitizeHandoverFileName(file.name);
+    const storagePath = `handovers/${handoverId}/attachments/${Date.now()}_${i}_${safe}`;
+    const storageRef = ref(storage, storagePath);
+    await uploadBytes(storageRef, file);
+    const downloadURL = await getDownloadURL(storageRef);
+    attachments.push({
+      storagePath,
+      downloadURL,
+      originalName: file.name || safe,
+      contentType: file.type || "application/octet-stream",
+      sizeBytes: file.size,
+      uploadedAt: Date.now(),
+    });
+  }
+  return attachments;
+}
+
+function isHandoverImageAtt(att) {
+  return (att.contentType || "").toLowerCase().startsWith("image/");
+}
+
+function isHandoverPdfAtt(att) {
+  if ((att.contentType || "").toLowerCase() === "application/pdf") return true;
+  return String(att.originalName || "").toLowerCase().endsWith(".pdf");
+}
+
+function HandoverAttachmentsBlock({ attachments }) {
+  const list = Array.isArray(attachments) ? attachments : [];
+  if (list.length === 0) return null;
+  return (
+    <div style={{ marginTop: ".45rem", display: "flex", flexWrap: "wrap", gap: ".45rem", alignItems: "flex-start" }}>
+      {list.map((att, i) => {
+        const url = att.downloadURL || "";
+        const name = att.originalName || "file";
+        if (isHandoverImageAtt(att) && url) {
+          return (
+            <a key={i} href={url} target="_blank" rel="noreferrer" style={{ display: "block", lineHeight: 0 }}>
+              <img
+                src={url}
+                alt=""
+                style={{ maxWidth: 160, maxHeight: 130, borderRadius: 4, objectFit: "cover", border: "1px solid rgba(244,162,97,0.25)" }}
+              />
+            </a>
+          );
+        }
+        if (isHandoverPdfAtt(att)) {
+          return (
+            <div
+              key={i}
+              style={{
+                padding: ".45rem .55rem",
+                background: "rgba(226,75,74,0.06)",
+                border: "1px solid rgba(244,162,97,0.2)",
+                borderRadius: 4,
+                fontSize: ".68rem",
+                maxWidth: 220,
+              }}
+            >
+              <div style={{ color: "#f4a261", marginBottom: ".25rem" }}>📄 PDF</div>
+              <div style={{ color: "rgba(240,232,208,0.75)", wordBreak: "break-all", marginBottom: ".35rem", lineHeight: 1.35 }}>{name}</div>
+              {url && (
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{
+                    padding: ".2rem .45rem",
+                    borderRadius: 3,
+                    fontSize: ".58rem",
+                    letterSpacing: ".08em",
+                    textTransform: "uppercase",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    background: "transparent",
+                    color: "#c9a84c",
+                    border: "1px solid rgba(201,168,76,0.35)",
+                    textDecoration: "none",
+                    display: "inline-block",
+                  }}
+                >
+                  PDFを開く
+                </a>
+              )}
+            </div>
+          );
+        }
+        return url ? (
+          <a key={i} href={url} target="_blank" rel="noreferrer" style={{ fontSize: ".65rem", color: "#7ec8e3" }}>
+            {name}
+          </a>
+        ) : null;
+      })}
+    </div>
+  );
+}
 
 // 業務チェックリストのテンプレート
 const CHECKLIST_TEMPLATE = {
@@ -183,6 +308,11 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
   const [handoverDates, setHandoverDates] = useState([]); // multi
   const [handoverRangeStart, setHandoverRangeStart] = useState("");
   const [handoverRangeEnd, setHandoverRangeEnd] = useState("");
+  const [handoverUploading, setHandoverUploading] = useState(false);
+  const [pendingNoteFileCount, setPendingNoteFileCount] = useState(0);
+  const [pendingItemFileCount, setPendingItemFileCount] = useState(0);
+  const handoverNoteFileRef = useRef(null);
+  const handoverItemFileRef = useRef(null);
 
   // Firestore同期：daily + handovers
   useEffect(() => {
@@ -262,7 +392,10 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
 
   // 申し送り：個別項目追加（モードに応じて対象日を設定）
   const addHandoverItem = async () => {
-    if (!newHandoverItem.trim()) return;
+    const text = newHandoverItem.trim();
+    const files = handoverItemFileRef.current?.files;
+    const fileArr = files ? Array.from(files) : [];
+    if (!text && fileArr.length === 0) return;
     const targetDates = computeTargetDates();
     if (targetDates === null) return;
     if (targetDates.length === 0) {
@@ -270,20 +403,40 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
       return;
     }
     const id = `ho_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,6)}`;
-    await setDoc(doc(db, "handovers", id), {
+    let attachments = [];
+    if (fileArr.length > 0) {
+      setHandoverUploading(true);
+      try {
+        attachments = await uploadHandoverAttachments(id, fileArr);
+      } catch (e) {
+        alert("アップロードに失敗しました: " + (e.message || String(e)));
+        return;
+      } finally {
+        setHandoverUploading(false);
+      }
+    }
+    if (!text && attachments.length === 0) return;
+    const payload = {
       type: "item",
-      text: newHandoverItem.trim(),
+      text,
       done: false,
       sourceDate: selectedDate,
       targetDates,
       createdAt: Date.now(),
-    });
+    };
+    if (attachments.length > 0) payload.attachments = attachments;
+    await setDoc(doc(db, "handovers", id), payload);
     setNewHandoverItem("");
+    setPendingItemFileCount(0);
+    if (handoverItemFileRef.current) handoverItemFileRef.current.value = "";
   };
 
   // 申し送り：自由記述追加
   const addHandoverNote = async () => {
-    if (!newHandoverNote.trim()) return;
+    const text = newHandoverNote.trim();
+    const files = handoverNoteFileRef.current?.files;
+    const fileArr = files ? Array.from(files) : [];
+    if (!text && fileArr.length === 0) return;
     const targetDates = computeTargetDates();
     if (targetDates === null) return;
     if (targetDates.length === 0) {
@@ -291,19 +444,47 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
       return;
     }
     const id = `ho_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,6)}`;
-    await setDoc(doc(db, "handovers", id), {
+    let attachments = [];
+    if (fileArr.length > 0) {
+      setHandoverUploading(true);
+      try {
+        attachments = await uploadHandoverAttachments(id, fileArr);
+      } catch (e) {
+        alert("アップロードに失敗しました: " + (e.message || String(e)));
+        return;
+      } finally {
+        setHandoverUploading(false);
+      }
+    }
+    if (!text && attachments.length === 0) return;
+    const payload = {
       type: "note",
-      text: newHandoverNote.trim(),
+      text,
       sourceDate: selectedDate,
       targetDates,
       createdAt: Date.now(),
-    });
+    };
+    if (attachments.length > 0) payload.attachments = attachments;
+    await setDoc(doc(db, "handovers", id), payload);
     setNewHandoverNote("");
+    setPendingNoteFileCount(0);
+    if (handoverNoteFileRef.current) handoverNoteFileRef.current.value = "";
   };
 
   // 申し送り：削除
   const removeHandoverItem = async (id) => {
     if (!window.confirm("この申し送りを削除しますか？")) return;
+    const h = allHandovers.find(x => x._id === id);
+    if (h && Array.isArray(h.attachments)) {
+      for (const att of h.attachments) {
+        if (!att.storagePath) continue;
+        try {
+          await deleteObject(ref(storage, att.storagePath));
+        } catch (e) {
+          console.warn(e);
+        }
+      }
+    }
     await deleteDoc(doc(db, "handovers", id));
   };
 
@@ -539,8 +720,9 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                 {h.type === "note" && <span style={{color:"#f4a261",marginTop:"2px"}}>•</span>}
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontSize:".82rem",color:h.done?"rgba(126,200,127,0.6)":"rgba(240,232,208,0.85)",textDecoration:h.done?"line-through":"none",lineHeight:1.6,whiteSpace:"pre-wrap",wordBreak:"break-word"}}>
-                    {h.text}
+                    {h.text || ((Array.isArray(h.attachments) && h.attachments.length > 0) ? "（ファイル添付）" : "")}
                   </div>
+                  <HandoverAttachmentsBlock attachments={h.attachments} />
                   <div style={{fontSize:".58rem",color:"rgba(240,232,208,0.4)",marginTop:".15rem",letterSpacing:".05em"}}>
                     {fromLabel}
                     {(h.targetDates||[]).length > 1 && ` / 計${h.targetDates.length}日`}
@@ -937,26 +1119,64 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
       </div>
 
       {/* 自由記述欄 */}
-      <div style={{display:"flex",gap:".4rem",marginBottom:".5rem"}}>
-        <textarea
-          style={{...S.inp,resize:"vertical",lineHeight:1.6,minHeight:60,flex:1}}
-          value={newHandoverNote}
-          onChange={e=>setNewHandoverNote(e.target.value)}
-          placeholder="自由記述で送る（共有事項・特記など）"
+      <div style={{marginBottom:".5rem"}}>
+        <div style={{display:"flex",gap:".4rem",marginBottom:".35rem"}}>
+          <textarea
+            style={{...S.inp,resize:"vertical",lineHeight:1.6,minHeight:60,flex:1}}
+            value={newHandoverNote}
+            onChange={e=>setNewHandoverNote(e.target.value)}
+            placeholder="自由記述で送る（共有事項・特記など）"
+          />
+          <button style={{...S.btn("gold"),alignSelf:"flex-end"}} onClick={addHandoverNote} disabled={handoverUploading}>
+            {handoverUploading ? "アップロード中…" : "送信"}
+          </button>
+        </div>
+        <input
+          ref={handoverNoteFileRef}
+          type="file"
+          accept="image/*,application/pdf"
+          multiple
+          style={{ display: "none" }}
+          onChange={e => setPendingNoteFileCount(e.target.files?.length || 0)}
         />
-        <button style={{...S.btn("gold"),alignSelf:"flex-end"}} onClick={addHandoverNote}>送信</button>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: ".45rem", fontSize: ".62rem", color: "rgba(240,232,208,0.55)" }}>
+          <button type="button" style={{ ...S.btn("sm"), padding: ".25rem .55rem" }} onClick={() => handoverNoteFileRef.current?.click()} disabled={handoverUploading}>
+            写真・PDFを添付
+          </button>
+          {pendingNoteFileCount > 0 && <span>{pendingNoteFileCount}件選択中</span>}
+          {handoverUploading && <span style={{ color: "#f4a261" }}>アップロード中…</span>}
+        </div>
       </div>
 
       {/* 個別チェック項目 */}
-      <div style={{display:"flex",gap:".4rem",marginBottom:".75rem"}}>
+      <div style={{marginBottom:".75rem"}}>
+        <div style={{display:"flex",gap:".4rem",marginBottom:".35rem"}}>
+          <input
+            style={{...S.inp,flex:1}}
+            value={newHandoverItem}
+            onChange={e=>setNewHandoverItem(e.target.value)}
+            onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();addHandoverItem();}}}
+            placeholder="チェック項目で送る（例：ケーキ用意 / 冷蔵庫確認）"
+          />
+          <button style={S.btn("gold")} onClick={addHandoverItem} disabled={handoverUploading}>
+            {handoverUploading ? "アップロード中…" : "送信"}
+          </button>
+        </div>
         <input
-          style={{...S.inp,flex:1}}
-          value={newHandoverItem}
-          onChange={e=>setNewHandoverItem(e.target.value)}
-          onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();addHandoverItem();}}}
-          placeholder="チェック項目で送る（例：ケーキ用意 / 冷蔵庫確認）"
+          ref={handoverItemFileRef}
+          type="file"
+          accept="image/*,application/pdf"
+          multiple
+          style={{ display: "none" }}
+          onChange={e => setPendingItemFileCount(e.target.files?.length || 0)}
         />
-        <button style={S.btn("gold")} onClick={addHandoverItem}>送信</button>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: ".45rem", fontSize: ".62rem", color: "rgba(240,232,208,0.55)" }}>
+          <button type="button" style={{ ...S.btn("sm"), padding: ".25rem .55rem" }} onClick={() => handoverItemFileRef.current?.click()} disabled={handoverUploading}>
+            写真・PDFを添付
+          </button>
+          {pendingItemFileCount > 0 && <span>{pendingItemFileCount}件選択中</span>}
+          {handoverUploading && <span style={{ color: "#f4a261" }}>アップロード中…</span>}
+        </div>
       </div>
 
       {/* 自分が今日送った申し送り */}
@@ -964,12 +1184,15 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
         <div style={{marginBottom:"1rem"}}>
           <div style={{fontSize:".62rem",color:"rgba(201,168,76,0.5)",marginBottom:".4rem",letterSpacing:".1em"}}>📤 本日送信した申し送り（{outgoingHandovers.length}件）</div>
           {outgoingHandovers.map(h => (
-            <div key={h._id} style={{padding:".4rem .65rem",background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.08)",borderRadius:4,marginBottom:".25rem",display:"flex",alignItems:"center",gap:".5rem"}}>
+            <div key={h._id} style={{padding:".4rem .65rem",background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.08)",borderRadius:4,marginBottom:".25rem",display:"flex",alignItems:"flex-start",gap:".5rem"}}>
               <span style={{fontSize:".55rem",padding:".1rem .4rem",borderRadius:2,background:h.type==="item"?"rgba(126,200,127,0.13)":"rgba(126,200,227,0.13)",color:h.type==="item"?"#7ec87e":"#7ec8e3",letterSpacing:".05em"}}>
                 {h.type === "item" ? "☑" : "📝"}
               </span>
               <div style={{flex:1,minWidth:0}}>
-                <div style={{fontSize:".75rem",color:"rgba(240,232,208,0.7)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.text}</div>
+                <div style={{fontSize:".75rem",color:"rgba(240,232,208,0.7)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  {h.text || ((Array.isArray(h.attachments) && h.attachments.length > 0) ? "（ファイル添付）" : "")}
+                </div>
+                <HandoverAttachmentsBlock attachments={h.attachments} />
                 <div style={{fontSize:".58rem",color:"rgba(240,232,208,0.4)"}}>
                   {(h.targetDates||[]).length === 1 ? `→ ${h.targetDates[0]}` : `→ ${(h.targetDates||[]).length}日に送信`}
                 </div>
@@ -1003,9 +1226,13 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                 <div key={date} style={{padding:".75rem 1rem",background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.08)",borderRadius:5,marginBottom:".5rem"}}>
                   <div style={{fontSize:".68rem",color:"rgba(201,168,76,0.6)",marginBottom:".4rem",letterSpacing:".1em"}}>{fmtDate(date)} 発行</div>
                   {grouped[date].map(h => (
-                    <div key={h._id} style={{fontSize:".75rem",color:h.done?"rgba(126,200,127,0.5)":"rgba(240,232,208,0.7)",textDecoration:h.done&&h.type==="item"?"line-through":"none",paddingLeft:".5rem",marginBottom:".15rem"}}>
-                      {h.type === "item" ? (h.done?"✓":"☐") : "📝"} {h.text}
-                      <span style={{fontSize:".58rem",color:"rgba(240,232,208,0.35)",marginLeft:".5rem"}}>→ {(h.targetDates||[]).length}日</span>
+                    <div key={h._id} style={{paddingLeft:".5rem",marginBottom:".55rem"}}>
+                      <div style={{fontSize:".75rem",color:h.done?"rgba(126,200,127,0.5)":"rgba(240,232,208,0.7)",textDecoration:h.done&&h.type==="item"?"line-through":"none"}}>
+                        {h.type === "item" ? (h.done?"✓":"☐") : "📝"}{" "}
+                        {h.text || ((Array.isArray(h.attachments) && h.attachments.length > 0) ? "（ファイル添付）" : "")}
+                        <span style={{fontSize:".58rem",color:"rgba(240,232,208,0.35)",marginLeft:".5rem"}}>→ {(h.targetDates||[]).length}日</span>
+                      </div>
+                      <HandoverAttachmentsBlock attachments={h.attachments} />
                     </div>
                   ))}
                 </div>
