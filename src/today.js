@@ -9,35 +9,38 @@ const CHECKLIST_TEMPLATE = {
     label: "開店前",
     icon: "🌅",
     items: [
-      "店内清掃", "トイレ清掃", "客席テーブル拭き", "ステージ周り確認",
-      "マイク・PA電源確認", "受付準備", "釣銭確認", "予約リスト確認",
-      "メニュー表確認", "タブレット注文端末確認", "Wi-Fi確認", "ゴミ袋設置",
+      "店内床清掃",
+      "1Fエントランス清掃",
+      "1F看板準備",
+      "エレベーター内ポスター確認",
+      "トイレ清掃",
+      "客席テーブル拭き",
+      "受付準備",
+      "釣銭確認",
+      "予約リスト確認",
+      "欠品・おすすめ等確認",
+      "朝礼",
     ],
   },
   during: {
     label: "イベント中",
     icon: "🎵",
-    items: [
-      "受付状況確認", "ドリンク提供状況確認", "フード提供状況確認",
-      "客席状況確認", "出演者対応", "転換時間確認",
-      "物販スペース確認", "トイレ状態確認",
-    ],
+    items: ["来店状況確認", "トイレ状態確認"],
   },
   after: {
     label: "終演後",
     icon: "🌙",
     items: [
-      "出演者精算", "忘れ物確認", "ステージ片付け", "マイク・ケーブル回収",
-      "客席片付け", "テーブル清掃", "洗い物確認", "ゴミまとめ",
-      "レジ締め確認", "翌日イベント確認",
-    ],
-  },
-  close: {
-    label: "閉店",
-    icon: "🔒",
-    items: [
-      "火元確認", "フライヤー確認", "冷蔵庫確認", "エアコン確認",
-      "照明確認", "音響電源OFF", "入口施錠", "裏口施錠", "最終報告",
+      "客席片付け",
+      "忘れ物確認",
+      "テーブル清掃",
+      "洗い物確認",
+      "ステージ片付け",
+      "ゴミ出し",
+      "出演者精算",
+      "レジ締め",
+      "翌日イベント確認",
+      "申し送り",
     ],
   },
 };
@@ -404,11 +407,11 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
 
   // 警告判定
   const computeAlerts = () => {
-    // 当日 OR 「昨日の日付を朝5時前に見ている」場合（深夜の閉店業務確認）
+    // 当日 OR 「昨日の日付を朝5時前に見ている」場合（深夜の終演後チェック確認）
     const isViewingToday = selectedDate === today;
     const isViewingYesterdayInEarlyMorning = (() => {
       if (selectedDate >= today) return false;
-      // 昨日の日付を見ていて、現在時刻が朝5時前なら閉店警告だけ出す
+      // 昨日の日付を見ていて、現在時刻が朝5時前なら終演後警告だけ出す
       const nowMin = now.getHours() * 60 + now.getMinutes();
       if (nowMin >= 5 * 60) return false;
       // 1日だけ前か確認
@@ -447,20 +450,15 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
           if (undone.length > 0) alerts.push({ key: "prep", label: "開店前", undone, since: earliestOpen });
         }
       }
-      // 終演後：22:00 を過ぎても未完了
-      if (nowMin >= 22 * 60) {
-        const undone = collectUndone("after");
-        if (undone.length > 0) alerts.push({ key: "after", label: "終演後", undone, since: "22:00" });
-      }
-      // 閉店：23:00 以降に未完了をリマインド（実際の閉店は24:30）
+      // 終演後：23:00 を過ぎても未完了
       if (nowMin >= 23 * 60) {
-        const undone = collectUndone("close");
-        if (undone.length > 0) alerts.push({ key: "close", label: "閉店", undone, since: "23:00" });
+        const undone = collectUndone("after");
+        if (undone.length > 0) alerts.push({ key: "after", label: "終演後", undone, since: "23:00" });
       }
     } else if (isViewingYesterdayInEarlyMorning) {
-      // 深夜：昨日の閉店チェックの未完了のみ警告
-      const undone = collectUndone("close");
-      if (undone.length > 0) alerts.push({ key: "close", label: "閉店（前日）", undone, since: "閉店業務" });
+      // 深夜：昨日の終演後チェックの未完了のみ警告
+      const undone = collectUndone("after");
+      if (undone.length > 0) alerts.push({ key: "after", label: "終演後（前日）", undone, since: "23:00" });
     }
     return alerts;
   };
