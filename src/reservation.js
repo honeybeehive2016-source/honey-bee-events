@@ -589,6 +589,30 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
     });
   };
 
+  // arrivedCount / arrived / arrivedAt を「指定値」で更新する（カードの select 用）
+  const patchReservationArrival = async (id, nextArrivedCountRaw) => {
+    const target = allReservations.find(r => r._id === id) || reservations.find(r => r._id === id);
+    if (!target) return;
+
+    const people = getPeopleCount(target.people);
+    const nextArrivedCount = Math.min(people, Math.max(0, Math.floor(Number(nextArrivedCountRaw) || 0)));
+    const currentArrivedCount = getArrivedCount(target);
+    const nextArrived = nextArrivedCount > 0;
+
+    const isFirstArrive = currentArrivedCount === 0 && nextArrivedCount > 0;
+    const nextArrivedAt = nextArrived
+      ? (isFirstArrive ? new Date().toLocaleString("ja-JP") : (target.arrivedAt || ""))
+      : "";
+
+    const { _id, ...data } = target;
+    await setDoc(doc(db, "reservations", id), {
+      ...data,
+      arrivedCount: nextArrivedCount,
+      arrived: nextArrived,
+      arrivedAt: nextArrivedAt,
+    });
+  };
+
   // フィルター
   const today = todayLocal;
   const filtered = reservations.filter(r => {
@@ -1301,17 +1325,34 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                   const showArtistBadge = evForCard && isMultiArtistEvent(evForCard);
                   return (
                   <div key={r._id} style={{...S.card,padding:".7rem .9rem",marginBottom:".4rem",display:"grid",gridTemplateColumns:"auto 1fr auto",gap:".6rem",alignItems:"center",borderLeft:isArrivedReservation(r)?"3px solid #7ec87e":"3px solid rgba(244,162,97,0.3)"}}>
-                    <button onClick={()=>toggleArrived(r._id)} style={{
-                      padding:".35rem .55rem",
-                      background:isArrivedReservation(r)?"rgba(126,200,127,0.13)":"transparent",
-                      border:`1px solid ${isArrivedReservation(r)?"#7ec87e":"rgba(244,162,97,0.4)"}`,
-                      borderRadius:4,
-                      color:isArrivedReservation(r)?"#7ec87e":"#f4a261",
-                      cursor:"pointer",fontSize:".68rem",fontFamily:"inherit",
-                      minWidth:60,
-                    }}>
-                      {getPeopleCount(r.people) <= 1 ? (isArrivedReservation(r) ? "✓ 来店済" : "未来店") : `来店 ${getArrivedCount(r)}/${getPeopleCount(r.people)}名`}
-                    </button>
+                    {getPeopleCount(r.people) <= 1 ? (
+                      <button onClick={()=>toggleArrived(r._id)} style={{
+                        padding:".35rem .55rem",
+                        background:isArrivedReservation(r)?"rgba(126,200,127,0.13)":"transparent",
+                        border:`1px solid ${isArrivedReservation(r)?"#7ec87e":"rgba(244,162,97,0.4)"}`,
+                        borderRadius:4,
+                        color:isArrivedReservation(r)?"#7ec87e":"#f4a261",
+                        cursor:"pointer",fontSize:".68rem",fontFamily:"inherit",
+                        minWidth:60,
+                      }}>
+                        {isArrivedReservation(r) ? "✓ 来店済" : "未来店"}
+                      </button>
+                    ) : (
+                      <div style={{display:"flex",flexDirection:"column",gap:".25rem",minWidth:92}}>
+                        <div style={{fontSize:".6rem",color:"rgba(240,232,208,0.55)",letterSpacing:".02em"}}>
+                          来店 {getArrivedCount(r)}/{getPeopleCount(r.people)}名
+                        </div>
+                        <select
+                          style={{...S.inp,maxWidth:110,padding:".25rem .4rem",fontSize:".75rem"}}
+                          value={getArrivedCount(r)}
+                          onChange={(e)=>patchReservationArrival(r._id, e.target.value)}
+                        >
+                          {Array.from({ length: getPeopleCount(r.people) + 1 }, (_, n) => (
+                            <option key={n} value={n}>{n}名</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                     <div onClick={()=>startEdit(r)} style={{cursor:"pointer",minWidth:0}}>
                       <div style={{display:"flex",alignItems:"center",gap:".5rem",marginBottom:".15rem",flexWrap:"wrap"}}>
                         <span style={{fontSize:".7rem"}}>{sourceIcon(r.source)}</span>
@@ -1449,17 +1490,34 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
               const showListArtist = evList && isMultiArtistEvent(evList);
               return (
                 <div key={r._id} style={{...S.card,padding:".75rem 1rem",display:"grid",gridTemplateColumns:"auto 1fr auto",gap:".75rem",alignItems:"center",borderLeft:isArrivedReservation(r)?"3px solid #7ec87e":"3px solid rgba(244,162,97,0.3)"}}>
-                  <button onClick={()=>toggleArrived(r._id)} style={{
-                    padding:".4rem .55rem",
-                    background:isArrivedReservation(r)?"rgba(126,200,127,0.13)":"transparent",
-                    border:`1px solid ${isArrivedReservation(r)?"#7ec87e":"rgba(244,162,97,0.4)"}`,
-                    borderRadius:4,
-                    color:isArrivedReservation(r)?"#7ec87e":"#f4a261",
-                    cursor:"pointer",fontSize:".7rem",fontFamily:"inherit",
-                    minWidth:60,
-                  }}>
-                    {getPeopleCount(r.people) <= 1 ? (isArrivedReservation(r) ? "✓ 来店済" : "未来店") : `来店 ${getArrivedCount(r)}/${getPeopleCount(r.people)}名`}
-                  </button>
+                  {getPeopleCount(r.people) <= 1 ? (
+                    <button onClick={()=>toggleArrived(r._id)} style={{
+                      padding:".4rem .55rem",
+                      background:isArrivedReservation(r)?"rgba(126,200,127,0.13)":"transparent",
+                      border:`1px solid ${isArrivedReservation(r)?"#7ec87e":"rgba(244,162,97,0.4)"}`,
+                      borderRadius:4,
+                      color:isArrivedReservation(r)?"#7ec87e":"#f4a261",
+                      cursor:"pointer",fontSize:".7rem",fontFamily:"inherit",
+                      minWidth:60,
+                    }}>
+                      {isArrivedReservation(r) ? "✓ 来店済" : "未来店"}
+                    </button>
+                  ) : (
+                    <div style={{display:"flex",flexDirection:"column",gap:".25rem",minWidth:92}}>
+                      <div style={{fontSize:".6rem",color:"rgba(240,232,208,0.55)",letterSpacing:".02em"}}>
+                        来店 {getArrivedCount(r)}/{getPeopleCount(r.people)}名
+                      </div>
+                      <select
+                        style={{...S.inp,maxWidth:110,padding:".25rem .4rem",fontSize:".75rem"}}
+                        value={getArrivedCount(r)}
+                        onChange={(e)=>patchReservationArrival(r._id, e.target.value)}
+                      >
+                        {Array.from({ length: getPeopleCount(r.people) + 1 }, (_, n) => (
+                          <option key={n} value={n}>{n}名</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                   <div onClick={()=>startEdit(r)} style={{cursor:"pointer",minWidth:0}}>
                     <div style={{display:"flex",alignItems:"center",gap:".5rem",marginBottom:".2rem",flexWrap:"wrap"}}>
                       <span style={{fontSize:".7rem"}}>{sourceIcon(r.source)}</span>
