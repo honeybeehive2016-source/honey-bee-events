@@ -160,16 +160,8 @@ function buildSettlementMemo(settlement, artist) {
 // 注意：このパスワードはコード内に書かれており、技術的には突破可能です。
 // 一般スタッフが誤って過去履歴を見ないようにするための「軽い目隠し」として運用してください。
 const ARTIST_HISTORY_PASSWORD = "honeybee2002";
-const HISTORY_AUTH_KEY = "hb_artist_history_authed";
 // 「過去」の判定基準：今日から30日より前のイベントは履歴扱い
 const HISTORY_DAYS_AGO = 30;
-
-function isHistoryUnlockedInSession() {
-  try { return sessionStorage.getItem(HISTORY_AUTH_KEY) === "1"; } catch { return false; }
-}
-function unlockHistoryInSession() {
-  try { sessionStorage.setItem(HISTORY_AUTH_KEY, "1"); } catch {}
-}
 
 export default function SettlementModule({ events = [], navigateBack }) {
   const [settlements, setSettlements] = useState([]);
@@ -185,8 +177,8 @@ export default function SettlementModule({ events = [], navigateBack }) {
   const [showPwdModal, setShowPwdModal] = useState(false);
   const [pwdInput, setPwdInput] = useState("");
   const [pwdError, setPwdError] = useState("");
-  // 既にこのブラウザセッションで認証済みか
-  const [historyUnlocked, setHistoryUnlocked] = useState(() => isHistoryUnlockedInSession());
+  // 認証状態はこの画面インスタンス内の state のみで管理（リロードで再ロック）
+  const [historyUnlocked, setHistoryUnlocked] = useState(false);
 
   useEffect(() => {
     const TRASH_TTL = 30 * 24 * 60 * 60 * 1000;
@@ -375,7 +367,6 @@ export default function SettlementModule({ events = [], navigateBack }) {
   // パスワード送信
   const submitPassword = () => {
     if (pwdInput === ARTIST_HISTORY_PASSWORD) {
-      unlockHistoryInSession();
       setHistoryUnlocked(true);
       setShowPwdModal(false);
       setPwdInput("");
@@ -641,7 +632,7 @@ export default function SettlementModule({ events = [], navigateBack }) {
         <div style={{display:"flex",gap:".5rem",marginTop:"1.5rem",flexWrap:"wrap"}}>
           <button style={{...S.btn("gold"),flex:1,maxWidth:200}} onClick={handleSave}>💾 保存</button>
           {editingId
-            ? <button style={S.btn("ghost")} onClick={()=>setView("list")}>← 一覧に戻る</button>
+            ? <button style={S.btn("ghost")} onClick={goToList}>← 一覧に戻る</button>
             : <button style={S.btn("ghost")} onClick={startNew}>🔄 フォームをリセット</button>
           }
           {editingId && <button style={{...S.btn("danger"),marginLeft:"auto"}} onClick={async()=>{await handleDelete(editingId);goToList();}}>🗑 削除</button>}
