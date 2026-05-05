@@ -125,6 +125,42 @@ function reservationsHaveAssignedSeats(list) {
   });
 }
 
+function getPeopleCount(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 1;
+  return Math.floor(n);
+}
+
+function getArrivedCount(r) {
+  const people = getPeopleCount(r?.people);
+  const raw = Number(r?.arrivedCount);
+  if (Number.isFinite(raw) && raw >= 0) {
+    return Math.min(people, Math.max(0, Math.floor(raw)));
+  }
+  return r?.arrived ? people : 0;
+}
+
+function isArrivedReservation(r) {
+  return getArrivedCount(r) > 0;
+}
+
+function normalizeArrivedForSave(data) {
+  const people = getPeopleCount(data.people);
+  let arrivedCount = Number(data.arrivedCount);
+  if (!Number.isFinite(arrivedCount) || arrivedCount < 0) {
+    arrivedCount = data.arrived ? people : 0;
+  }
+  arrivedCount = Math.min(people, Math.max(0, Math.floor(arrivedCount)));
+  const arrived = arrivedCount > 0;
+  const arrivedAt = arrived ? (data.arrivedAt || new Date().toLocaleString("ja-JP")) : "";
+  return {
+    people,
+    arrivedCount,
+    arrived,
+    arrivedAt,
+  };
+}
+
 const emptyReservation = {
   eventName: "",
   date: "",
@@ -137,6 +173,7 @@ const emptyReservation = {
   sourceDetail: "", // 「その他」の場合の詳細
   staff: "", // 受付担当者
   targetArtist: TARGET_ARTIST_NONE, // ご予約アーティスト
+  arrivedCount: 0,
   arrived: false,
   arrivedAt: "",
   seatNumber: "",
@@ -381,6 +418,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
         sourceDetail: "CSVインポート",
         staff:        "",
         targetArtist: resolveTargetArtistValue("", linkedEvent),
+        arrivedCount: 0,
         arrived:      false,
         arrivedAt:    "",
         seatNumber:   "",
@@ -469,7 +507,16 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   };
 
   const startEdit = (r) => {
-    setForm({ ...emptyReservation, ...r });
+    const arrivedCount = getArrivedCount(r);
+    const arrived = arrivedCount > 0;
+    setForm({
+      ...emptyReservation,
+      ...r,
+      people: getPeopleCount(r.people),
+      arrivedCount,
+      arrived,
+      arrivedAt: arrived ? (r.arrivedAt || "") : "",
+    });
     setEditingId(r._id);
     // どのビューから編集に入ったかを覚える
     setReturnView(view);
@@ -484,6 +531,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
       const { _id, ...data } = form;
       const linkedEvent = findEventByDateAndName(events, data.date, data.eventName);
       data.targetArtist = resolveTargetArtistValue(data.targetArtist, linkedEvent);
+      Object.assign(data, normalizeArrivedForSave(data));
       data.savedAt = new Date().toLocaleString("ja-JP");
       if (!data.createdAt) data.createdAt = Date.now();
       await setDoc(doc(db, "reservations", id), data);
@@ -526,12 +574,18 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   const toggleArrived = async (id) => {
     const target = reservations.find(r => r._id === id);
     if (!target) return;
-    const newArrived = !target.arrived;
+    const people = getPeopleCount(target.people);
+    const currentArrivedCount = getArrivedCount(target);
+    const newArrivedCount = people <= 1
+      ? (currentArrivedCount > 0 ? 0 : 1)
+      : (currentArrivedCount > 0 ? 0 : people);
+    const newArrived = newArrivedCount > 0;
     const { _id, ...data } = target;
     await setDoc(doc(db, "reservations", id), {
       ...data,
+      arrivedCount: newArrivedCount,
       arrived: newArrived,
-      arrivedAt: newArrived ? new Date().toLocaleString("ja-JP") : "",
+      arrivedAt: newArrived ? (target.arrivedAt || new Date().toLocaleString("ja-JP")) : "",
     });
   };
 
@@ -567,6 +621,8 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
     // 選択日のイベント候補（貸切は電話予約の対象外）
     const candidateEvents = staffReservationEventsForDate(events, form.date);
     const staffBookingNotice = getStaffBookingStatusNotice(selectedFormEvent);
+    const formPeopleCount = getPeopleCount(form.people);
+    const formArrivedCount = getArrivedCount(form);
     return (
       <div style={{padding:"1.5rem 2rem",maxWidth:800,margin:"0 auto"}} className="hb-view">
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1rem",flexWrap:"wrap",gap:".5rem"}}>
@@ -646,7 +702,17 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
             <input style={S.inp} value={form.customerName} onChange={e=>setField("customerName",e.target.value)} placeholder="例：山田太郎"/>
           </Field>
           <Field label="人数" required>
-            <select style={S.inp} value={form.people} onChange={e=>setField("people",e.target.value)}>
+            <select style={S.inp} value={form.people} onChange={e=>{
+              const nextPeople = getPeopleCount(e.target.value);
+              const clampedArrivedCount = Math.min(formArrivedCount, nextPeople);
+              setForm(prev => ({
+                ...prev,
+                people: nextPeople,
+                arrivedCount: clampedArrivedCount,
+                arrived: clampedArrivedCount > 0,
+                arrivedAt: clampedArrivedCount > 0 ? (prev.arrivedAt || new Date().toLocaleString("ja-JP")) : "",
+              }));
+            }}>
               {[1,2,3,4,5,6,7,8,9,10,11,12,15,20].map(n=><option key={n} value={n}>{n}名</option>)}
             </select>
           </Field>
@@ -676,14 +742,53 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
             <textarea style={{...S.inp,resize:"vertical",lineHeight:1.5}} rows={3} value={form.note} onChange={e=>setField("note",e.target.value)} placeholder="席の希望・アレルギー対応など"/>
           </Field>
           <Field label="受付状況" full>
-            <label style={{display:"flex",alignItems:"center",gap:".5rem",cursor:"pointer",fontSize:".88rem",padding:".55rem 0",color:form.arrived?"#7ec87e":"rgba(240,232,208,0.55)"}}>
-              <input type="checkbox" checked={!!form.arrived} onChange={e=>{
-                setField("arrived",e.target.checked);
-                if(e.target.checked) setField("arrivedAt",new Date().toLocaleString("ja-JP"));
-                else setField("arrivedAt","");
-              }} style={{accentColor:"#7ec87e",width:20,height:20}}/>
-              {form.arrived?`✓ 来店済み（${form.arrivedAt}）`:"未来店"}
-            </label>
+            {formPeopleCount <= 1 ? (
+              <button
+                type="button"
+                onClick={() => {
+                  const nextCount = formArrivedCount > 0 ? 0 : 1;
+                  setForm(prev => ({
+                    ...prev,
+                    arrivedCount: nextCount,
+                    arrived: nextCount > 0,
+                    arrivedAt: nextCount > 0 ? (prev.arrivedAt || new Date().toLocaleString("ja-JP")) : "",
+                  }));
+                }}
+                style={{
+                  ...S.btn("ghost"),
+                  padding: ".45rem .8rem",
+                  fontSize: ".72rem",
+                  color: formArrivedCount > 0 ? "#7ec87e" : "rgba(240,232,208,0.75)",
+                  border: `1px solid ${formArrivedCount > 0 ? "rgba(126,200,127,0.55)" : "rgba(201,168,76,0.27)"}`,
+                }}
+              >
+                {formArrivedCount > 0 ? `✓ 来店済み（${form.arrivedAt || ""}）` : "未来店"}
+              </button>
+            ) : (
+              <div style={{display:"flex",alignItems:"center",gap:".5rem",flexWrap:"wrap",padding:".35rem 0"}}>
+                <span style={{fontSize:".78rem",color:"rgba(240,232,208,0.75)"}}>来店人数</span>
+                <select
+                  style={{...S.inp,maxWidth:130,padding:".35rem .55rem"}}
+                  value={formArrivedCount}
+                  onChange={e => {
+                    const nextCount = Math.min(formPeopleCount, Math.max(0, Number(e.target.value) || 0));
+                    setForm(prev => ({
+                      ...prev,
+                      arrivedCount: nextCount,
+                      arrived: nextCount > 0,
+                      arrivedAt: nextCount > 0 ? (prev.arrivedAt || new Date().toLocaleString("ja-JP")) : "",
+                    }));
+                  }}
+                >
+                  {Array.from({ length: formPeopleCount + 1 }, (_, n) => (
+                    <option key={n} value={n}>{n}名</option>
+                  ))}
+                </select>
+                <span style={{fontSize:".72rem",color:formArrivedCount>0?"#7ec87e":"rgba(240,232,208,0.5)"}}>
+                  来店 {formArrivedCount}/{formPeopleCount}名
+                </span>
+              </div>
+            )}
           </Field>
           {!editingId && form.email && form.source !== "phone" && (
             <Field label="📧 メール通知" full>
@@ -776,8 +881,9 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
     const seatHtml = (layout.seats||[]).map(s => {
       const r = seatStates[s.number];
       const isBlocked = (dayBlockedMap[calSelectedDate] || []).includes(s.number);
-      const fillColor = isBlocked ? "#dadada" : (r ? (r.arrived ? "#dbe9f4" : "#fde9d4") : "#ffffff");
-      const borderColor = isBlocked ? "#888" : (r ? (r.arrived ? "#5a8eae" : "#c47e3a") : "#888");
+      const isArrived = r ? isArrivedReservation(r) : false;
+      const fillColor = isBlocked ? "#dadada" : (r ? (isArrived ? "#dbe9f4" : "#fde9d4") : "#ffffff");
+      const borderColor = isBlocked ? "#888" : (r ? (isArrived ? "#5a8eae" : "#c47e3a") : "#888");
       const seatW = s.width || 50;
       const seatH = s.height || 50;
       // 名前の長さ・席幅から自動でフォントサイズを決定
@@ -890,7 +996,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
 
     const renderRows = (list, showArtist) => list.map(r => `
       <tr>
-        <td style="text-align:center;width:40px"><div style="display:inline-block;width:18px;height:18px;border:1.5px solid #555;border-radius:3px;background:${r.arrived?"#5a8eae":"#fff"};color:#fff;font-weight:700;line-height:18px;text-align:center;font-size:12px">${r.arrived?"✓":""}</div></td>
+        <td style="text-align:center;width:40px"><div style="display:inline-block;width:18px;height:18px;border:1.5px solid #555;border-radius:3px;background:${isArrivedReservation(r)?"#5a8eae":"#fff"};color:#fff;font-weight:700;line-height:18px;text-align:center;font-size:12px">${isArrivedReservation(r)?"✓":""}</div></td>
         <td>${r.customerName||""}</td>
         <td style="text-align:center">${r.people||""}名</td>
         ${showArtist ? `<td>${normalizeTargetArtist(r.targetArtist)}</td>` : ""}
@@ -902,7 +1008,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
 
     const sections = groups.map(g => {
       const totalP = g.reservations.reduce((s,r)=>s+Number(r.people||0),0);
-      const arrivedC = g.reservations.filter(r=>r.arrived).length;
+      const arrivedC = g.reservations.reduce((s, r) => s + getArrivedCount(r), 0);
       const showArtist = g.event && isMultiArtistEvent(g.event);
       const artistSummary = showArtist
         ? summarizeTargetArtistPeople(g.reservations).map(([name, ppl]) => `${name} ${ppl}名`).join(" / ")
@@ -916,7 +1022,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
           ${dayEvents.length > 1 || g.title ? `<div class="section-title">🎵 ${g.title || "（イベントなし）"}${noBookingBadge}</div>` : ""}
           ${evMeta ? `<div class="section-meta">🕒 ${evMeta}</div>` : ""}
           ${ev && ev.notes ? `<div class="notes">⚠️ <b>スタッフへの注意事項</b><br/>${(ev.notes||"").replace(/[<>]/g,"").replace(/\n/g,"<br/>")}</div>` : ""}
-          <div class="section-stat">${g.reservations.length}組 / 計${totalP}名 / 来店 ${arrivedC}/${g.reservations.length}</div>
+          <div class="section-stat">${g.reservations.length}組 / 計${totalP}名 / 来店 ${arrivedC}/${totalP}名</div>
           ${showArtist && artistSummary ? `<div class="section-meta">🎤 ご予約アーティスト別：${artistSummary}</div>` : ""}
           <table>
             <thead><tr><th>受付</th><th>お名前</th><th>人数</th>${showArtist ? "<th>ご予約アーティスト</th>" : ""}<th>電話</th><th>経路</th><th>席</th><th>備考</th></tr></thead>
@@ -940,7 +1046,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
       @media print{ body{padding:8px} .noprint{display:none} }
     </style></head><body>
       <h1>予約リスト：${dt.getFullYear()}年${dt.getMonth()+1}月${dt.getDate()}日（${dowJp}）</h1>
-      <div class="meta">${dayReservations.length}組 / 計${totalPeople}名 / 来店 ${dayReservations.filter(r=>r.arrived).length}/${dayReservations.length}</div>
+      <div class="meta">${dayReservations.length}組 / 計${totalPeople}名 / 来店 ${dayReservations.reduce((s, r) => s + getArrivedCount(r), 0)}/${totalPeople}名</div>
       ${sections}
       <div class="noprint" style="margin-top:16px;text-align:center"><button onclick="window.print()" style="padding:8px 24px">印刷</button></div>
     </body></html>`);
@@ -987,7 +1093,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
             {calMonthDays.map((cell, idx) => {
               if (!cell) return <div key={"e"+idx}/>;
               const total = cell.reservations.reduce((s,r)=>s+Number(r.people||0),0);
-              const arrived = cell.reservations.filter(r=>r.arrived).length;
+              const arrived = cell.reservations.reduce((s, r) => s + getArrivedCount(r), 0);
               const hasEvent = cell.events.length > 0;
               const isSelected = cell.date === calSelectedDate;
               const isToday = cell.date === today;
@@ -1025,7 +1131,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                   {cell.reservations.length > 0 && (
                     <div style={{fontSize:".55rem",color:"#f4a261",marginTop:"auto"}}>
                       📞 {cell.reservations.length}組 / {total}名
-                      {arrived>0 && <span style={{color:"#7ec87e",marginLeft:"3px"}}>(✓{arrived})</span>}
+                      {arrived>0 && <span style={{color:"#7ec87e",marginLeft:"3px"}}>(✓{arrived}名)</span>}
                     </div>
                   )}
                 </button>
@@ -1194,17 +1300,17 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                   const evForCard = findEventByDateAndName(events, calSelectedDate, r.eventName);
                   const showArtistBadge = evForCard && isMultiArtistEvent(evForCard);
                   return (
-                  <div key={r._id} style={{...S.card,padding:".7rem .9rem",marginBottom:".4rem",display:"grid",gridTemplateColumns:"auto 1fr auto",gap:".6rem",alignItems:"center",borderLeft:r.arrived?"3px solid #7ec87e":"3px solid rgba(244,162,97,0.3)"}}>
+                  <div key={r._id} style={{...S.card,padding:".7rem .9rem",marginBottom:".4rem",display:"grid",gridTemplateColumns:"auto 1fr auto",gap:".6rem",alignItems:"center",borderLeft:isArrivedReservation(r)?"3px solid #7ec87e":"3px solid rgba(244,162,97,0.3)"}}>
                     <button onClick={()=>toggleArrived(r._id)} style={{
                       padding:".35rem .55rem",
-                      background:r.arrived?"rgba(126,200,127,0.13)":"transparent",
-                      border:`1px solid ${r.arrived?"#7ec87e":"rgba(244,162,97,0.4)"}`,
+                      background:isArrivedReservation(r)?"rgba(126,200,127,0.13)":"transparent",
+                      border:`1px solid ${isArrivedReservation(r)?"#7ec87e":"rgba(244,162,97,0.4)"}`,
                       borderRadius:4,
-                      color:r.arrived?"#7ec87e":"#f4a261",
+                      color:isArrivedReservation(r)?"#7ec87e":"#f4a261",
                       cursor:"pointer",fontSize:".68rem",fontFamily:"inherit",
                       minWidth:60,
                     }}>
-                      {r.arrived?"✓ 来店済":"未来店"}
+                      {getPeopleCount(r.people) <= 1 ? (isArrivedReservation(r) ? "✓ 来店済" : "未来店") : `来店 ${getArrivedCount(r)}/${getPeopleCount(r.people)}名`}
                     </button>
                     <div onClick={()=>startEdit(r)} style={{cursor:"pointer",minWidth:0}}>
                       <div style={{display:"flex",alignItems:"center",gap:".5rem",marginBottom:".15rem",flexWrap:"wrap"}}>
@@ -1228,7 +1334,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
 
                 return groups.map((g, gi) => {
                   const totalP = g.reservations.reduce((s,r)=>s+Number(r.people||0),0);
-                  const arrivedC = g.reservations.filter(r=>r.arrived).length;
+                  const arrivedC = g.reservations.reduce((s,r)=>s+getArrivedCount(r),0);
                   const artistSummary = summarizeTargetArtistPeople(g.reservations);
                   const groupBookingNotice = getStaffBookingStatusNotice(g.event);
                   // 複数イベント時は、イベント名をキーに付けて席レイアウトを分ける
@@ -1252,7 +1358,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                           📞 {dayEvents.length > 1 && g.eventName ? `${g.eventName} の予約` : "予約リスト"}
                         </span>
                         <span style={{fontSize:".68rem",color:"rgba(201,168,76,0.65)"}}>
-                          （{g.reservations.length}組 / 計{totalP}名 / 来店 {arrivedC}/{g.reservations.length}）
+                          （{g.reservations.length}組 / 計{totalP}名 / 来店 {arrivedC}/{totalP}名）
                         </span>
                       </div>
                       {groupBookingNotice && (
@@ -1327,7 +1433,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
       ) : Object.keys(grouped).sort().map(date => {
         const dayReservations = grouped[date];
         const totalPeople = dayReservations.reduce((s,r)=>s+Number(r.people||0),0);
-        const arrivedCount = dayReservations.filter(r=>r.arrived).length;
+        const arrivedCount = dayReservations.reduce((s,r)=>s+getArrivedCount(r),0);
         return (
           <div key={date} style={{marginBottom:"1.25rem"}}>
             <div style={{display:"flex",alignItems:"center",gap:".75rem",marginBottom:".5rem",padding:".5rem 0",borderBottom:"1px solid rgba(201,168,76,0.15)"}}>
@@ -1335,24 +1441,24 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                 {fmtDate(date)}
               </span>
               <span style={{fontSize:".68rem",color:"rgba(240,232,208,0.55)"}}>
-                {dayReservations.length}組 / 計{totalPeople}名 / 来店 {arrivedCount}/{dayReservations.length}
+                {dayReservations.length}組 / 計{totalPeople}名 / 来店 {arrivedCount}/{totalPeople}名
               </span>
             </div>
             {dayReservations.map(r => {
               const evList = findEventByDateAndName(events, r.date, r.eventName);
               const showListArtist = evList && isMultiArtistEvent(evList);
               return (
-                <div key={r._id} style={{...S.card,padding:".75rem 1rem",display:"grid",gridTemplateColumns:"auto 1fr auto",gap:".75rem",alignItems:"center",borderLeft:r.arrived?"3px solid #7ec87e":"3px solid rgba(244,162,97,0.3)"}}>
+                <div key={r._id} style={{...S.card,padding:".75rem 1rem",display:"grid",gridTemplateColumns:"auto 1fr auto",gap:".75rem",alignItems:"center",borderLeft:isArrivedReservation(r)?"3px solid #7ec87e":"3px solid rgba(244,162,97,0.3)"}}>
                   <button onClick={()=>toggleArrived(r._id)} style={{
                     padding:".4rem .55rem",
-                    background:r.arrived?"rgba(126,200,127,0.13)":"transparent",
-                    border:`1px solid ${r.arrived?"#7ec87e":"rgba(244,162,97,0.4)"}`,
+                    background:isArrivedReservation(r)?"rgba(126,200,127,0.13)":"transparent",
+                    border:`1px solid ${isArrivedReservation(r)?"#7ec87e":"rgba(244,162,97,0.4)"}`,
                     borderRadius:4,
-                    color:r.arrived?"#7ec87e":"#f4a261",
+                    color:isArrivedReservation(r)?"#7ec87e":"#f4a261",
                     cursor:"pointer",fontSize:".7rem",fontFamily:"inherit",
                     minWidth:60,
                   }}>
-                    {r.arrived?"✓ 来店済":"未来店"}
+                    {getPeopleCount(r.people) <= 1 ? (isArrivedReservation(r) ? "✓ 来店済" : "未来店") : `来店 ${getArrivedCount(r)}/${getPeopleCount(r.people)}名`}
                   </button>
                   <div onClick={()=>startEdit(r)} style={{cursor:"pointer",minWidth:0}}>
                     <div style={{display:"flex",alignItems:"center",gap:".5rem",marginBottom:".2rem",flexWrap:"wrap"}}>
@@ -1791,6 +1897,7 @@ export function CustomerReservationForm({ events = [] }) {
         source: "form",
         sourceDetail: "",
         staff: "",
+        arrivedCount: 0,
         arrived: false,
         arrivedAt: "",
         seatNumber: "",

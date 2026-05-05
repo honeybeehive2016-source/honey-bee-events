@@ -1125,6 +1125,14 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
             style={{...S.inp,resize:"vertical",lineHeight:1.6,minHeight:60,flex:1}}
             value={newHandoverNote}
             onChange={e=>setNewHandoverNote(e.target.value)}
+            onKeyDown={e=>{
+              if (e.key !== "Enter") return;
+              if (e.nativeEvent?.isComposing || e.isComposing) return;
+              if (e.ctrlKey || e.metaKey) {
+                e.preventDefault();
+                addHandoverNote();
+              }
+            }}
             placeholder="自由記述で送る（共有事項・特記など）"
           />
           <button style={{...S.btn("gold"),alignSelf:"flex-end"}} onClick={addHandoverNote} disabled={handoverUploading}>
@@ -1155,7 +1163,12 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
             style={{...S.inp,flex:1}}
             value={newHandoverItem}
             onChange={e=>setNewHandoverItem(e.target.value)}
-            onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();addHandoverItem();}}}
+            onKeyDown={e=>{
+              if (e.key !== "Enter") return;
+              if (e.nativeEvent?.isComposing || e.isComposing) return;
+              e.preventDefault();
+              addHandoverItem();
+            }}
             placeholder="チェック項目で送る（例：ケーキ用意 / 冷蔵庫確認）"
           />
           <button style={S.btn("gold")} onClick={addHandoverItem} disabled={handoverUploading}>
