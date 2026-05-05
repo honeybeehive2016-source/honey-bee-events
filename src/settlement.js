@@ -275,7 +275,7 @@ export default function SettlementModule({ events = [], navigateBack }) {
       data.savedAt = new Date().toLocaleDateString("ja-JP");
       await setDoc(doc(db, "settlements", id), data);
       alert("✓ 保存しました");
-      if (editingId) { setView("list"); } else { startNew(); }
+      if (editingId) { goToList(); } else { startNew(); }
     } catch (e) { alert("保存失敗：" + e.message); }
   };
 
@@ -358,13 +358,17 @@ export default function SettlementModule({ events = [], navigateBack }) {
   const sorted = [...filtered].sort((a, b) => (b.eventDate || "").localeCompare(a.eventDate || ""));
 
   // 精算一覧へ遷移（パスワード認証済みなら即遷移、未認証ならモーダル表示）
+  const openPasswordModal = () => {
+    setPwdInput("");
+    setPwdError("");
+    setShowPwdModal(true);
+  };
+
   const goToList = () => {
     if (historyUnlocked) {
       setView("list");
     } else {
-      setPwdInput("");
-      setPwdError("");
-      setShowPwdModal(true);
+      openPasswordModal();
     }
   };
 
@@ -383,6 +387,36 @@ export default function SettlementModule({ events = [], navigateBack }) {
     }
   };
 
+  const passwordModal = showPwdModal && (
+    <div style={{position:"fixed",top:0,left:0,width:"100%",height:"100%",background:"rgba(0,0,0,0.88)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}} onClick={()=>setShowPwdModal(false)}>
+      <div onClick={e=>e.stopPropagation()} style={{background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.35)",borderRadius:8,padding:"1.75rem",maxWidth:420,width:"100%"}}>
+        <div style={{fontFamily:"Georgia,serif",fontSize:"1rem",color:"#c9a84c",letterSpacing:".15em",marginBottom:".75rem"}}>
+          🔒 精算一覧
+        </div>
+        <div style={{fontSize:".75rem",color:"rgba(240,232,208,0.7)",lineHeight:1.6,marginBottom:"1.25rem"}}>
+          精算一覧を表示するにはパスワードが必要です。<br/>
+          <span style={{fontSize:".68rem",color:"rgba(201,168,76,0.6)"}}>※一度認証すると、ブラウザを閉じるまで再入力は不要です</span>
+        </div>
+        <input
+          type="password"
+          autoFocus
+          value={pwdInput}
+          onChange={e=>{setPwdInput(e.target.value);setPwdError("");}}
+          onKeyDown={e=>{if(e.key==="Enter")submitPassword();}}
+          placeholder="パスワード"
+          style={{...S.inp,marginBottom:".5rem",fontSize:"1rem",padding:".7rem .9rem"}}
+        />
+        {pwdError && (
+          <div style={{fontSize:".72rem",color:"#ff8a89",marginBottom:".75rem"}}>{pwdError}</div>
+        )}
+        <div style={{display:"flex",gap:".5rem",justifyContent:"flex-end",marginTop:".75rem"}}>
+          <button style={S.btn("ghost")} onClick={()=>{setShowPwdModal(false);setPwdInput("");setPwdError("");}}>キャンセル</button>
+          <button style={S.btn("gold")} onClick={submitPassword}>確認</button>
+        </div>
+      </div>
+    </div>
+  );
+
   // ===== 編集画面 =====
   if (view === "edit") {
     return (
@@ -392,7 +426,7 @@ export default function SettlementModule({ events = [], navigateBack }) {
             💰 {editingId ? "精算編集" : "新規精算"}
           </h2>
           {editingId
-            ? <button style={S.btn("sm")} onClick={()=>setView("list")}>← 一覧に戻る</button>
+            ? <button style={S.btn("sm")} onClick={goToList}>← 一覧に戻る</button>
             : <button style={S.btn("sm")} onClick={goToList}>📂 過去の精算一覧を見る</button>
           }
         </div>
@@ -610,40 +644,34 @@ export default function SettlementModule({ events = [], navigateBack }) {
             ? <button style={S.btn("ghost")} onClick={()=>setView("list")}>← 一覧に戻る</button>
             : <button style={S.btn("ghost")} onClick={startNew}>🔄 フォームをリセット</button>
           }
-          {editingId && <button style={{...S.btn("danger"),marginLeft:"auto"}} onClick={async()=>{await handleDelete(editingId);setView("list");}}>🗑 削除</button>}
+          {editingId && <button style={{...S.btn("danger"),marginLeft:"auto"}} onClick={async()=>{await handleDelete(editingId);goToList();}}>🗑 削除</button>}
         </div>
-
-        {/* パスワードモーダル（編集画面からも開く） */}
-        {showPwdModal && (
-          <div style={{position:"fixed",top:0,left:0,width:"100%",height:"100%",background:"rgba(0,0,0,0.88)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}} onClick={()=>setShowPwdModal(false)}>
-            <div onClick={e=>e.stopPropagation()} style={{background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.35)",borderRadius:8,padding:"1.75rem",maxWidth:420,width:"100%"}}>
-              <div style={{fontFamily:"Georgia,serif",fontSize:"1rem",color:"#c9a84c",letterSpacing:".15em",marginBottom:".75rem"}}>🔒 精算一覧</div>
-              <div style={{fontSize:".75rem",color:"rgba(240,232,208,0.7)",lineHeight:1.6,marginBottom:"1.25rem"}}>
-                精算一覧を表示するにはパスワードが必要です。<br/>
-                <span style={{fontSize:".68rem",color:"rgba(201,168,76,0.6)"}}>※一度認証すると、ブラウザを閉じるまで再入力は不要です</span>
-              </div>
-              <input
-                type="password"
-                autoFocus
-                value={pwdInput}
-                onChange={e=>{setPwdInput(e.target.value);setPwdError("");}}
-                onKeyDown={e=>{if(e.key==="Enter")submitPassword();}}
-                placeholder="パスワード"
-                style={{...S.inp,marginBottom:".5rem",fontSize:"1rem",padding:".7rem .9rem"}}
-              />
-              {pwdError && <div style={{fontSize:".72rem",color:"#ff8a89",marginBottom:".75rem"}}>{pwdError}</div>}
-              <div style={{display:"flex",gap:".5rem",justifyContent:"flex-end",marginTop:".75rem"}}>
-                <button style={S.btn("ghost")} onClick={()=>{setShowPwdModal(false);setPwdInput("");setPwdError("");}}>キャンセル</button>
-                <button style={S.btn("gold")} onClick={submitPassword}>確認</button>
-              </div>
-            </div>
-          </div>
-        )}
+        {passwordModal}
       </div>
     );
   }
 
   // ===== 一覧画面 =====
+  if (!historyUnlocked) {
+    return (
+      <div style={{padding:"1.5rem 2rem",maxWidth:720,margin:"0 auto"}} className="hb-view">
+        <div style={{...S.card,padding:"1.5rem 1.6rem",textAlign:"center"}}>
+          <div style={{fontFamily:"Georgia,serif",fontSize:"1.05rem",color:"#c9a84c",letterSpacing:".12em",marginBottom:".7rem"}}>
+            🔒 過去の精算はロックされています
+          </div>
+          <div style={{fontSize:".86rem",color:"rgba(240,232,208,0.72)",lineHeight:1.65,marginBottom:"1.05rem"}}>
+            過去の精算一覧・詳細・履歴閲覧を表示するにはパスワード認証が必要です。
+          </div>
+          <div style={{display:"flex",gap:".6rem",justifyContent:"center",flexWrap:"wrap"}}>
+            <button style={S.btn("gold")} onClick={openPasswordModal}>パスワード入力</button>
+            <button style={S.btn("ghost")} onClick={startNew}>新規精算へ戻る</button>
+          </div>
+        </div>
+        {passwordModal}
+      </div>
+    );
+  }
+
   return (
     <div style={{padding:"1.5rem 2rem",maxWidth:1100,margin:"0 auto"}} className="hb-view">
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1.25rem",flexWrap:"wrap",gap:".5rem"}}>
@@ -695,36 +723,7 @@ export default function SettlementModule({ events = [], navigateBack }) {
         );
       })}
 
-      {/* パスワードモーダル（過去履歴を見るとき） */}
-      {showPwdModal && (
-        <div style={{position:"fixed",top:0,left:0,width:"100%",height:"100%",background:"rgba(0,0,0,0.88)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}} onClick={()=>setShowPwdModal(false)}>
-          <div onClick={e=>e.stopPropagation()} style={{background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.35)",borderRadius:8,padding:"1.75rem",maxWidth:420,width:"100%"}}>
-            <div style={{fontFamily:"Georgia,serif",fontSize:"1rem",color:"#c9a84c",letterSpacing:".15em",marginBottom:".75rem"}}>
-              🔒 精算一覧
-            </div>
-            <div style={{fontSize:".75rem",color:"rgba(240,232,208,0.7)",lineHeight:1.6,marginBottom:"1.25rem"}}>
-              精算一覧を表示するにはパスワードが必要です。<br/>
-              <span style={{fontSize:".68rem",color:"rgba(201,168,76,0.6)"}}>※一度認証すると、ブラウザを閉じるまで再入力は不要です</span>
-            </div>
-            <input
-              type="password"
-              autoFocus
-              value={pwdInput}
-              onChange={e=>{setPwdInput(e.target.value);setPwdError("");}}
-              onKeyDown={e=>{if(e.key==="Enter")submitPassword();}}
-              placeholder="パスワード"
-              style={{...S.inp,marginBottom:".5rem",fontSize:"1rem",padding:".7rem .9rem"}}
-            />
-            {pwdError && (
-              <div style={{fontSize:".72rem",color:"#ff8a89",marginBottom:".75rem"}}>{pwdError}</div>
-            )}
-            <div style={{display:"flex",gap:".5rem",justifyContent:"flex-end",marginTop:".75rem"}}>
-              <button style={S.btn("ghost")} onClick={()=>{setShowPwdModal(false);setPwdInput("");setPwdError("");}}>キャンセル</button>
-              <button style={S.btn("gold")} onClick={submitPassword}>確認</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {passwordModal}
 
       {/* ゴミ箱モーダル */}
       {showTrash && (
