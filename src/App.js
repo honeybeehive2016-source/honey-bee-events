@@ -242,20 +242,20 @@ const S={
   hdr:{background:"linear-gradient(180deg,#1a1400 0%,#0a0a0a 100%)",borderBottom:"1px solid rgba(201,168,76,0.27)",padding:"1.25rem 2rem",display:"flex",alignItems:"center",justifyContent:"space-between"},
   logo:{fontFamily:"Georgia,serif",fontSize:"1.5rem",fontWeight:700,color:"#c9a84c",letterSpacing:".15em"},
   logoSm:{color:"#f0e8d0",fontSize:".55em",letterSpacing:".3em",display:"block",fontWeight:300},
-  secTitle:{fontFamily:"Georgia,serif",fontSize:".7rem",letterSpacing:".25em",textTransform:"uppercase",color:"#c9a84c",borderBottom:"1px solid rgba(201,168,76,0.2)",paddingBottom:".5rem",marginBottom:".75rem"},
-  btn:(v)=>{const b={padding:".55rem 1.1rem",borderRadius:4,fontFamily:"inherit",fontSize:".72rem",fontWeight:500,letterSpacing:".12em",textTransform:"uppercase",cursor:"pointer",transition:"all .15s",border:"none"};if(v==="gold")return{...b,background:"#c9a84c",color:"#0a0a0a"};if(v==="ghost")return{...b,background:"transparent",color:"#c9a84c",border:"1px solid rgba(201,168,76,0.27)"};if(v==="danger")return{...b,background:"transparent",color:"#e24b4a",border:"1px solid rgba(226,75,74,0.27)"};if(v==="sm")return{...b,padding:".35rem .7rem",fontSize:".65rem",background:"transparent",color:"#c9a84c",border:"1px solid rgba(201,168,76,0.27)"};if(v==="ai")return{...b,background:"linear-gradient(135deg,#7c4dff,#c9a84c)",color:"#fff",padding:".4rem .9rem",fontSize:".65rem",letterSpacing:".08em"};return b;},
-  navTab:(a)=>({padding:".4rem 1rem",borderRadius:3,border:"1px solid "+(a?"#c9a84c":"rgba(201,168,76,0.2)"),background:a?"#c9a84c":"transparent",color:a?"#0a0a0a":"rgba(201,168,76,0.55)",fontSize:".7rem",letterSpacing:".12em",textTransform:"uppercase",cursor:"pointer",fontFamily:"inherit"}),
+  secTitle:{fontFamily:"Georgia,serif",fontSize:".78rem",letterSpacing:".24em",textTransform:"uppercase",color:"#c9a84c",borderBottom:"1px solid rgba(201,168,76,0.2)",paddingBottom:".55rem",marginBottom:".8rem"},
+  btn:(v)=>{const b={padding:".62rem 1.15rem",borderRadius:4,fontFamily:"inherit",fontSize:".82rem",fontWeight:500,letterSpacing:".1em",textTransform:"uppercase",cursor:"pointer",transition:"all .15s",border:"none"};if(v==="gold")return{...b,background:"#c9a84c",color:"#0a0a0a"};if(v==="ghost")return{...b,background:"transparent",color:"#c9a84c",border:"1px solid rgba(201,168,76,0.27)"};if(v==="danger")return{...b,background:"transparent",color:"#e24b4a",border:"1px solid rgba(226,75,74,0.27)"};if(v==="sm")return{...b,padding:".45rem .8rem",fontSize:".74rem",background:"transparent",color:"#c9a84c",border:"1px solid rgba(201,168,76,0.27)"};if(v==="ai")return{...b,background:"linear-gradient(135deg,#7c4dff,#c9a84c)",color:"#fff",padding:".5rem .95rem",fontSize:".74rem",letterSpacing:".08em"};return b;},
+  navTab:(a)=>({padding:".45rem 1.05rem",borderRadius:3,border:"1px solid "+(a?"#c9a84c":"rgba(201,168,76,0.2)"),background:a?"#c9a84c":"transparent",color:a?"#0a0a0a":"rgba(201,168,76,0.55)",fontSize:".78rem",letterSpacing:".1em",textTransform:"uppercase",cursor:"pointer",fontFamily:"inherit"}),
   card:(tpl)=>({background:"#111",border:"1px solid rgba(201,168,76,0.1)",borderLeft:tpl?"2px solid #c9a84c":undefined,borderRadius:6,padding:"1rem 1.25rem",marginBottom:".75rem",display:"grid",gridTemplateColumns:"1fr auto",gap:".75rem",alignItems:"center"}),
-  badge:{display:"inline-block",padding:".15rem .5rem",borderRadius:2,fontSize:".6rem",letterSpacing:".1em",textTransform:"uppercase",background:"rgba(201,168,76,0.13)",color:"#c9a84c",marginLeft:".5rem"},
+  badge:{display:"inline-block",padding:".18rem .55rem",borderRadius:2,fontSize:".68rem",letterSpacing:".1em",textTransform:"uppercase",background:"rgba(201,168,76,0.13)",color:"#c9a84c",marginLeft:".5rem"},
   fgrid:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:".75rem"},
-  lbl:{fontSize:".67rem",letterSpacing:".12em",textTransform:"uppercase",color:"rgba(201,168,76,0.6)",fontWeight:500,display:"block",marginBottom:".3rem"},
-  inp:{background:"#111",border:"1px solid rgba(201,168,76,0.14)",borderRadius:4,color:"#f0e8d0",fontFamily:"inherit",fontSize:".85rem",padding:".55rem .7rem",outline:"none",width:"100%"},
-  outTab:(a)=>({padding:".35rem .7rem",borderRadius:3,border:"1px solid "+(a?"#c9a84c":"rgba(201,168,76,0.2)"),background:a?"#c9a84c":"transparent",color:a?"#0a0a0a":"rgba(201,168,76,0.55)",fontSize:".65rem",letterSpacing:".1em",textTransform:"uppercase",cursor:"pointer",fontFamily:"inherit"}),
-  outTxt:{background:"#0f0f0f",border:"1px solid rgba(201,168,76,0.1)",borderRadius:6,padding:"1rem",fontSize:".82rem",lineHeight:1.75,color:"rgba(240,232,208,0.8)",whiteSpace:"pre-wrap",minHeight:160,position:"relative"},
-  cpyBtn:{position:"absolute",top:".6rem",right:".6rem",padding:".25rem .6rem",background:"rgba(201,168,76,0.13)",border:"1px solid rgba(201,168,76,0.27)",borderRadius:3,color:"#c9a84c",fontSize:".6rem",letterSpacing:".1em",textTransform:"uppercase",cursor:"pointer",fontFamily:"inherit"},
-  wixLbl:{fontSize:".65rem",letterSpacing:".15em",textTransform:"uppercase",color:"#7ec8e3",marginBottom:".4rem",display:"flex",alignItems:"center",justifyContent:"space-between"},
-  wixCpy:(done)=>({padding:".2rem .55rem",background:done?"rgba(126,200,227,0.25)":"rgba(126,200,227,0.1)",border:"1px solid rgba(126,200,227,0.3)",borderRadius:3,color:"#7ec8e3",fontSize:".6rem",cursor:"pointer",fontFamily:"inherit",letterSpacing:".08em"}),
-  wixTxt:{background:"#0a0f11",border:"1px solid rgba(126,200,227,0.12)",borderRadius:5,padding:".75rem 1rem",fontSize:".82rem",lineHeight:1.7,color:"rgba(240,232,208,0.75)",whiteSpace:"pre-wrap"},
+  lbl:{fontSize:".75rem",letterSpacing:".11em",textTransform:"uppercase",color:"rgba(201,168,76,0.6)",fontWeight:500,display:"block",marginBottom:".34rem"},
+  inp:{background:"#111",border:"1px solid rgba(201,168,76,0.14)",borderRadius:4,color:"#f0e8d0",fontFamily:"inherit",fontSize:".95rem",padding:".62rem .78rem",outline:"none",width:"100%"},
+  outTab:(a)=>({padding:".4rem .78rem",borderRadius:3,border:"1px solid "+(a?"#c9a84c":"rgba(201,168,76,0.2)"),background:a?"#c9a84c":"transparent",color:a?"#0a0a0a":"rgba(201,168,76,0.55)",fontSize:".74rem",letterSpacing:".1em",textTransform:"uppercase",cursor:"pointer",fontFamily:"inherit"}),
+  outTxt:{background:"#0f0f0f",border:"1px solid rgba(201,168,76,0.1)",borderRadius:6,padding:"1rem",fontSize:".9rem",lineHeight:1.75,color:"rgba(240,232,208,0.8)",whiteSpace:"pre-wrap",minHeight:160,position:"relative"},
+  cpyBtn:{position:"absolute",top:".6rem",right:".6rem",padding:".3rem .65rem",background:"rgba(201,168,76,0.13)",border:"1px solid rgba(201,168,76,0.27)",borderRadius:3,color:"#c9a84c",fontSize:".68rem",letterSpacing:".09em",textTransform:"uppercase",cursor:"pointer",fontFamily:"inherit"},
+  wixLbl:{fontSize:".74rem",letterSpacing:".13em",textTransform:"uppercase",color:"#7ec8e3",marginBottom:".45rem",display:"flex",alignItems:"center",justifyContent:"space-between"},
+  wixCpy:(done)=>({padding:".25rem .6rem",background:done?"rgba(126,200,227,0.25)":"rgba(126,200,227,0.1)",border:"1px solid rgba(126,200,227,0.3)",borderRadius:3,color:"#7ec8e3",fontSize:".68rem",cursor:"pointer",fontFamily:"inherit",letterSpacing:".08em"}),
+  wixTxt:{background:"#0a0f11",border:"1px solid rgba(126,200,227,0.12)",borderRadius:5,padding:".8rem 1rem",fontSize:".9rem",lineHeight:1.72,color:"rgba(240,232,208,0.75)",whiteSpace:"pre-wrap"},
 };
 
 function Field({label,children,full}){return(<div style={{gridColumn:full?"1/-1":undefined,display:"flex",flexDirection:"column"}}><label style={S.lbl}>{label}</label>{children}</div>);}
@@ -1351,6 +1351,23 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
       <style>{`
         html, body, #root { overflow-x: hidden; max-width: 100%; }
+        html { font-size: 17px; }
+        body { font-size: 1rem; line-height: 1.5; }
+        .hb-view { font-size: 1rem; }
+        .hb-view p, .hb-view li, .hb-view td, .hb-view th, .hb-view label, .hb-view span {
+          font-size: max(0.78rem, 13px);
+        }
+        .hb-view button {
+          min-height: 2.2rem;
+          font-size: 0.86rem;
+        }
+        .hb-view input, .hb-view select, .hb-view textarea {
+          min-height: 2.35rem;
+          font-size: 0.93rem !important;
+        }
+        .hb-view textarea {
+          min-height: 3.2rem;
+        }
         /* Date input カレンダーアイコンを明るく見やすく */
         input[type="date"]::-webkit-calendar-picker-indicator {
           filter: invert(0.7) sepia(1) saturate(3) hue-rotate(15deg) brightness(1.1);
@@ -1379,18 +1396,18 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
         }
         @media (max-width: 768px) {
           .hb-hdr { padding: 0.75rem 0.85rem !important; flex-wrap: wrap !important; gap: 0.4rem !important; }
-          .hb-logo { font-size: 1rem !important; }
+          .hb-logo { font-size: 1.08rem !important; }
           .hb-view { padding: 0.85rem 0.6rem !important; }
           .hb-form-layout { grid-template-columns: 1fr !important; gap: 1rem !important; }
           .hb-form-grid { grid-template-columns: 1fr !important; }
           .hb-output-panel { border-left: none !important; padding-left: 0 !important; border-top: 1px solid rgba(201,168,76,0.1); padding-top: 1rem !important; }
           .hb-cal-cell { min-height: 44px !important; padding: 0.15rem 0.1rem !important; }
-          .hb-cal-day-num { font-size: 0.6rem !important; }
-          .hb-cal-event { font-size: 0.45rem !important; padding: 0.08rem 0.15rem !important; line-height: 1.2 !important; }
+          .hb-cal-day-num { font-size: 0.72rem !important; }
+          .hb-cal-event { font-size: 0.62rem !important; padding: 0.14rem 0.2rem !important; line-height: 1.3 !important; }
           .hb-toolbar { flex-direction: column !important; align-items: stretch !important; }
           .hb-card { grid-template-columns: 1fr !important; }
           .hb-tabs { gap: 0.25rem !important; }
-          .hb-tab { font-size: 0.6rem !important; padding: 0.3rem 0.5rem !important; letter-spacing: 0.05em !important; }
+          .hb-tab { font-size: 0.74rem !important; padding: 0.36rem 0.55rem !important; letter-spacing: 0.05em !important; }
           input, textarea, select { font-size: 16px !important; }
           .hb-module-grid { grid-template-columns: 1fr !important; }
         }
