@@ -11,7 +11,6 @@ import ReservationModule, { CustomerReservationForm } from "./reservation";
 import SeatLayoutModule from "./seatLayout";
 import { BOOKING_STATUS_OPTIONS, effectiveBookingStatus } from "./eventBooking";
 import { getBusinessDate } from "./businessDate";
-import BusinessDateBadge from "./BusinessDateBadge";
 
 const DAYS = ["日","月","火","水","木","金","土"];
 const MONTH_NAMES = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
@@ -393,9 +392,6 @@ function CalendarView({events,rentals=[],onEdit,onEditRental}){
         </select>
         <button style={S.btn("sm")} onClick={next}>▶</button>
         {!isCurrentMonth&&<button style={{...S.btn("ghost"),padding:".3rem .7rem",fontSize:".62rem"}} onClick={goToday}>今月</button>}
-      </div>
-      <div style={{display:"flex",justifyContent:"center",marginBottom:".55rem"}}>
-        <BusinessDateBadge />
       </div>
       {/* 凡例 */}
       <div style={{display:"flex",justifyContent:"center",gap:".75rem",marginBottom:".5rem",fontSize:".58rem",color:"rgba(240,232,208,0.45)",flexWrap:"wrap"}}>

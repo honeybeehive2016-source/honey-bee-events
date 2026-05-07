@@ -6,7 +6,6 @@ import { sendReservationEmails } from "./email";
 import { SeatPicker, DayLayoutView, getDefaultLayout, sortLayouts } from "./seatLayout";
 import { isCustomerBookingStatusOpen, effectiveBookingStatus } from "./eventBooking";
 import { getBusinessDate } from "./businessDate";
-import BusinessDateBadge from "./BusinessDateBadge";
 
 const S = {
   card: { background:"#111", border:"1px solid rgba(201,168,76,0.1)", borderRadius:6, padding:"1rem 1.25rem", marginBottom:".75rem" },
@@ -1087,10 +1086,6 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
           <button style={S.btn("gold")} onClick={startNew}>＋ 電話予約を追加</button>
         </div>
       </div>
-      <div style={{marginBottom:".75rem"}}>
-        <BusinessDateBadge />
-      </div>
-
       {/* ビュー切替（カレンダー / リスト） */}
       <div style={{display:"flex",gap:".4rem",marginBottom:"1rem"}}>
         <button onClick={()=>setView("calendar")} style={{padding:".4rem .9rem",borderRadius:3,border:"1px solid "+(view==="calendar"?"#c9a84c":"rgba(201,168,76,0.2)"),background:view==="calendar"?"#c9a84c":"transparent",color:view==="calendar"?"#0a0a0a":"rgba(201,168,76,0.7)",fontSize:".7rem",cursor:"pointer",fontFamily:"inherit",letterSpacing:".05em"}}>📅 カレンダー</button>

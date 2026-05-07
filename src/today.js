@@ -4,7 +4,6 @@ import { collection, doc, setDoc, deleteDoc, onSnapshot, updateDoc } from "fireb
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { getShiftForDate, getRoleColor, getRoleLabel, isManager } from "./shift";
 import { getBusinessDate } from "./businessDate";
-import BusinessDateBadge from "./BusinessDateBadge";
 
 const MAX_HANDOVER_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
@@ -666,9 +665,6 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
               {isToday ? "（本日）" : selectedDate < today ? "（過去）" : "（未来）"}
             </span>
             {!isToday && <button type="button" style={{...S.btn("sm"),padding:".15rem .5rem",fontSize:".55rem",marginLeft:".5rem"}} onClick={goToday}>今日へ</button>}
-          </div>
-          <div style={{marginTop:".35rem"}}>
-            <BusinessDateBadge />
           </div>
         </div>
         <button type="button" onClick={nextDay} style={{...S.btn("sm"),padding:".4rem .7rem"}}>▶</button>

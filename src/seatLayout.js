@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from "react";
 import { db } from "./firebase";
 import { collection, doc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
 import { getBusinessDate } from "./businessDate";
-import BusinessDateBadge from "./BusinessDateBadge";
 
 const S = {
   card: { background:"#111", border:"1px solid rgba(201,168,76,0.1)", borderRadius:6, padding:"1rem 1.25rem", marginBottom:".75rem" },
@@ -352,10 +351,6 @@ export default function SeatLayoutModule({ navigateBack, reservations = [], onBa
           )}
         </div>
       </div>
-      <div style={{marginBottom:".75rem"}}>
-        <BusinessDateBadge />
-      </div>
-
       {/* レイアウト選択 */}
       {!editMode && (
         <div style={{padding:"1rem 1.1rem",background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.1)",borderRadius:6,marginBottom:"1rem"}}>

@@ -3,7 +3,6 @@ import { db, storage } from "./firebase";
 import { collection, doc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { getBusinessDate } from "./businessDate";
-import BusinessDateBadge from "./BusinessDateBadge";
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
@@ -388,10 +387,6 @@ export default function KitchenNotesModule() {
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:".5rem", marginBottom:"1rem", flexWrap:"wrap" }}>
         <h1 style={{ fontFamily:"Georgia,serif", fontSize:"1.05rem", color:"rgba(126,200,127,0.95)", letterSpacing:".12em", margin:0 }}>🍳 厨房共有</h1>
       </div>
-      <div style={{marginBottom:".8rem"}}>
-        <BusinessDateBadge />
-      </div>
-
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:".5rem", marginBottom:"1rem", flexWrap:"wrap" }}>
         <button type="button" onClick={prevDay} style={{ ...S.btn("sm"), padding:".4rem .7rem" }}>◀</button>
         <div style={{ flex:1, textAlign:"center", minWidth:200 }}>

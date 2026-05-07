@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { db } from "./firebase";
 import { collection, doc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
 import { getBusinessDate } from "./businessDate";
-import BusinessDateBadge from "./BusinessDateBadge";
 
 const S = {
   card: { background:"#111", border:"1px solid rgba(201,168,76,0.1)", borderRadius:6, padding:"1rem 1.25rem", marginBottom:".75rem" },
@@ -423,10 +422,6 @@ export default function SettlementModule({ events = [], navigateBack }) {
             : <button style={S.btn("sm")} onClick={goToList}>📂 過去の精算一覧を見る</button>
           }
         </div>
-        <div style={{marginBottom:".8rem"}}>
-          <BusinessDateBadge />
-        </div>
-
         {/* イベント情報 */}
         <div style={{display:"grid",gridTemplateColumns:"1fr 2fr 1fr",gap:".7rem",marginBottom:"1rem"}} className="hb-form-grid">
           <Field label="開催日">
@@ -651,9 +646,6 @@ export default function SettlementModule({ events = [], navigateBack }) {
   if (!historyUnlocked) {
     return (
       <div style={{padding:"1.5rem 2rem",maxWidth:720,margin:"0 auto"}} className="hb-view">
-        <div style={{marginBottom:".8rem"}}>
-          <BusinessDateBadge />
-        </div>
         <div style={{...S.card,padding:"1.5rem 1.6rem",textAlign:"center"}}>
           <div style={{fontFamily:"Georgia,serif",fontSize:"1.05rem",color:"#c9a84c",letterSpacing:".12em",marginBottom:".7rem"}}>
             🔒 過去の精算はロックされています
@@ -680,10 +672,6 @@ export default function SettlementModule({ events = [], navigateBack }) {
           <button style={S.btn("gold")} onClick={startNew}>← 新規精算に戻る</button>
         </div>
       </div>
-      <div style={{marginBottom:".75rem"}}>
-        <BusinessDateBadge />
-      </div>
-
       {/* フィルター */}
       <div style={{display:"flex",gap:".4rem",marginBottom:"1rem"}}>
         {[{k:"all",l:"すべて"},{k:"unpaid",l:"未精算あり"},{k:"paid",l:"精算済"}].map(f=>(
