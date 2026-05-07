@@ -5,6 +5,8 @@ import { getOrderedStaffNames } from "./shift";
 import { sendReservationEmails } from "./email";
 import { SeatPicker, DayLayoutView, getDefaultLayout, sortLayouts } from "./seatLayout";
 import { isCustomerBookingStatusOpen, effectiveBookingStatus } from "./eventBooking";
+import { getBusinessDate } from "./businessDate";
+import BusinessDateBadge from "./BusinessDateBadge";
 
 const S = {
   card: { background:"#111", border:"1px solid rgba(201,168,76,0.1)", borderRadius:6, padding:"1rem 1.25rem", marginBottom:".75rem" },
@@ -201,13 +203,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   const [dayLayoutMap, setDayLayoutMap] = useState({}); // dateKey -> layoutId
   const [dayBlockedMap, setDayBlockedMap] = useState({}); // dateKey -> [seatNumber, ...]
   // カレンダーで選択中の日付（詳細表示用）— ローカルタイムゾーンで今日を取得
-  const todayLocal = (() => {
-    const d = new Date();
-    const yy = d.getFullYear();
-    const mm = String(d.getMonth()+1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    return `${yy}-${mm}-${dd}`;
-  })();
+  const todayLocal = getBusinessDate();
   const [calSelectedDate, setCalSelectedDate] = useState(initialDate || todayLocal);
   // カレンダーの月（年月）— initialDate があればその月を表示
   const [calYearMonth, setCalYearMonth] = useState(() => {
@@ -1091,6 +1087,9 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
           <button style={S.btn("gold")} onClick={startNew}>＋ 電話予約を追加</button>
         </div>
       </div>
+      <div style={{marginBottom:".75rem"}}>
+        <BusinessDateBadge />
+      </div>
 
       {/* ビュー切替（カレンダー / リスト） */}
       <div style={{display:"flex",gap:".4rem",marginBottom:"1rem"}}>
@@ -1883,13 +1882,7 @@ export function CustomerReservationForm({ events = [] }) {
   const [submitting, setSubmitting] = useState(false);
 
   // 今日以降のイベントを日付別にグループ化（貸切除外）— ローカルタイムゾーン
-  const today = (() => {
-    const d = new Date();
-    const yy = d.getFullYear();
-    const mm = String(d.getMonth()+1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    return `${yy}-${mm}-${dd}`;
-  })();
+  const today = getBusinessDate();
   const upcomingEvents = events.filter(e => e.date && e.date >= today && !/貸切|貸し切り/.test(e.name||"") && !e.noBooking && isCustomerBookingStatusOpen(e));
   const eventsByDate = {};
   upcomingEvents.forEach(e => {

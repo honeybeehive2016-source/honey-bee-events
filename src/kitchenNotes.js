@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import { db, storage } from "./firebase";
 import { collection, doc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
+import { getBusinessDate } from "./businessDate";
+import BusinessDateBadge from "./BusinessDateBadge";
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
@@ -226,13 +228,7 @@ function MiniCalendar({ selectedDates = [], onToggle, mode = "multi", rangeStart
 }
 
 export default function KitchenNotesModule() {
-  const today = (() => {
-    const d = new Date();
-    const yy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    return `${yy}-${mm}-${dd}`;
-  })();
+  const today = getBusinessDate();
   const [selectedDate, setSelectedDate] = useState(today);
   const [allKitchenNotes, setAllKitchenNotes] = useState([]);
   const [kitchenSendMode, setKitchenSendMode] = useState("nextday");
@@ -391,6 +387,9 @@ export default function KitchenNotesModule() {
     <div style={{ padding:"1rem .85rem", maxWidth:720, margin:"0 auto" }} className="hb-view">
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:".5rem", marginBottom:"1rem", flexWrap:"wrap" }}>
         <h1 style={{ fontFamily:"Georgia,serif", fontSize:"1.05rem", color:"rgba(126,200,127,0.95)", letterSpacing:".12em", margin:0 }}>🍳 厨房共有</h1>
+      </div>
+      <div style={{marginBottom:".8rem"}}>
+        <BusinessDateBadge />
       </div>
 
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:".5rem", marginBottom:"1rem", flexWrap:"wrap" }}>

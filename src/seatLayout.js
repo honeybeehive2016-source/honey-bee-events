@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { db } from "./firebase";
 import { collection, doc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
+import { getBusinessDate } from "./businessDate";
+import BusinessDateBadge from "./BusinessDateBadge";
 
 const S = {
   card: { background:"#111", border:"1px solid rgba(201,168,76,0.1)", borderRadius:6, padding:"1rem 1.25rem", marginBottom:".75rem" },
@@ -114,7 +116,7 @@ export default function SeatLayoutModule({ navigateBack, reservations = [], onBa
   const [draftLayout, setDraftLayout] = useState(null); // 編集中のレイアウト
   const [draggingSeatId, setDraggingSeatId] = useState(null);
   const [dragOffset, setDragOffset] = useState({x:0, y:0});
-  const [viewDate, setViewDate] = useState(new Date().toISOString().split("T")[0]);
+  const [viewDate, setViewDate] = useState(getBusinessDate());
   const [zoom, setZoom] = useState(1);
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -349,6 +351,9 @@ export default function SeatLayoutModule({ navigateBack, reservations = [], onBa
             <button style={S.btn("ghost")} onClick={onBackToReservation}>← 予約管理に戻る</button>
           )}
         </div>
+      </div>
+      <div style={{marginBottom:".75rem"}}>
+        <BusinessDateBadge />
       </div>
 
       {/* レイアウト選択 */}

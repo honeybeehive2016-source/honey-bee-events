@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { db } from "./firebase";
 import { collection, doc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
+import { getBusinessDate } from "./businessDate";
+import BusinessDateBadge from "./BusinessDateBadge";
 
 const S = {
   card: { background:"#111", border:"1px solid rgba(201,168,76,0.1)", borderRadius:6, padding:"1rem 1.25rem", marginBottom:".75rem" },
@@ -167,7 +169,7 @@ export default function SettlementModule({ events = [], navigateBack }) {
   const [settlements, setSettlements] = useState([]);
   const [allSettlements, setAllSettlements] = useState([]);
   const [view, setView] = useState("edit"); // list | edit
-  const todayStr = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; })();
+  const todayStr = getBusinessDate();
   const [form, setForm] = useState({ ...emptySettlement, eventDate: todayStr, artists: [{ ...emptyArtist }] });
   const [editingId, setEditingId] = useState(null);
   const [filter, setFilter] = useState("all"); // all | unpaid | paid
@@ -248,7 +250,7 @@ export default function SettlementModule({ events = [], navigateBack }) {
   };
 
   const startNew = () => {
-    setForm({ ...emptySettlement, eventDate: new Date().toISOString().split("T")[0], artists: [{ ...emptyArtist }] });
+    setForm({ ...emptySettlement, eventDate: getBusinessDate(), artists: [{ ...emptyArtist }] });
     setEditingId(null);
     setView("edit");
   };
@@ -421,6 +423,9 @@ export default function SettlementModule({ events = [], navigateBack }) {
             : <button style={S.btn("sm")} onClick={goToList}>📂 過去の精算一覧を見る</button>
           }
         </div>
+        <div style={{marginBottom:".8rem"}}>
+          <BusinessDateBadge />
+        </div>
 
         {/* イベント情報 */}
         <div style={{display:"grid",gridTemplateColumns:"1fr 2fr 1fr",gap:".7rem",marginBottom:"1rem"}} className="hb-form-grid">
@@ -591,7 +596,7 @@ export default function SettlementModule({ events = [], navigateBack }) {
                   <label style={{display:"flex",alignItems:"center",gap:".5rem",cursor:"pointer",fontSize:".85rem",padding:".55rem 0",color:artist.paid?"#7ec87e":"rgba(240,232,208,0.55)"}}>
                     <input type="checkbox" checked={!!artist.paid} onChange={e=>{
                       updateArtist(idx,"paid",e.target.checked);
-                      if(e.target.checked && !artist.paidDate) updateArtist(idx,"paidDate",new Date().toISOString().split("T")[0]);
+                      if(e.target.checked && !artist.paidDate) updateArtist(idx,"paidDate",getBusinessDate());
                     }} style={{accentColor:"#7ec87e"}}/>
                     {artist.paid?"✓ 精算済":"未精算"}
                   </label>
@@ -646,6 +651,9 @@ export default function SettlementModule({ events = [], navigateBack }) {
   if (!historyUnlocked) {
     return (
       <div style={{padding:"1.5rem 2rem",maxWidth:720,margin:"0 auto"}} className="hb-view">
+        <div style={{marginBottom:".8rem"}}>
+          <BusinessDateBadge />
+        </div>
         <div style={{...S.card,padding:"1.5rem 1.6rem",textAlign:"center"}}>
           <div style={{fontFamily:"Georgia,serif",fontSize:"1.05rem",color:"#c9a84c",letterSpacing:".12em",marginBottom:".7rem"}}>
             🔒 過去の精算はロックされています
@@ -671,6 +679,9 @@ export default function SettlementModule({ events = [], navigateBack }) {
           <button style={{...S.btn("sm"),padding:".4rem .8rem"}} onClick={()=>setShowTrash(true)}>🗑 ゴミ箱{trashSettlements.length>0?` (${trashSettlements.length})`:""}</button>
           <button style={S.btn("gold")} onClick={startNew}>← 新規精算に戻る</button>
         </div>
+      </div>
+      <div style={{marginBottom:".75rem"}}>
+        <BusinessDateBadge />
       </div>
 
       {/* フィルター */}
