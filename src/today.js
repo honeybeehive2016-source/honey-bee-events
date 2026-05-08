@@ -130,46 +130,116 @@ function HandoverAttachmentsBlock({ attachments }) {
 }
 
 // 業務チェックリストのテンプレート
-const CHECKLIST_TEMPLATE = {
-  prep: {
+const NORMAL_CHECKLIST_TEMPLATE = [
+  {
+    key: "open",
     label: "開店前",
     icon: "🌅",
     items: [
-      "店内床清掃",
-      "1Fエントランス清掃",
-      "1F看板準備",
-      "エレベーター内ポスター確認",
-      "トイレ清掃",
-      "客席テーブル拭き",
-      "受付準備",
-      "釣銭確認",
-      "予約リスト確認",
-      "欠品・おすすめ等確認",
-      "朝礼",
+      { id: "floor_cleaning", label: "店内床清掃" },
+      { id: "entrance_cleaning", label: "1Fエントランス清掃" },
+      { id: "sign_preparation", label: "1F看板準備" },
+      { id: "elevator_poster_check", label: "エレベーター内ポスター確認" },
+      { id: "toilet_cleaning", label: "トイレ清掃" },
+      { id: "table_wipe", label: "客席テーブル拭き" },
+      { id: "reception_preparation", label: "受付準備" },
+      { id: "change_check", label: "釣銭確認" },
+      { id: "reservation_list_check", label: "予約リスト確認" },
+      { id: "stock_recommend_check", label: "欠品・おすすめ等確認" },
+      { id: "morning_meeting", label: "朝礼" },
     ],
   },
-  during: {
+  {
+    key: "during",
     label: "イベント中",
     icon: "🎵",
-    items: ["来店状況確認", "トイレ状態確認"],
+    items: [
+      { id: "customer_status_check", label: "来店状況確認" },
+      { id: "toilet_status_check", label: "トイレ状態確認" },
+    ],
   },
-  after: {
+  {
+    key: "after",
     label: "終演後",
     icon: "🌙",
     items: [
-      "客席片付け",
-      "忘れ物確認",
-      "テーブル清掃",
-      "洗い物確認",
-      "ステージ片付け",
-      "ゴミ出し",
-      "出演者精算",
-      "レジ締め",
-      "翌日イベント確認",
-      "申し送り",
+      { id: "seat_cleanup", label: "客席片付け" },
+      { id: "lost_and_found_check", label: "忘れ物確認" },
+      { id: "table_cleaning", label: "テーブル清掃" },
+      { id: "dishwashing_check", label: "洗い物確認" },
+      { id: "stage_cleanup", label: "ステージ片付け" },
+      { id: "garbage_disposal", label: "ゴミ出し" },
+      { id: "artist_settlement", label: "出演者精算" },
+      { id: "cash_register_close", label: "レジ締め" },
+      { id: "next_day_event_check", label: "翌日イベント確認" },
+      { id: "handover_note", label: "申し送り" },
     ],
   },
-};
+];
+
+const MULTI_CHECKLIST_TEMPLATE = [
+  {
+    key: "open",
+    label: "開店前",
+    icon: "🌅",
+    items: [...NORMAL_CHECKLIST_TEMPLATE[0].items],
+  },
+  {
+    key: "firstDuring",
+    label: "前半イベント中",
+    icon: "🎵",
+    items: [
+      { id: "customer_status_check", label: "来店状況確認" },
+      { id: "toilet_status_check", label: "トイレ状態確認" },
+    ],
+  },
+  {
+    key: "handover",
+    label: "前半終演後／後半引き継ぎ",
+    icon: "🔄",
+    items: [
+      { id: "first_event_finished_check", label: "前半イベント終了状況確認" },
+      { id: "reservation_share", label: "来店・予約状況の共有" },
+      { id: "pending_tasks_check", label: "未対応事項確認" },
+      { id: "seat_cleanup", label: "客席片付け" },
+      { id: "lost_and_found_check", label: "忘れ物確認" },
+      { id: "table_cleaning", label: "テーブル清掃" },
+      { id: "toilet_status_check", label: "トイレ状態確認" },
+      { id: "dishwashing_check", label: "洗い物確認" },
+      { id: "stage_transition_check", label: "ステージ転換確認" },
+      { id: "garbage_status_check", label: "ゴミ状況確認" },
+      { id: "artist_settlement_check", label: "出演者精算確認" },
+      { id: "handover_to_later_staff", label: "後半スタッフへの申し送り" },
+    ],
+  },
+  {
+    key: "laterDuring",
+    label: "後半イベント中",
+    icon: "🎶",
+    items: [
+      { id: "customer_status_check", label: "来店状況確認" },
+      { id: "toilet_status_check", label: "トイレ状態確認" },
+      { id: "handover_confirmed", label: "前半からの申し送り確認" },
+    ],
+  },
+  {
+    key: "finalAfter",
+    label: "最終終演後",
+    icon: "🌙",
+    items: [
+      { id: "seat_cleanup", label: "客席片付け" },
+      { id: "lost_and_found_check", label: "忘れ物確認" },
+      { id: "table_cleaning", label: "テーブル清掃" },
+      { id: "dishwashing_check", label: "洗い物確認" },
+      { id: "stage_cleanup", label: "ステージ片付け" },
+      { id: "garbage_disposal", label: "ゴミ出し" },
+      { id: "artist_settlement", label: "出演者精算" },
+      { id: "cash_register_close", label: "レジ締め" },
+      { id: "next_day_event_check", label: "翌日イベント確認" },
+      { id: "handover_note", label: "申し送り" },
+    ],
+  },
+];
 
 const S = {
   card: { background:"#111", border:"1px solid rgba(201,168,76,0.1)", borderRadius:6, padding:"1rem 1.25rem", marginBottom:".75rem" },
@@ -352,27 +422,56 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
     }
   };
 
-  // チェック切替（並列編集対応）
-  // checks をオブジェクト型 ({ "0": true, "1": false, ... }) で持つことで、
-  // 個別の項目だけドット記法で更新できる（他のスタッフのチェックを上書きしない）
-  const toggleCheck = async (category, idx) => {
+  const getLegacyNormalCategoryKey = (categoryKey) => {
+    if (categoryKey === "open") return "prep";
+    if (categoryKey === "during") return "during";
+    if (categoryKey === "after") return "after";
+    return null;
+  };
+
+  const getCheckValue = (modeKey, categoryKey, itemId, idx) => {
     const checks = dayData.checks || {};
-    const catChecks = checks[category] || {};
-    // 配列形式だった古いデータも対応
-    const isArr = Array.isArray(catChecks);
-    const cur = isArr ? !!catChecks[idx] : !!catChecks[String(idx)];
-    const newVal = !cur;
-    // 楽観的更新：UIを即座に反映
-    const newCatChecks = isArr
-      ? (() => { const a = [...catChecks]; a[idx] = newVal; return a; })()
-      : { ...catChecks, [String(idx)]: newVal };
-    setDayData({ ...dayData, checks: { ...checks, [category]: newCatChecks } });
-    // Firestore: 配列の場合は category 全体を上書き、オブジェクトの場合はドット記法で個別更新
-    if (isArr) {
-      await updateField(`checks.${category}`, newCatChecks);
-    } else {
-      await updateField(`checks.${category}.${idx}`, newVal);
+    const scopedChecks = checks[modeKey];
+    const catChecks = scopedChecks && typeof scopedChecks === "object" ? scopedChecks[categoryKey] : null;
+    if (catChecks && typeof catChecks === "object") {
+      if (Object.prototype.hasOwnProperty.call(catChecks, itemId)) return !!catChecks[itemId];
+      if (Object.prototype.hasOwnProperty.call(catChecks, String(idx))) return !!catChecks[String(idx)];
     }
+    if (modeKey === "normal") {
+      const legacyKey = getLegacyNormalCategoryKey(categoryKey);
+      const legacyChecks = legacyKey ? checks[legacyKey] : null;
+      if (Array.isArray(legacyChecks)) return !!legacyChecks[idx];
+      if (legacyChecks && typeof legacyChecks === "object") {
+        if (Object.prototype.hasOwnProperty.call(legacyChecks, itemId)) return !!legacyChecks[itemId];
+        if (Object.prototype.hasOwnProperty.call(legacyChecks, String(idx))) return !!legacyChecks[String(idx)];
+      }
+    }
+    return false;
+  };
+
+  // チェック切替（並列編集対応）
+  const toggleCheck = async (modeKey, categoryKey, itemId, idx) => {
+    const checks = dayData.checks || {};
+    const current = getCheckValue(modeKey, categoryKey, itemId, idx);
+    const newVal = !current;
+    const nextChecks = {
+      ...checks,
+      [modeKey]: {
+        ...(checks[modeKey] && typeof checks[modeKey] === "object" ? checks[modeKey] : {}),
+        [categoryKey]: {
+          ...(
+            checks[modeKey] &&
+            checks[modeKey][categoryKey] &&
+            typeof checks[modeKey][categoryKey] === "object"
+              ? checks[modeKey][categoryKey]
+              : {}
+          ),
+          [itemId]: newVal,
+        },
+      },
+    };
+    setDayData({ ...dayData, checks: nextChecks });
+    await updateField(`checks.${modeKey}.${categoryKey}.${itemId}`, newVal);
   };
 
   // 申し送り：個別項目チェック切替（並列編集対応）
@@ -549,7 +648,27 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
   const isToday = selectedDate === today;
 
   // 当日のイベント
-  const todayEvents = events.filter(e => e.date === selectedDate);
+  const parseEventMinutes = (ev) => {
+    const raw = ev?.open || ev?.start || ev?.time || ev?.startTime || "";
+    const m = String(raw).match(/(\d{1,2}):(\d{2})/);
+    if (!m) return Number.MAX_SAFE_INTEGER;
+    return Number(m[1]) * 60 + Number(m[2]);
+  };
+  const todayEvents = events
+    .filter(e => e.date === selectedDate)
+    .slice()
+    .sort((a, b) => {
+      const diff = parseEventMinutes(a) - parseEventMinutes(b);
+      if (diff !== 0) return diff;
+      return String(a.name || "").localeCompare(String(b.name || ""), "ja");
+    });
+  const isMultiEventDay = todayEvents.length >= 2;
+  const checklistModeKey = isMultiEventDay ? "multi" : "normal";
+  const checklistTemplate = isMultiEventDay ? MULTI_CHECKLIST_TEMPLATE : NORMAL_CHECKLIST_TEMPLATE;
+  const checklistByKey = checklistTemplate.reduce((acc, cat) => {
+    acc[cat.key] = cat;
+    return acc;
+  }, {});
 
   // 当日の貸切（仮押さえ・成約・完了のみ）
   const todayRentals = rentals.filter(r =>
@@ -604,17 +723,17 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
     };
 
     const collectUndone = (catKey) => {
-      const cat = CHECKLIST_TEMPLATE[catKey];
-      const checksRaw = (dayData.checks || {})[catKey];
-      const isCheckedAt = (idx) => {
-        if (!checksRaw) return false;
-        if (Array.isArray(checksRaw)) return !!checksRaw[idx];
-        return !!checksRaw[String(idx)];
-      };
+      const cat = checklistByKey[catKey];
+      if (!cat) return [];
       const undone = [];
-      cat.items.forEach((it, i) => { if (!isCheckedAt(i)) undone.push(it); });
+      cat.items.forEach((it, i) => {
+        if (!getCheckValue(checklistModeKey, catKey, it.id, i)) undone.push(it.label);
+      });
       return undone;
     };
+
+    const prepCategoryKey = "open";
+    const afterCategoryKey = isMultiEventDay ? "finalAfter" : "after";
 
     if (isViewingToday) {
       // 開店前：イベントの開場時間を過ぎても未完了
@@ -622,19 +741,19 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
       if (earliestOpen) {
         const openMin = parseMin(earliestOpen);
         if (nowMin >= openMin) {
-          const undone = collectUndone("prep");
-          if (undone.length > 0) alerts.push({ key: "prep", label: "開店前", undone, since: earliestOpen });
+          const undone = collectUndone(prepCategoryKey);
+          if (undone.length > 0) alerts.push({ key: prepCategoryKey, label: checklistByKey[prepCategoryKey]?.label || "開店前", undone, since: earliestOpen });
         }
       }
       // 終演後：23:00 を過ぎても未完了
       if (nowMin >= 23 * 60) {
-        const undone = collectUndone("after");
-        if (undone.length > 0) alerts.push({ key: "after", label: "終演後", undone, since: "23:00" });
+        const undone = collectUndone(afterCategoryKey);
+        if (undone.length > 0) alerts.push({ key: afterCategoryKey, label: checklistByKey[afterCategoryKey]?.label || "終演後", undone, since: "23:00" });
       }
     } else if (isViewingYesterdayInEarlyMorning) {
       // 深夜：昨日の終演後チェックの未完了のみ警告
-      const undone = collectUndone("after");
-      if (undone.length > 0) alerts.push({ key: "after", label: "終演後（前日）", undone, since: "23:00" });
+      const undone = collectUndone(afterCategoryKey);
+      if (undone.length > 0) alerts.push({ key: afterCategoryKey, label: `${checklistByKey[afterCategoryKey]?.label || "終演後"}（前日）`, undone, since: "23:00" });
     }
     return alerts;
   };
@@ -680,7 +799,7 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
           {alerts.map(alert => (
             <div key={alert.key} style={{marginBottom:".75rem",padding:".7rem .85rem",background:"rgba(0,0,0,0.3)",borderRadius:5,borderLeft:"3px solid #e24b4a"}}>
               <div style={{fontSize:".75rem",color:"#ff8e8d",marginBottom:".4rem",fontWeight:600,display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:".3rem"}}>
-                <span>{CHECKLIST_TEMPLATE[alert.key]?.icon || "📋"} {alert.label}（{alert.undone.length}件）</span>
+                <span>{checklistByKey[alert.key]?.icon || "📋"} {alert.label}（{alert.undone.length}件）</span>
                 <span style={{fontSize:".6rem",color:"rgba(255,142,141,0.6)",fontWeight:400}}>{alert.since} 過ぎ</span>
               </div>
               <div style={{display:"flex",flexWrap:"wrap",gap:".3rem"}}>
@@ -953,13 +1072,11 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
 
       {/* 業務チェックリスト */}
       <div style={S.secTitle}>✅ 業務チェックリスト</div>
-      {Object.entries(CHECKLIST_TEMPLATE).map(([key, cat]) => {
-        const checksRaw = (dayData.checks || {})[key];
-        // 配列でもオブジェクトでも対応
+      {checklistTemplate.map((cat) => {
+        const key = cat.key;
         const isCheckedAt = (idx) => {
-          if (!checksRaw) return false;
-          if (Array.isArray(checksRaw)) return !!checksRaw[idx];
-          return !!checksRaw[String(idx)];
+          const item = cat.items[idx];
+          return getCheckValue(checklistModeKey, key, item.id, idx);
         };
         const total = cat.items.length;
         let done = 0;
@@ -1000,10 +1117,10 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                       <input
                         type="checkbox"
                         checked={checked}
-                        onChange={()=>toggleCheck(key, idx)}
+                        onChange={()=>toggleCheck(checklistModeKey, key, item.id, idx)}
                         style={{accentColor:"#7ec87e",width:20,height:20,flexShrink:0}}
                       />
-                      <span style={{fontSize:".88rem",color:checked?"rgba(126,200,127,0.7)":"rgba(240,232,208,0.85)",textDecoration:checked?"line-through":"none"}}>{item}</span>
+                      <span style={{fontSize:".88rem",color:checked?"rgba(126,200,127,0.7)":"rgba(240,232,208,0.85)",textDecoration:checked?"line-through":"none"}}>{item.label}</span>
                     </label>
                   );
                 })}

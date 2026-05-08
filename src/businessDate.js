@@ -1,4 +1,4 @@
-const BUSINESS_DAY_SWITCH_HOUR = 1; // 25:00切り替え（実際は翌01:00）
+const BUSINESS_DAY_SWITCH_HOUR = 7; // 07:00切り替え
 
 function toDateKey(d) {
   const yy = d.getFullYear();
@@ -11,7 +11,7 @@ export function getDateKey(date = new Date()) {
   return toDateKey(date);
 }
 
-// 深夜 00:00〜00:59 は前日営業日として扱う
+// 深夜 00:00〜06:59 は前日営業日として扱う
 export function getBusinessDate(date = new Date()) {
   const d = new Date(date);
   if (d.getHours() < BUSINESS_DAY_SWITCH_HOUR) {
@@ -27,7 +27,7 @@ export function getBusinessDateInfo(date = new Date()) {
     actualDate,
     businessDate,
     isOvernightWindow: actualDate !== businessDate,
-    switchLabel: "25:00切り替え",
+    switchLabel: "7:00切り替え",
   };
 }
 
