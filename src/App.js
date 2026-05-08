@@ -14,6 +14,7 @@ import { getBusinessDate } from "./businessDate";
 
 const DAYS = ["日","月","火","水","木","金","土"];
 const MONTH_NAMES = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
+const STAFF_DAY_SHEET_URL = "https://docs.google.com/spreadsheets/d/1qD302u-RornvrxYd1-FDuTzEDiFU8krBQ6JuWT0pbE8/edit?usp=drive_link";
 
 // 貸切判定 + お客様名抽出（モジュール間で共有）
 export const isRentalEvent = (name) => /貸切|貸し切り/.test(name||"");
@@ -1505,7 +1506,7 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
               {key:"settlement", icon:"💰", title:"アーティスト精算", desc:"歩合・固定額計算 / 精算メモ自動生成", ready:true},
               {key:"shift", icon:"👥", title:"シフト管理", desc:"勤務表CSVから取り込み / 月別表示", ready:true},
               {key:"procurement", icon:"📦", title:"発注管理", desc:"発注先リンク・予定日・ステータス・メモ（認証情報は保存しません）", ready:true},
-              {key:"staff_day", icon:"🎤", title:"STAFF DAY", desc:"スタッフ企画イベントの管理", ready:false},
+              {key:"staffDay", icon:"🎤", title:"STAFF DAY", desc:"スタッフ企画イベントの管理", ready:true},
             ].map(m => (
               <div key={m.key} onClick={()=>m.ready?navigateTo(m.key):alert("このモジュールは準備中です。今後実装予定！")} style={{
                 background: m.ready ? "linear-gradient(135deg,#1a1400 0%,#111 100%)" : "#0d0d0d",
@@ -1575,6 +1576,29 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
 
       {view==="procurement"&&(
         <ProcurementModule navigateBack={navigateBack} />
+      )}
+
+      {view==="staffDay"&&(
+        <div style={{padding:"1.5rem 2rem",maxWidth:1200,margin:"0 auto"}} className="hb-view">
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:".9rem",flexWrap:"wrap",gap:".5rem"}}>
+            <h2 style={{fontFamily:"Georgia,serif",fontSize:"1.2rem",color:"#c9a84c",letterSpacing:".15em",margin:0}}>🎤 STAFF DAY</h2>
+            <a
+              href={STAFF_DAY_SHEET_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{...S.btn("ghost"),padding:".45rem .9rem",textDecoration:"none",display:"inline-flex",alignItems:"center"}}
+            >
+              ↗ 新しいタブで開く
+            </a>
+          </div>
+          <div style={{...S.card(false),display:"block",padding:".5rem",minHeight:"calc(100vh - 140px)"}}>
+            <iframe
+              title="STAFF DAY Spreadsheet"
+              src={STAFF_DAY_SHEET_URL}
+              style={{width:"100%",height:"calc(100vh - 170px)",border:"1px solid rgba(201,168,76,0.2)",borderRadius:6,background:"#111"}}
+            />
+          </div>
+        </div>
       )}
 
       {view==="reservation"&&(
