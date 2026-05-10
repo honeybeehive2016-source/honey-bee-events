@@ -661,6 +661,34 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
   const incomingHandovers = allHandovers.filter(h => (h.targetDates || []).includes(selectedDate));
   // 自分が当日に発行した申し送り
   const outgoingHandovers = allHandovers.filter(h => h.sourceDate === selectedDate);
+  const sortedIncomingHandovers = incomingHandovers
+    .slice()
+    .sort((a, b) => {
+      const ao = Number(a.sortOrder);
+      const bo = Number(b.sortOrder);
+      const aHas = Number.isFinite(ao);
+      const bHas = Number.isFinite(bo);
+      if (aHas && bHas) return ao - bo;
+      if (aHas && !bHas) return -1;
+      if (!aHas && bHas) return 1;
+      const ac = Number(a.createdAt || 0);
+      const bc = Number(b.createdAt || 0);
+      if (ac !== bc) return ac - bc;
+      return String(a._id || "").localeCompare(String(b._id || ""));
+    });
+
+  const moveIncomingHandover = async (index, direction) => {
+    if (editingHandoverId) return;
+    const target = index + direction;
+    if (target < 0 || target >= sortedIncomingHandovers.length) return;
+    const next = [...sortedIncomingHandovers];
+    [next[index], next[target]] = [next[target], next[index]];
+    await Promise.all(
+      next.map((h, i) =>
+        setDoc(doc(db, "handovers", h._id), { sortOrder: i }, { merge: true })
+      )
+    );
+  };
 
   // 日付ナビ（タイムゾーン対応：toISOString は UTC を返すので文字列を直接いじる）
   const shiftDate = (dateStr, days) => {
@@ -852,16 +880,17 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
       )}
 
       {/* 当日に届く申し送り */}
-      {incomingHandovers.length > 0 && (
+      {sortedIncomingHandovers.length > 0 && (
         <div style={{padding:"1rem 1.1rem",marginBottom:"1.25rem",background:"rgba(244,162,97,0.08)",border:"1px solid rgba(244,162,97,0.3)",borderRadius:8}}>
           <div style={{fontSize:".7rem",letterSpacing:".15em",color:"#f4a261",marginBottom:".75rem",fontWeight:600}}>📋 申し送り</div>
-          {incomingHandovers.map(h => {
+          {sortedIncomingHandovers.map((h, idx) => {
             const isFromPast = h.sourceDate && h.sourceDate < selectedDate;
             const fromLabel = h.sourceDate === selectedDate
               ? "本日"
               : fmtDate(h.sourceDate || "").replace(/^\d+年/,"") + " から";
             const isEditing = editingHandoverId === h._id;
             const updatedLabel = getHandoverUpdatedLabel(h);
+            const sortingDisabled = !!editingHandoverId;
             return (
               <div key={h._id} style={{padding:".55rem .7rem",background:h.done?"rgba(126,200,127,0.08)":"rgba(244,162,97,0.04)",borderRadius:5,marginBottom:".4rem",display:"flex",alignItems:"flex-start",gap:".5rem"}}>
                 {h.type === "item" && (
@@ -896,6 +925,20 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                   </div>
                 </div>
                 <div style={{display:"flex",flexDirection:"column",gap:".2rem"}}>
+                  <div style={{display:"flex",gap:".2rem",marginBottom:".1rem"}}>
+                    <button
+                      type="button"
+                      onClick={()=>moveIncomingHandover(idx, -1)}
+                      disabled={sortingDisabled || idx === 0}
+                      style={{padding:".25rem .45rem",minWidth:34,minHeight:30,background:"transparent",border:"1px solid rgba(201,168,76,0.35)",borderRadius:4,color:"rgba(201,168,76,0.9)",cursor:(sortingDisabled || idx===0)?"not-allowed":"pointer",fontSize:".72rem",lineHeight:1,opacity:(sortingDisabled || idx===0)?0.35:1}}
+                    >▲</button>
+                    <button
+                      type="button"
+                      onClick={()=>moveIncomingHandover(idx, 1)}
+                      disabled={sortingDisabled || idx === sortedIncomingHandovers.length - 1}
+                      style={{padding:".25rem .45rem",minWidth:34,minHeight:30,background:"transparent",border:"1px solid rgba(201,168,76,0.35)",borderRadius:4,color:"rgba(201,168,76,0.9)",cursor:(sortingDisabled || idx===sortedIncomingHandovers.length-1)?"not-allowed":"pointer",fontSize:".72rem",lineHeight:1,opacity:(sortingDisabled || idx===sortedIncomingHandovers.length-1)?0.35:1}}
+                    >▼</button>
+                  </div>
                   {!isEditing && <button type="button" onClick={()=>startEditHandover(h)} style={{padding:".15rem .35rem",background:"transparent",border:"none",color:"rgba(201,168,76,0.7)",cursor:"pointer",fontSize:".68rem"}}>編集</button>}
                   <button type="button" onClick={()=>removeHandoverItem(h._id)} style={{padding:".15rem .35rem",background:"transparent",border:"none",color:"rgba(226,75,74,0.5)",cursor:"pointer",fontSize:".7rem"}}>✕</button>
                 </div>
