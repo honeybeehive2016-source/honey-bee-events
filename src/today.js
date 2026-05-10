@@ -1011,14 +1011,9 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
         <div style={{padding:".6rem .72rem",marginBottom:".85rem",background:"rgba(244,162,97,0.06)",border:"1px solid rgba(244,162,97,0.22)",borderRadius:6}}>
           <div style={{fontSize:".65rem",letterSpacing:".12em",color:"#f4a261",marginBottom:".42rem",fontWeight:600}}>📋 申し送り</div>
           {sortedIncomingHandovers.map((h, idx) => {
-            const fromLabel = h.sourceDate === selectedDate
-              ? "本日"
-              : fmtDate(h.sourceDate || "").replace(/^\d+年/,"") + " から";
             const isEditing = editingHandoverId === h._id;
             const isEditingTarget = editingTargetHandoverId === h._id;
-            const updatedLabel = getHandoverUpdatedLabel(h);
             const sortingDisabled = !!editingHandoverId || !!editingTargetHandoverId;
-            const metaLine = `${fromLabel}${(h.targetDates||[]).length > 1 ? ` · ${(h.targetDates||[]).length}日` : ""}${updatedLabel ? ` · ${updatedLabel}` : ""}`;
             return (
               <div key={h._id} style={{padding:".32rem .42rem",marginBottom: idx === sortedIncomingHandovers.length - 1 ? 0 : ".18rem",background:h.done?"rgba(126,200,127,0.06)":"rgba(0,0,0,0.28)",borderRadius:4,borderLeft:"2px solid rgba(201,168,76,0.38)"}}>
                 <div style={{display:"flex",gap:".38rem",alignItems:"flex-start"}}>
@@ -1155,31 +1150,8 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                       </div>
                     </div>
                   )}
-                  <div
-                    style={{
-                      display: "flex",
-                      flexWrap: "wrap",
-                      alignItems: "baseline",
-                      gap: ".1rem .18rem",
-                      marginTop: ".12rem",
-                      fontSize: "0.63rem",
-                      lineHeight: 1.22,
-                    }}
-                  >
-                    <span
-                      style={{
-                        flex: "1 1 120px",
-                        minWidth: 0,
-                        color: "rgba(240,232,208,0.25)",
-                        letterSpacing: ".015em",
-                        wordBreak: "break-word",
-                        fontWeight: 400,
-                      }}
-                      title={metaLine}
-                    >
-                      {metaLine}
-                    </span>
-                    <span style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: ".04rem", flexShrink: 0 }}>
+                  <div style={{ display: "flex", justifyContent: "flex-end", flexWrap: "wrap", marginTop: ".1rem" }}>
+                    <span style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: ".04rem", flexShrink: 0 }}>
                       <button type="button" className="ho-meta-act" onClick={()=>moveIncomingHandover(idx, -1)} disabled={sortingDisabled || idx === 0}>▲</button>
                       <button type="button" className="ho-meta-act" onClick={()=>moveIncomingHandover(idx, 1)} disabled={sortingDisabled || idx === sortedIncomingHandovers.length - 1}>▼</button>
                       {!isEditing && !isEditingTarget && (
@@ -1661,8 +1633,6 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
           {outgoingHandovers.map(h => {
             const isEditing = editingHandoverId === h._id;
             const isEditingTarget = editingTargetHandoverId === h._id;
-            const updatedLabel = getHandoverUpdatedLabel(h);
-            const outgoingMeta = `→ ${(h.targetDates||[]).length === 1 ? (h.targetDates||[])[0] : `${(h.targetDates||[]).length}日に送信`}${updatedLabel ? ` · ${updatedLabel}` : ""}`;
             return (
             <div key={h._id} style={{padding:".32rem .42rem",marginBottom:".18rem",background:"#0c0c0c",border:"1px solid rgba(201,168,76,0.1)",borderRadius:4,display:"flex",alignItems:"flex-start",gap:".38rem"}}>
               <span style={{fontSize:".52rem",padding:".12rem .34rem",borderRadius:2,background:h.type==="item"?"rgba(126,200,127,0.13)":"rgba(126,200,227,0.13)",color:h.type==="item"?"#7ec87e":"#7ec8e3",letterSpacing:".05em",flexShrink:0,marginTop:1}}>
@@ -1796,31 +1766,8 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                     </div>
                   </div>
                 )}
-                <div
-                  style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    alignItems: "baseline",
-                    gap: ".1rem .18rem",
-                    marginTop: ".12rem",
-                    fontSize: "0.63rem",
-                    lineHeight: 1.22,
-                  }}
-                >
-                  <span
-                    style={{
-                      flex: "1 1 120px",
-                      minWidth: 0,
-                      color: "rgba(240,232,208,0.25)",
-                      letterSpacing: ".015em",
-                      wordBreak: "break-word",
-                      fontWeight: 400,
-                    }}
-                    title={outgoingMeta}
-                  >
-                    {outgoingMeta}
-                  </span>
-                  <span style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: ".04rem", flexShrink: 0 }}>
+                <div style={{ display: "flex", justifyContent: "flex-end", flexWrap: "wrap", marginTop: ".1rem" }}>
+                  <span style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: ".04rem", flexShrink: 0 }}>
                     {!isEditing && !isEditingTarget && (
                       <>
                         <button type="button" className="ho-meta-act" onClick={()=>startEditHandover(h)} disabled={!!editingTargetHandoverId}>編集</button>
