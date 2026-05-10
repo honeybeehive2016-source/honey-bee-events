@@ -807,15 +807,20 @@ export function SeatPicker({ layoutId, reservations, currentDate, currentReserva
     const unsub = onSnapshot(collection(db, "seatLayouts"), (snap) => {
       const list = [];
       snap.forEach(d => list.push({ ...d.data(), _id: d.id }));
-      const sorted = sortLayouts(list);
-      setLayouts(sorted);
-      if (sorted.length > 0 && !selectedLayoutId) {
-        setSelectedLayoutId(sorted[0]._id);
-      }
+      setLayouts(sortLayouts(list));
     });
     return () => unsub();
-    // eslint-disable-next-line
   }, []);
+
+  // daily 由来の layoutId 変更・一覧読み込みに追従（無効ID時は並び先頭へフォールバック）
+  useEffect(() => {
+    if (!layouts.length) return;
+    if (layoutId && layouts.some(l => l._id === layoutId)) {
+      setSelectedLayoutId(layoutId);
+      return;
+    }
+    setSelectedLayoutId(layouts[0]._id);
+  }, [layoutId, layouts]);
 
   const currentLayout = layouts.find(l => l._id === selectedLayoutId);
 

@@ -126,6 +126,37 @@ function reservationsHaveAssignedSeats(list) {
   });
 }
 
+/** 席選択モーダル用：DayLayoutView と同じキー規則で layoutId を解決（無ければ undefined） */
+function resolveSeatPickerLayoutId(events, formDate, eventName, dayLayoutMap) {
+  if (!formDate) return undefined;
+  const dayEvents = events.filter(e => e.date === formDate);
+  const multi = dayEvents.length > 1;
+  const name = String(eventName || "").trim();
+  if (multi && name) {
+    const scoped = `${formDate}::${name}`;
+    const id = dayLayoutMap[scoped];
+    if (id) return id;
+  }
+  const dayId = dayLayoutMap[formDate];
+  return dayId || undefined;
+}
+
+/** 席選択モーダル用：blockedSeats を eventScoped → 日付 の順で解決 */
+function resolveSeatPickerBlockedSeats(events, formDate, eventName, dayBlockedMap) {
+  if (!formDate) return [];
+  const dayEvents = events.filter(e => e.date === formDate);
+  const multi = dayEvents.length > 1;
+  const name = String(eventName || "").trim();
+  if (multi && name) {
+    const scoped = `${formDate}::${name}`;
+    const b = dayBlockedMap[scoped];
+    if (b !== undefined) return Array.isArray(b) ? b : [];
+  }
+  const b2 = dayBlockedMap[formDate];
+  if (b2 !== undefined) return Array.isArray(b2) ? b2 : [];
+  return [];
+}
+
 function getPeopleCount(value) {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) return 1;
@@ -832,11 +863,13 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
 
         {showSeatPicker && (
           <SeatPicker
+            key={`seatpicker-${form.date || ""}-${form.eventName || ""}`}
+            layoutId={resolveSeatPickerLayoutId(events, form.date, form.eventName, dayLayoutMap)}
             reservations={allReservations}
             currentDate={form.date}
             currentReservationId={editingId}
             currentSeats={form.seatNumber}
-            blockedSeats={dayBlockedMap[form.date] || []}
+            blockedSeats={resolveSeatPickerBlockedSeats(events, form.date, form.eventName, dayBlockedMap)}
             onSelect={(seatNumber)=>setField("seatNumber", seatNumber)}
             onClose={()=>setShowSeatPicker(false)}
           />
