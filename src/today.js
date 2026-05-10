@@ -935,6 +935,38 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
 
   return (
     <div style={{padding:"1rem .85rem",maxWidth:720,margin:"0 auto"}} className="hb-view">
+      <style>{`
+        .hb-view .ho-meta-act {
+          padding: .1rem .22rem;
+          margin: 0;
+          font-size: inherit;
+          font-family: inherit;
+          line-height: 1.35;
+          border: 1px solid transparent;
+          border-radius: 3px;
+          background: transparent;
+          color: rgba(201,168,76,0.58);
+          cursor: pointer;
+        }
+        .hb-view .ho-meta-act:hover:not(:disabled) {
+          border-color: rgba(201,168,76,0.32);
+          color: rgba(244,213,140,0.92);
+          background: rgba(201,168,76,0.07);
+        }
+        .hb-view .ho-meta-act:disabled {
+          opacity: 0.32;
+          cursor: not-allowed;
+        }
+        .hb-view .ho-meta-act-del {
+          color: rgba(226,75,74,0.42);
+          padding: .08rem .2rem;
+        }
+        .hb-view .ho-meta-act-del:hover:not(:disabled) {
+          color: rgba(255,150,148,0.95);
+          border-color: rgba(226,75,74,0.22);
+          background: rgba(226,75,74,0.06);
+        }
+      `}</style>
       {/* ヘッダー：日付選択 */}
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:".5rem",marginBottom:"1rem",flexWrap:"wrap"}}>
         <button type="button" onClick={prevDay} style={{...S.btn("sm"),padding:".4rem .7rem"}}>◀</button>
@@ -998,7 +1030,6 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
             const sortingDisabled = !!editingHandoverId || !!editingTargetHandoverId;
             const bodyExpanded = expandedHandoverBodyId === h._id;
             const metaLine = `${fromLabel}${(h.targetDates||[]).length > 1 ? ` · ${(h.targetDates||[]).length}日` : ""}${updatedLabel ? ` · ${updatedLabel}` : ""}`;
-            const tbStyle = { padding: ".32rem .48rem", minHeight: 34, fontSize: ".62rem", fontFamily: "inherit", borderRadius: 4, cursor: "pointer" };
             return (
               <div key={h._id} style={{padding:".32rem .42rem",marginBottom: idx === sortedIncomingHandovers.length - 1 ? 0 : ".18rem",background:h.done?"rgba(126,200,127,0.06)":"rgba(0,0,0,0.28)",borderRadius:4,borderLeft:"2px solid rgba(201,168,76,0.38)"}}>
                 <div style={{display:"flex",gap:".38rem",alignItems:"flex-start"}}>
@@ -1156,29 +1187,40 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                       </div>
                     </div>
                   )}
-                  <div style={{fontSize:".52rem",color:"rgba(240,232,208,0.38)",marginTop:".22rem",lineHeight:1.35,letterSpacing:".02em",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}} title={metaLine}>
-                    {metaLine}
-                  </div>
-                  <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",gap:".28rem",marginTop:".32rem"}}>
-                    <button
-                      type="button"
-                      onClick={()=>moveIncomingHandover(idx, -1)}
-                      disabled={sortingDisabled || idx === 0}
-                      style={{...tbStyle, minWidth: 36, background:"transparent", border:"1px solid rgba(201,168,76,0.35)", color:"rgba(201,168,76,0.9)", cursor:(sortingDisabled || idx===0)?"not-allowed":"pointer", opacity:(sortingDisabled || idx===0)?0.35:1}}
-                    >▲</button>
-                    <button
-                      type="button"
-                      onClick={()=>moveIncomingHandover(idx, 1)}
-                      disabled={sortingDisabled || idx === sortedIncomingHandovers.length - 1}
-                      style={{...tbStyle, minWidth: 36, background:"transparent", border:"1px solid rgba(201,168,76,0.35)", color:"rgba(201,168,76,0.9)", cursor:(sortingDisabled || idx===sortedIncomingHandovers.length-1)?"not-allowed":"pointer", opacity:(sortingDisabled || idx===sortedIncomingHandovers.length-1)?0.35:1}}
-                    >▼</button>
-                    {!isEditing && !isEditingTarget && (
-                      <>
-                        <button type="button" onClick={()=>startEditHandover(h)} disabled={!!editingTargetHandoverId} style={{...tbStyle, background:"transparent", border:"1px solid rgba(201,168,76,0.28)", color:editingTargetHandoverId?"rgba(201,168,76,0.25)":"rgba(201,168,76,0.82)", cursor:editingTargetHandoverId?"not-allowed":"pointer"}}>編集</button>
-                        <button type="button" onClick={()=>startEditTargetDates(h)} disabled={!!editingHandoverId} style={{...tbStyle, background:"transparent", border:"1px solid rgba(201,168,76,0.28)", color:editingHandoverId?"rgba(201,168,76,0.25)":"rgba(201,168,76,0.82)", cursor:editingHandoverId?"not-allowed":"pointer"}}>表示日変更</button>
-                      </>
-                    )}
-                    <button type="button" onClick={()=>removeHandoverItem(h._id)} style={{...tbStyle, marginLeft:"auto", background:"transparent", border:"none", color:"rgba(226,75,74,0.55)", fontSize:".85rem", lineHeight:1, padding:".28rem .42rem"}}>✕</button>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      alignItems: "baseline",
+                      gap: ".18rem .28rem",
+                      marginTop: ".16rem",
+                      fontSize: "0.72rem",
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    <span
+                      style={{
+                        flex: "1 1 120px",
+                        minWidth: 0,
+                        color: "rgba(240,232,208,0.38)",
+                        letterSpacing: ".02em",
+                        wordBreak: "break-word",
+                      }}
+                      title={metaLine}
+                    >
+                      {metaLine}
+                    </span>
+                    <span style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: ".08rem", flexShrink: 0 }}>
+                      <button type="button" className="ho-meta-act" onClick={()=>moveIncomingHandover(idx, -1)} disabled={sortingDisabled || idx === 0}>▲</button>
+                      <button type="button" className="ho-meta-act" onClick={()=>moveIncomingHandover(idx, 1)} disabled={sortingDisabled || idx === sortedIncomingHandovers.length - 1}>▼</button>
+                      {!isEditing && !isEditingTarget && (
+                        <>
+                          <button type="button" className="ho-meta-act" onClick={()=>startEditHandover(h)} disabled={!!editingTargetHandoverId}>編集</button>
+                          <button type="button" className="ho-meta-act" onClick={()=>startEditTargetDates(h)} disabled={!!editingHandoverId}>表示日変更</button>
+                        </>
+                      )}
+                      <button type="button" className="ho-meta-act ho-meta-act-del" onClick={()=>removeHandoverItem(h._id)}>✕</button>
+                    </span>
                   </div>
                   </div>
                 </div>
@@ -1653,7 +1695,6 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
             const updatedLabel = getHandoverUpdatedLabel(h);
             const bodyExpanded = expandedHandoverBodyId === h._id;
             const outgoingMeta = `→ ${(h.targetDates||[]).length === 1 ? (h.targetDates||[])[0] : `${(h.targetDates||[]).length}日に送信`}${updatedLabel ? ` · ${updatedLabel}` : ""}`;
-            const tbStyle = { padding: ".32rem .48rem", minHeight: 34, fontSize: ".62rem", fontFamily: "inherit", borderRadius: 4, cursor: "pointer" };
             return (
             <div key={h._id} style={{padding:".32rem .42rem",marginBottom:".18rem",background:"#0c0c0c",border:"1px solid rgba(201,168,76,0.1)",borderRadius:4,display:"flex",alignItems:"flex-start",gap:".38rem"}}>
               <span style={{fontSize:".52rem",padding:".12rem .34rem",borderRadius:2,background:h.type==="item"?"rgba(126,200,127,0.13)":"rgba(126,200,227,0.13)",color:h.type==="item"?"#7ec87e":"#7ec8e3",letterSpacing:".05em",flexShrink:0,marginTop:1}}>
@@ -1808,17 +1849,38 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                     </div>
                   </div>
                 )}
-                <div style={{fontSize:".52rem",color:"rgba(240,232,208,0.38)",marginTop:".22rem",lineHeight:1.35,letterSpacing:".02em",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}} title={outgoingMeta}>
-                  {outgoingMeta}
-                </div>
-                <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",gap:".28rem",marginTop:".32rem"}}>
-                  {!isEditing && !isEditingTarget && (
-                    <>
-                      <button type="button" onClick={()=>startEditHandover(h)} disabled={!!editingTargetHandoverId} style={{...tbStyle, background:"transparent", border:"1px solid rgba(201,168,76,0.28)", color:editingTargetHandoverId?"rgba(201,168,76,0.25)":"rgba(201,168,76,0.82)", cursor:editingTargetHandoverId?"not-allowed":"pointer"}}>編集</button>
-                      <button type="button" onClick={()=>startEditTargetDates(h)} disabled={!!editingHandoverId} style={{...tbStyle, background:"transparent", border:"1px solid rgba(201,168,76,0.28)", color:editingHandoverId?"rgba(201,168,76,0.25)":"rgba(201,168,76,0.82)", cursor:editingHandoverId?"not-allowed":"pointer"}}>表示日変更</button>
-                    </>
-                  )}
-                  <button type="button" onClick={()=>removeHandoverItem(h._id)} style={{...tbStyle, marginLeft:"auto", background:"transparent", border:"none", color:"rgba(226,75,74,0.55)", fontSize:".85rem", lineHeight:1, padding:".28rem .42rem"}}>✕</button>
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    alignItems: "baseline",
+                    gap: ".18rem .28rem",
+                    marginTop: ".16rem",
+                    fontSize: "0.72rem",
+                    lineHeight: 1.45,
+                  }}
+                >
+                  <span
+                    style={{
+                      flex: "1 1 120px",
+                      minWidth: 0,
+                      color: "rgba(240,232,208,0.38)",
+                      letterSpacing: ".02em",
+                      wordBreak: "break-word",
+                    }}
+                    title={outgoingMeta}
+                  >
+                    {outgoingMeta}
+                  </span>
+                  <span style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: ".08rem", flexShrink: 0 }}>
+                    {!isEditing && !isEditingTarget && (
+                      <>
+                        <button type="button" className="ho-meta-act" onClick={()=>startEditHandover(h)} disabled={!!editingTargetHandoverId}>編集</button>
+                        <button type="button" className="ho-meta-act" onClick={()=>startEditTargetDates(h)} disabled={!!editingHandoverId}>表示日変更</button>
+                      </>
+                    )}
+                    <button type="button" className="ho-meta-act ho-meta-act-del" onClick={()=>removeHandoverItem(h._id)}>✕</button>
+                  </span>
                 </div>
               </div>
             </div>
