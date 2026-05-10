@@ -31,6 +31,10 @@ const S = {
 const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 600;
 
+/** 席指定ありの日にテンプレ変更する際の確認（reservation.js の layoutLocked / 警告バナーと併用） */
+const LAYOUT_TEMPLATE_CHANGE_CONFIRM =
+  "席指定済みの予約があります。レイアウトを変更すると、指定済みの席番号が新しいレイアウトと合わない可能性があります。変更後に席指定を確認してください。レイアウトを変更しますか？";
+
 // 席のデフォルトサイズ
 const DEFAULT_SEAT_SIZE = 50;
 
@@ -606,13 +610,13 @@ export function DayLayoutView({ reservations, dateKey, layouts, selectedLayoutId
       <div style={{display:"flex",gap:".5rem",alignItems:"center",flexWrap:"wrap",marginBottom:".5rem"}}>
         <span style={{fontSize:".68rem",color:"rgba(201,168,76,0.6)",letterSpacing:".15em"}}>レイアウト：</span>
         <select
-          style={{...S.inp,maxWidth:240,padding:".4rem .6rem",opacity:layoutLocked?0.65:1}}
+          style={{...S.inp,maxWidth:240,padding:".4rem .6rem"}}
           value={layoutId}
-          disabled={!!layoutLocked}
           onChange={e=>{
-            if (layoutLocked) return;
-            if (onLayoutChange) onLayoutChange(e.target.value);
-            else setInternalSelectedId(e.target.value);
+            const nextId = e.target.value;
+            if (layoutLocked && !window.confirm(LAYOUT_TEMPLATE_CHANGE_CONFIRM)) return;
+            if (onLayoutChange) onLayoutChange(nextId);
+            else setInternalSelectedId(nextId);
           }}
         >
           {layouts.map(l => (

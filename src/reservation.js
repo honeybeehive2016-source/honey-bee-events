@@ -115,7 +115,7 @@ function summarizeTargetArtistPeople(list) {
 }
 
 const SEAT_LAYOUT_LOCK_MESSAGE =
-  "このイベントは既に席配置済みの予約があるため、レイアウトを変更できません。変更が必要な場合は、先に席配置を解除してください。";
+  "席指定済みの予約があります。レイアウト変更時は、指定済み席番号が新しいレイアウトと一致するか確認してください。";
 
 /** スコープ内の予約で seatNumber に1件でも席があれば true（カンマ区切り対応） */
 function reservationsHaveAssignedSeats(list) {
