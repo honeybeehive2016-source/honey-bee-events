@@ -114,6 +114,7 @@ function newLayout(name = "新規レイアウト") {
 
 export default function SeatLayoutModule({ navigateBack, reservations = [], onBackToReservation }) {
   const [layouts, setLayouts] = useState([]);
+  const [dailyLayoutMap, setDailyLayoutMap] = useState({});
   const [selectedLayoutId, setSelectedLayoutId] = useState("");
   const [editMode, setEditMode] = useState(false);
   const [draftLayout, setDraftLayout] = useState(null); // 編集中のレイアウト
@@ -123,6 +124,8 @@ export default function SeatLayoutModule({ navigateBack, reservations = [], onBa
   const [zoom, setZoom] = useState(1);
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
+  /** viewDate + その日の daily.layoutId が変わったときだけテンプレ選択を同期（layouts 一覧の更新だけでは上書きしない） */
+  const layoutSyncTokenRef = useRef(null);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "seatLayouts"), (snap) => {
@@ -130,13 +133,40 @@ export default function SeatLayoutModule({ navigateBack, reservations = [], onBa
       snap.forEach(d => list.push({ ...d.data(), _id: d.id }));
       const sorted = sortLayouts(list);
       setLayouts(sorted);
-      if (sorted.length > 0 && !selectedLayoutId) {
-        setSelectedLayoutId(sorted[0]._id);
-      }
     });
     return () => unsub();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 予約管理と同様：daily の dateKey（無ければ doc.id）→ layoutId（単体画面は YYYY-MM-DD のみ参照）
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "daily"), (snap) => {
+      const map = {};
+      snap.forEach(d => {
+        const data = d.data();
+        const key = data.dateKey || d.id;
+        if (data.layoutId) map[key] = data.layoutId;
+      });
+      setDailyLayoutMap(map);
+    });
+    return () => unsub();
+  }, []);
+
+  // viewDate に対応する daily.layoutId を優先。無効・未設定時はデフォルト／先頭。
+  // layouts コレクションの再取得だけでは同期しない（保存直後の選択が daily で上書きされないようにする）。
+  useEffect(() => {
+    if (!layouts.length) return;
+    const fromDaily = dailyLayoutMap[viewDate];
+    const token = `${viewDate}|${fromDaily || ""}`;
+    if (layoutSyncTokenRef.current === token) return;
+    layoutSyncTokenRef.current = token;
+
+    if (fromDaily && layouts.some(l => l._id === fromDaily)) {
+      setSelectedLayoutId(fromDaily);
+      return;
+    }
+    const def = getDefaultLayout(layouts);
+    setSelectedLayoutId(def?._id || layouts[0]._id || "");
+  }, [viewDate, dailyLayoutMap, layouts]);
 
   const currentLayout = editMode ? draftLayout : layouts.find(l => l._id === selectedLayoutId);
 
