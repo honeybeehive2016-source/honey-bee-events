@@ -926,34 +926,35 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
     <div style={{padding:"1rem .85rem",maxWidth:720,margin:"0 auto"}} className="hb-view">
       <style>{`
         .hb-view .ho-meta-act {
-          padding: .03rem .12rem;
+          padding: 0 .06rem;
           margin: 0;
-          font-size: 0.68rem;
+          font-size: 0.63rem;
           font-family: inherit;
-          line-height: 1.28;
+          line-height: 1.22;
+          font-weight: 400;
           border: 1px solid transparent;
           border-radius: 2px;
           background: transparent;
-          color: rgba(201,168,76,0.4);
+          color: rgba(240,232,208,0.24);
           cursor: pointer;
         }
         .hb-view .ho-meta-act:hover:not(:disabled) {
-          border-color: rgba(201,168,76,0.2);
-          color: rgba(210,185,125,0.75);
-          background: rgba(201,168,76,0.05);
+          border-color: rgba(201,168,76,0.14);
+          color: rgba(220,210,190,0.42);
+          background: rgba(201,168,76,0.04);
         }
         .hb-view .ho-meta-act:disabled {
-          opacity: 0.28;
+          opacity: 0.22;
           cursor: not-allowed;
         }
         .hb-view .ho-meta-act-del {
-          color: rgba(226,75,74,0.32);
-          padding: .02rem .1rem;
+          color: rgba(226,75,74,0.22);
+          padding: 0 .05rem;
         }
         .hb-view .ho-meta-act-del:hover:not(:disabled) {
-          color: rgba(230,130,128,0.85);
-          border-color: rgba(226,75,74,0.18);
-          background: rgba(226,75,74,0.05);
+          color: rgba(230,140,138,0.55);
+          border-color: rgba(226,75,74,0.12);
+          background: rgba(226,75,74,0.04);
         }
       `}</style>
       {/* ヘッダー：日付選択 */}
@@ -1159,25 +1160,26 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                       display: "flex",
                       flexWrap: "wrap",
                       alignItems: "baseline",
-                      gap: ".12rem .22rem",
-                      marginTop: ".14rem",
-                      fontSize: "0.68rem",
-                      lineHeight: 1.35,
+                      gap: ".1rem .18rem",
+                      marginTop: ".12rem",
+                      fontSize: "0.63rem",
+                      lineHeight: 1.22,
                     }}
                   >
                     <span
                       style={{
                         flex: "1 1 120px",
                         minWidth: 0,
-                        color: "rgba(240,232,208,0.30)",
-                        letterSpacing: ".02em",
+                        color: "rgba(240,232,208,0.25)",
+                        letterSpacing: ".015em",
                         wordBreak: "break-word",
+                        fontWeight: 400,
                       }}
                       title={metaLine}
                     >
                       {metaLine}
                     </span>
-                    <span style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: ".06rem", flexShrink: 0 }}>
+                    <span style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: ".04rem", flexShrink: 0 }}>
                       <button type="button" className="ho-meta-act" onClick={()=>moveIncomingHandover(idx, -1)} disabled={sortingDisabled || idx === 0}>▲</button>
                       <button type="button" className="ho-meta-act" onClick={()=>moveIncomingHandover(idx, 1)} disabled={sortingDisabled || idx === sortedIncomingHandovers.length - 1}>▼</button>
                       {!isEditing && !isEditingTarget && (
@@ -1799,25 +1801,26 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                     display: "flex",
                     flexWrap: "wrap",
                     alignItems: "baseline",
-                    gap: ".12rem .22rem",
-                    marginTop: ".14rem",
-                    fontSize: "0.68rem",
-                    lineHeight: 1.35,
+                    gap: ".1rem .18rem",
+                    marginTop: ".12rem",
+                    fontSize: "0.63rem",
+                    lineHeight: 1.22,
                   }}
                 >
                   <span
                     style={{
                       flex: "1 1 120px",
                       minWidth: 0,
-                      color: "rgba(240,232,208,0.30)",
-                      letterSpacing: ".02em",
+                      color: "rgba(240,232,208,0.25)",
+                      letterSpacing: ".015em",
                       wordBreak: "break-word",
+                      fontWeight: 400,
                     }}
                     title={outgoingMeta}
                   >
                     {outgoingMeta}
                   </span>
-                  <span style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: ".06rem", flexShrink: 0 }}>
+                  <span style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: ".04rem", flexShrink: 0 }}>
                     {!isEditing && !isEditingTarget && (
                       <>
                         <button type="button" className="ho-meta-act" onClick={()=>startEditHandover(h)} disabled={!!editingTargetHandoverId}>編集</button>
