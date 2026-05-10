@@ -65,11 +65,18 @@ function normalizeHandoverTargetDates(arr) {
   return [...set].sort();
 }
 
-function HandoverAttachmentsBlock({ attachments }) {
+/** 3行クランプ相当で省略される可能性がある長さか（本文のみ判定） */
+function handoverTextNeedsMoreToggle(text) {
+  const t = String(text || "").trim();
+  if (!t) return false;
+  return t.length > 88 || (t.match(/\n/g) || []).length >= 2;
+}
+
+function HandoverAttachmentsBlock({ attachments, compact }) {
   const list = Array.isArray(attachments) ? attachments : [];
   if (list.length === 0) return null;
   return (
-    <div style={{ marginTop: ".45rem", display: "flex", flexWrap: "wrap", gap: ".45rem", alignItems: "flex-start" }}>
+    <div style={{ marginTop: compact ? ".25rem" : ".45rem", display: "flex", flexWrap: "wrap", gap: compact ? ".35rem" : ".45rem", alignItems: "flex-start" }}>
       {list.map((att, i) => {
         const url = att.downloadURL || "";
         const name = att.originalName || "file";
@@ -392,6 +399,7 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
   const [editTargetRangeStart, setEditTargetRangeStart] = useState("");
   const [editTargetRangeEnd, setEditTargetRangeEnd] = useState("");
   const [savingTargetDatesId, setSavingTargetDatesId] = useState("");
+  const [expandedHandoverBodyId, setExpandedHandoverBodyId] = useState("");
   const handoverNoteFileRef = useRef(null);
   const handoverItemFileRef = useRef(null);
 
@@ -511,6 +519,7 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
 
   const startEditHandover = (h) => {
     cancelEditTargetDates();
+    setExpandedHandoverBodyId("");
     setEditingHandoverId(h._id);
     setEditingHandoverText(String(h.text || ""));
   };
@@ -522,6 +531,7 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
 
   const startEditTargetDates = (h) => {
     cancelEditHandover();
+    setExpandedHandoverBodyId("");
     const initial = normalizeHandoverTargetDates(h.targetDates);
     setEditingTargetHandoverId(h._id);
     setEditTargetMode("multi");
@@ -638,6 +648,7 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
     if (!window.confirm("この申し送りを削除しますか？")) return;
     if (id === editingHandoverId) cancelEditHandover();
     if (id === editingTargetHandoverId) cancelEditTargetDates();
+    if (id === expandedHandoverBodyId) setExpandedHandoverBodyId("");
     const h = allHandovers.find(x => x._id === id);
     if (h && Array.isArray(h.attachments)) {
       for (const att of h.attachments) {
@@ -975,10 +986,9 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
 
       {/* 当日に届く申し送り */}
       {sortedIncomingHandovers.length > 0 && (
-        <div style={{padding:"1rem 1.1rem",marginBottom:"1.25rem",background:"rgba(244,162,97,0.08)",border:"1px solid rgba(244,162,97,0.3)",borderRadius:8}}>
-          <div style={{fontSize:".7rem",letterSpacing:".15em",color:"#f4a261",marginBottom:".75rem",fontWeight:600}}>📋 申し送り</div>
+        <div style={{padding:".6rem .72rem",marginBottom:".85rem",background:"rgba(244,162,97,0.06)",border:"1px solid rgba(244,162,97,0.22)",borderRadius:6}}>
+          <div style={{fontSize:".65rem",letterSpacing:".12em",color:"#f4a261",marginBottom:".42rem",fontWeight:600}}>📋 申し送り</div>
           {sortedIncomingHandovers.map((h, idx) => {
-            const isFromPast = h.sourceDate && h.sourceDate < selectedDate;
             const fromLabel = h.sourceDate === selectedDate
               ? "本日"
               : fmtDate(h.sourceDate || "").replace(/^\d+年/,"") + " から";
@@ -986,33 +996,67 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
             const isEditingTarget = editingTargetHandoverId === h._id;
             const updatedLabel = getHandoverUpdatedLabel(h);
             const sortingDisabled = !!editingHandoverId || !!editingTargetHandoverId;
+            const bodyExpanded = expandedHandoverBodyId === h._id;
+            const metaLine = `${fromLabel}${(h.targetDates||[]).length > 1 ? ` · ${(h.targetDates||[]).length}日` : ""}${updatedLabel ? ` · ${updatedLabel}` : ""}`;
+            const tbStyle = { padding: ".32rem .48rem", minHeight: 34, fontSize: ".62rem", fontFamily: "inherit", borderRadius: 4, cursor: "pointer" };
             return (
-              <div key={h._id} style={{padding:".55rem .7rem",background:h.done?"rgba(126,200,127,0.08)":"rgba(244,162,97,0.04)",borderRadius:5,marginBottom:".4rem",display:"flex",alignItems:"flex-start",gap:".5rem"}}>
-                {h.type === "item" && (
-                  <input type="checkbox" checked={!!h.done} onChange={()=>toggleHandoverItem(h._id, h.done)} style={{accentColor:"#7ec87e",width:18,height:18,marginTop:"3px",flexShrink:0}}/>
-                )}
-                {h.type === "note" && <span style={{color:"#f4a261",marginTop:"2px"}}>•</span>}
-                <div style={{flex:1,minWidth:0}}>
+              <div key={h._id} style={{padding:".32rem .42rem",marginBottom: idx === sortedIncomingHandovers.length - 1 ? 0 : ".18rem",background:h.done?"rgba(126,200,127,0.06)":"rgba(0,0,0,0.28)",borderRadius:4,borderLeft:"2px solid rgba(201,168,76,0.38)"}}>
+                <div style={{display:"flex",gap:".38rem",alignItems:"flex-start"}}>
+                  {h.type === "item" && (
+                    <input type="checkbox" checked={!!h.done} onChange={()=>toggleHandoverItem(h._id, h.done)} style={{accentColor:"#7ec87e",width:18,height:18,marginTop:2,flexShrink:0}}/>
+                  )}
+                  {h.type === "note" && <span style={{color:"#f4a261",marginTop:1,flexShrink:0,fontSize:".72rem",lineHeight:1.2}}>•</span>}
+                  <div style={{flex:1,minWidth:0}}>
                   {isEditing ? (
-                    <div style={{marginBottom:".35rem"}}>
+                    <div style={{marginBottom:".28rem"}}>
                       <textarea
                         value={editingHandoverText}
                         onChange={e=>setEditingHandoverText(e.target.value)}
-                        style={{...S.inp,resize:"vertical",lineHeight:1.5,minHeight:64,fontSize:".8rem"}}
+                        style={{...S.inp,resize:"vertical",lineHeight:1.5,minHeight:72,fontSize:".78rem"}}
                       />
-                      <div style={{display:"flex",gap:".35rem",marginTop:".35rem"}}>
-                        <button type="button" style={{...S.btn("gold"),padding:".25rem .55rem",fontSize:".6rem"}} onClick={()=>saveEditHandover(h._id)} disabled={savingHandoverEditId===h._id}>
+                      <div style={{display:"flex",gap:".35rem",marginTop:".32rem"}}>
+                        <button type="button" style={{...S.btn("gold"),padding:".28rem .55rem",fontSize:".62rem"}} onClick={()=>saveEditHandover(h._id)} disabled={savingHandoverEditId===h._id}>
                           {savingHandoverEditId===h._id ? "保存中…" : "保存"}
                         </button>
-                        <button type="button" style={{...S.btn("ghost"),padding:".25rem .55rem",fontSize:".6rem"}} onClick={cancelEditHandover} disabled={savingHandoverEditId===h._id}>キャンセル</button>
+                        <button type="button" style={{...S.btn("ghost"),padding:".28rem .55rem",fontSize:".62rem"}} onClick={cancelEditHandover} disabled={savingHandoverEditId===h._id}>キャンセル</button>
                       </div>
                     </div>
                   ) : (
-                    <div style={{fontSize:".82rem",color:h.done?"rgba(126,200,127,0.6)":"rgba(240,232,208,0.85)",textDecoration:h.done?"line-through":"none",lineHeight:1.6,whiteSpace:"pre-wrap",wordBreak:"break-word"}}>
-                      {h.text || ((Array.isArray(h.attachments) && h.attachments.length > 0) ? "（ファイル添付）" : "")}
-                    </div>
+                    <>
+                      <div
+                        style={{
+                          fontSize: ".78rem",
+                          color: h.done ? "rgba(126,200,127,0.62)" : "rgba(240,232,208,0.88)",
+                          textDecoration: h.done ? "line-through" : "none",
+                          lineHeight: 1.45,
+                          whiteSpace: "pre-wrap",
+                          wordBreak: "break-word",
+                          overflow: "hidden",
+                          ...(bodyExpanded
+                            ? {}
+                            : {
+                                display: "-webkit-box",
+                                WebkitBoxOrient: "vertical",
+                                WebkitLineClamp: 3,
+                              }),
+                        }}
+                      >
+                        {h.text || ((Array.isArray(h.attachments) && h.attachments.length > 0) ? "（ファイル添付）" : "")}
+                      </div>
+                      {(handoverTextNeedsMoreToggle(h.text) || bodyExpanded) && (
+                        <div style={{ marginTop: ".08rem" }}>
+                          {!bodyExpanded && handoverTextNeedsMoreToggle(h.text) ? (
+                            <button type="button" onClick={()=>setExpandedHandoverBodyId(h._id)} style={{padding:".12rem 0",background:"transparent",border:"none",color:"#c9a84c",cursor:"pointer",fontSize:".58rem",fontFamily:"inherit",textDecoration:"underline",textUnderlineOffset:"2px"}}>もっと見る</button>
+                          ) : (
+                            handoverTextNeedsMoreToggle(h.text) && (
+                              <button type="button" onClick={()=>setExpandedHandoverBodyId("")} style={{padding:".12rem 0",background:"transparent",border:"none",color:"rgba(201,168,76,0.75)",cursor:"pointer",fontSize:".58rem",fontFamily:"inherit"}}>閉じる</button>
+                            )
+                          )}
+                        </div>
+                      )}
+                    </>
                   )}
-                  <HandoverAttachmentsBlock attachments={h.attachments} />
+                  <HandoverAttachmentsBlock attachments={h.attachments} compact />
                   {isEditingTarget && (
                     <div style={{marginTop:".5rem",padding:".65rem .75rem",background:"#111",border:"1px solid rgba(244,162,97,0.25)",borderRadius:5}}>
                       <div style={{fontSize:".62rem",color:"rgba(244,162,97,0.85)",marginBottom:".45rem",letterSpacing:".1em"}}>📅 表示日変更</div>
@@ -1112,34 +1156,31 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                       </div>
                     </div>
                   )}
-                  <div style={{fontSize:".58rem",color:"rgba(240,232,208,0.4)",marginTop:".15rem",letterSpacing:".05em"}}>
-                    {fromLabel}
-                    {(h.targetDates||[]).length > 1 && ` / 計${h.targetDates.length}日`}
-                    {updatedLabel && ` / ${updatedLabel}`}
+                  <div style={{fontSize:".52rem",color:"rgba(240,232,208,0.38)",marginTop:".22rem",lineHeight:1.35,letterSpacing:".02em",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}} title={metaLine}>
+                    {metaLine}
                   </div>
-                </div>
-                <div style={{display:"flex",flexDirection:"column",gap:".2rem"}}>
-                  <div style={{display:"flex",gap:".2rem",marginBottom:".1rem"}}>
+                  <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",gap:".28rem",marginTop:".32rem"}}>
                     <button
                       type="button"
                       onClick={()=>moveIncomingHandover(idx, -1)}
                       disabled={sortingDisabled || idx === 0}
-                      style={{padding:".25rem .45rem",minWidth:34,minHeight:30,background:"transparent",border:"1px solid rgba(201,168,76,0.35)",borderRadius:4,color:"rgba(201,168,76,0.9)",cursor:(sortingDisabled || idx===0)?"not-allowed":"pointer",fontSize:".72rem",lineHeight:1,opacity:(sortingDisabled || idx===0)?0.35:1}}
+                      style={{...tbStyle, minWidth: 36, background:"transparent", border:"1px solid rgba(201,168,76,0.35)", color:"rgba(201,168,76,0.9)", cursor:(sortingDisabled || idx===0)?"not-allowed":"pointer", opacity:(sortingDisabled || idx===0)?0.35:1}}
                     >▲</button>
                     <button
                       type="button"
                       onClick={()=>moveIncomingHandover(idx, 1)}
                       disabled={sortingDisabled || idx === sortedIncomingHandovers.length - 1}
-                      style={{padding:".25rem .45rem",minWidth:34,minHeight:30,background:"transparent",border:"1px solid rgba(201,168,76,0.35)",borderRadius:4,color:"rgba(201,168,76,0.9)",cursor:(sortingDisabled || idx===sortedIncomingHandovers.length-1)?"not-allowed":"pointer",fontSize:".72rem",lineHeight:1,opacity:(sortingDisabled || idx===sortedIncomingHandovers.length-1)?0.35:1}}
+                      style={{...tbStyle, minWidth: 36, background:"transparent", border:"1px solid rgba(201,168,76,0.35)", color:"rgba(201,168,76,0.9)", cursor:(sortingDisabled || idx===sortedIncomingHandovers.length-1)?"not-allowed":"pointer", opacity:(sortingDisabled || idx===sortedIncomingHandovers.length-1)?0.35:1}}
                     >▼</button>
+                    {!isEditing && !isEditingTarget && (
+                      <>
+                        <button type="button" onClick={()=>startEditHandover(h)} disabled={!!editingTargetHandoverId} style={{...tbStyle, background:"transparent", border:"1px solid rgba(201,168,76,0.28)", color:editingTargetHandoverId?"rgba(201,168,76,0.25)":"rgba(201,168,76,0.82)", cursor:editingTargetHandoverId?"not-allowed":"pointer"}}>編集</button>
+                        <button type="button" onClick={()=>startEditTargetDates(h)} disabled={!!editingHandoverId} style={{...tbStyle, background:"transparent", border:"1px solid rgba(201,168,76,0.28)", color:editingHandoverId?"rgba(201,168,76,0.25)":"rgba(201,168,76,0.82)", cursor:editingHandoverId?"not-allowed":"pointer"}}>表示日変更</button>
+                      </>
+                    )}
+                    <button type="button" onClick={()=>removeHandoverItem(h._id)} style={{...tbStyle, marginLeft:"auto", background:"transparent", border:"none", color:"rgba(226,75,74,0.55)", fontSize:".85rem", lineHeight:1, padding:".28rem .42rem"}}>✕</button>
                   </div>
-                  {!isEditing && !isEditingTarget && (
-                    <>
-                      <button type="button" onClick={()=>startEditHandover(h)} disabled={!!editingTargetHandoverId} style={{padding:".15rem .35rem",background:"transparent",border:"none",color:editingTargetHandoverId?"rgba(201,168,76,0.25)":"rgba(201,168,76,0.7)",cursor:editingTargetHandoverId?"not-allowed":"pointer",fontSize:".68rem"}}>編集</button>
-                      <button type="button" onClick={()=>startEditTargetDates(h)} disabled={!!editingHandoverId} style={{padding:".15rem .35rem",background:"transparent",border:"none",color:editingHandoverId?"rgba(201,168,76,0.25)":"rgba(201,168,76,0.7)",cursor:editingHandoverId?"not-allowed":"pointer",fontSize:".65rem"}}>表示日変更</button>
-                    </>
-                  )}
-                  <button type="button" onClick={()=>removeHandoverItem(h._id)} style={{padding:".15rem .35rem",background:"transparent",border:"none",color:"rgba(226,75,74,0.5)",cursor:"pointer",fontSize:".7rem"}}>✕</button>
+                  </div>
                 </div>
               </div>
             );
@@ -1604,38 +1645,70 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
 
       {/* 自分が今日送った申し送り */}
       {outgoingHandovers.length > 0 && (
-        <div style={{marginBottom:"1rem"}}>
-          <div style={{fontSize:".62rem",color:"rgba(201,168,76,0.5)",marginBottom:".4rem",letterSpacing:".1em"}}>📤 本日送信した申し送り（{outgoingHandovers.length}件）</div>
+        <div style={{marginBottom:".85rem"}}>
+          <div style={{fontSize:".58rem",color:"rgba(201,168,76,0.48)",marginBottom:".32rem",letterSpacing:".1em"}}>📤 本日送信した申し送り（{outgoingHandovers.length}件）</div>
           {outgoingHandovers.map(h => {
             const isEditing = editingHandoverId === h._id;
             const isEditingTarget = editingTargetHandoverId === h._id;
             const updatedLabel = getHandoverUpdatedLabel(h);
+            const bodyExpanded = expandedHandoverBodyId === h._id;
+            const outgoingMeta = `→ ${(h.targetDates||[]).length === 1 ? (h.targetDates||[])[0] : `${(h.targetDates||[]).length}日に送信`}${updatedLabel ? ` · ${updatedLabel}` : ""}`;
+            const tbStyle = { padding: ".32rem .48rem", minHeight: 34, fontSize: ".62rem", fontFamily: "inherit", borderRadius: 4, cursor: "pointer" };
             return (
-            <div key={h._id} style={{padding:".4rem .65rem",background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.08)",borderRadius:4,marginBottom:".25rem",display:"flex",alignItems:"flex-start",gap:".5rem"}}>
-              <span style={{fontSize:".55rem",padding:".1rem .4rem",borderRadius:2,background:h.type==="item"?"rgba(126,200,127,0.13)":"rgba(126,200,227,0.13)",color:h.type==="item"?"#7ec87e":"#7ec8e3",letterSpacing:".05em"}}>
+            <div key={h._id} style={{padding:".32rem .42rem",marginBottom:".18rem",background:"#0c0c0c",border:"1px solid rgba(201,168,76,0.1)",borderRadius:4,display:"flex",alignItems:"flex-start",gap:".38rem"}}>
+              <span style={{fontSize:".52rem",padding:".12rem .34rem",borderRadius:2,background:h.type==="item"?"rgba(126,200,127,0.13)":"rgba(126,200,227,0.13)",color:h.type==="item"?"#7ec87e":"#7ec8e3",letterSpacing:".05em",flexShrink:0,marginTop:1}}>
                 {h.type === "item" ? "☑" : "📝"}
               </span>
               <div style={{flex:1,minWidth:0}}>
                 {isEditing ? (
-                  <div style={{marginBottom:".3rem"}}>
+                  <div style={{marginBottom:".28rem"}}>
                     <textarea
                       value={editingHandoverText}
                       onChange={e=>setEditingHandoverText(e.target.value)}
-                      style={{...S.inp,resize:"vertical",lineHeight:1.5,minHeight:64,fontSize:".78rem"}}
+                      style={{...S.inp,resize:"vertical",lineHeight:1.5,minHeight:72,fontSize:".76rem"}}
                     />
-                    <div style={{display:"flex",gap:".35rem",marginTop:".35rem"}}>
-                      <button type="button" style={{...S.btn("gold"),padding:".25rem .55rem",fontSize:".58rem"}} onClick={()=>saveEditHandover(h._id)} disabled={savingHandoverEditId===h._id}>
+                    <div style={{display:"flex",gap:".35rem",marginTop:".32rem"}}>
+                      <button type="button" style={{...S.btn("gold"),padding:".28rem .55rem",fontSize:".6rem"}} onClick={()=>saveEditHandover(h._id)} disabled={savingHandoverEditId===h._id}>
                         {savingHandoverEditId===h._id ? "保存中…" : "保存"}
                       </button>
-                      <button type="button" style={{...S.btn("ghost"),padding:".25rem .55rem",fontSize:".58rem"}} onClick={cancelEditHandover} disabled={savingHandoverEditId===h._id}>キャンセル</button>
+                      <button type="button" style={{...S.btn("ghost"),padding:".28rem .55rem",fontSize:".6rem"}} onClick={cancelEditHandover} disabled={savingHandoverEditId===h._id}>キャンセル</button>
                     </div>
                   </div>
                 ) : (
-                  <div style={{fontSize:".75rem",color:"rgba(240,232,208,0.7)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                    {h.text || ((Array.isArray(h.attachments) && h.attachments.length > 0) ? "（ファイル添付）" : "")}
-                  </div>
+                  <>
+                    <div
+                      style={{
+                        fontSize: ".76rem",
+                        color: "rgba(240,232,208,0.78)",
+                        lineHeight: 1.45,
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-word",
+                        overflow: "hidden",
+                        ...(bodyExpanded
+                          ? {}
+                          : {
+                              display: "-webkit-box",
+                              WebkitBoxOrient: "vertical",
+                              WebkitLineClamp: 3,
+                            }),
+                      }}
+                    >
+                      {h.text || ((Array.isArray(h.attachments) && h.attachments.length > 0) ? "（ファイル添付）" : "")}
+                    </div>
+                    {(handoverTextNeedsMoreToggle(h.text) || bodyExpanded) && (
+                      <div style={{ marginTop: ".08rem" }}>
+                        {!bodyExpanded && handoverTextNeedsMoreToggle(h.text) ? (
+                          <button type="button" onClick={()=>setExpandedHandoverBodyId(h._id)} style={{padding:".12rem 0",background:"transparent",border:"none",color:"#c9a84c",cursor:"pointer",fontSize:".58rem",fontFamily:"inherit",textDecoration:"underline",textUnderlineOffset:"2px"}}>もっと見る</button>
+                        ) : (
+                          handoverTextNeedsMoreToggle(h.text) && (
+                            <button type="button" onClick={()=>setExpandedHandoverBodyId("")} style={{padding:".12rem 0",background:"transparent",border:"none",color:"rgba(201,168,76,0.75)",cursor:"pointer",fontSize:".58rem",fontFamily:"inherit"}}>閉じる</button>
+                          )
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
-                <HandoverAttachmentsBlock attachments={h.attachments} />
+                <HandoverAttachmentsBlock attachments={h.attachments} compact />
                 {isEditingTarget && (
                   <div style={{marginTop:".5rem",padding:".65rem .75rem",background:"#111",border:"1px solid rgba(244,162,97,0.25)",borderRadius:5}}>
                     <div style={{fontSize:".62rem",color:"rgba(244,162,97,0.85)",marginBottom:".45rem",letterSpacing:".1em"}}>📅 表示日変更</div>
@@ -1735,19 +1808,18 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                     </div>
                   </div>
                 )}
-                <div style={{fontSize:".58rem",color:"rgba(240,232,208,0.4)"}}>
-                  {(h.targetDates||[]).length === 1 ? `→ ${h.targetDates[0]}` : `→ ${(h.targetDates||[]).length}日に送信`}
-                  {updatedLabel && ` / ${updatedLabel}`}
+                <div style={{fontSize:".52rem",color:"rgba(240,232,208,0.38)",marginTop:".22rem",lineHeight:1.35,letterSpacing:".02em",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}} title={outgoingMeta}>
+                  {outgoingMeta}
                 </div>
-              </div>
-              <div style={{display:"flex",flexDirection:"column",gap:".2rem"}}>
-                {!isEditing && !isEditingTarget && (
-                  <>
-                    <button type="button" onClick={()=>startEditHandover(h)} disabled={!!editingTargetHandoverId} style={{padding:".15rem .35rem",background:"transparent",border:"none",color:editingTargetHandoverId?"rgba(201,168,76,0.25)":"rgba(201,168,76,0.7)",cursor:editingTargetHandoverId?"not-allowed":"pointer",fontSize:".65rem"}}>編集</button>
-                    <button type="button" onClick={()=>startEditTargetDates(h)} disabled={!!editingHandoverId} style={{padding:".15rem .35rem",background:"transparent",border:"none",color:editingHandoverId?"rgba(201,168,76,0.25)":"rgba(201,168,76,0.7)",cursor:editingHandoverId?"not-allowed":"pointer",fontSize:".62rem"}}>表示日変更</button>
-                  </>
-                )}
-                <button type="button" onClick={()=>removeHandoverItem(h._id)} style={{padding:".2rem .4rem",background:"transparent",border:"none",color:"rgba(226,75,74,0.5)",cursor:"pointer",fontSize:".7rem"}}>✕</button>
+                <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",gap:".28rem",marginTop:".32rem"}}>
+                  {!isEditing && !isEditingTarget && (
+                    <>
+                      <button type="button" onClick={()=>startEditHandover(h)} disabled={!!editingTargetHandoverId} style={{...tbStyle, background:"transparent", border:"1px solid rgba(201,168,76,0.28)", color:editingTargetHandoverId?"rgba(201,168,76,0.25)":"rgba(201,168,76,0.82)", cursor:editingTargetHandoverId?"not-allowed":"pointer"}}>編集</button>
+                      <button type="button" onClick={()=>startEditTargetDates(h)} disabled={!!editingHandoverId} style={{...tbStyle, background:"transparent", border:"1px solid rgba(201,168,76,0.28)", color:editingHandoverId?"rgba(201,168,76,0.25)":"rgba(201,168,76,0.82)", cursor:editingHandoverId?"not-allowed":"pointer"}}>表示日変更</button>
+                    </>
+                  )}
+                  <button type="button" onClick={()=>removeHandoverItem(h._id)} style={{...tbStyle, marginLeft:"auto", background:"transparent", border:"none", color:"rgba(226,75,74,0.55)", fontSize:".85rem", lineHeight:1, padding:".28rem .42rem"}}>✕</button>
+                </div>
               </div>
             </div>
           );})}
