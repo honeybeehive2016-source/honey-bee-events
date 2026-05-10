@@ -376,6 +376,9 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
   const [handoverUploading, setHandoverUploading] = useState(false);
   const [pendingNoteFileCount, setPendingNoteFileCount] = useState(0);
   const [pendingItemFileCount, setPendingItemFileCount] = useState(0);
+  const [editingHandoverId, setEditingHandoverId] = useState("");
+  const [editingHandoverText, setEditingHandoverText] = useState("");
+  const [savingHandoverEditId, setSavingHandoverEditId] = useState("");
   const handoverNoteFileRef = useRef(null);
   const handoverItemFileRef = useRef(null);
 
@@ -482,6 +485,37 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
   // 申し送り共通：updateField
   const updateField_handover = async (id, field, value) => {
     await setDoc(doc(db, "handovers", id), { [field]: value, updatedAt: Date.now() }, { merge: true });
+  };
+
+  const startEditHandover = (h) => {
+    setEditingHandoverId(h._id);
+    setEditingHandoverText(String(h.text || ""));
+  };
+
+  const cancelEditHandover = () => {
+    setEditingHandoverId("");
+    setEditingHandoverText("");
+  };
+
+  const saveEditHandover = async (id) => {
+    const nextText = editingHandoverText.trim();
+    if (!nextText) {
+      alert("本文を入力してください");
+      return;
+    }
+    setSavingHandoverEditId(id);
+    try {
+      await setDoc(doc(db, "handovers", id), { text: nextText, updatedAt: Date.now(), editedAt: Date.now() }, { merge: true });
+      cancelEditHandover();
+    } finally {
+      setSavingHandoverEditId("");
+    }
+  };
+
+  const getHandoverUpdatedLabel = (h) => {
+    const t = Number(h.editedAt || h.updatedAt || 0);
+    if (!Number.isFinite(t) || t <= 0) return "";
+    return `最終更新：${new Date(t).toLocaleString("ja-JP")}`;
   };
 
   // 申し送り：個別項目追加（モードに応じて対象日を設定）
@@ -826,6 +860,8 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
             const fromLabel = h.sourceDate === selectedDate
               ? "本日"
               : fmtDate(h.sourceDate || "").replace(/^\d+年/,"") + " から";
+            const isEditing = editingHandoverId === h._id;
+            const updatedLabel = getHandoverUpdatedLabel(h);
             return (
               <div key={h._id} style={{padding:".55rem .7rem",background:h.done?"rgba(126,200,127,0.08)":"rgba(244,162,97,0.04)",borderRadius:5,marginBottom:".4rem",display:"flex",alignItems:"flex-start",gap:".5rem"}}>
                 {h.type === "item" && (
@@ -833,16 +869,36 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                 )}
                 {h.type === "note" && <span style={{color:"#f4a261",marginTop:"2px"}}>•</span>}
                 <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:".82rem",color:h.done?"rgba(126,200,127,0.6)":"rgba(240,232,208,0.85)",textDecoration:h.done?"line-through":"none",lineHeight:1.6,whiteSpace:"pre-wrap",wordBreak:"break-word"}}>
-                    {h.text || ((Array.isArray(h.attachments) && h.attachments.length > 0) ? "（ファイル添付）" : "")}
-                  </div>
+                  {isEditing ? (
+                    <div style={{marginBottom:".35rem"}}>
+                      <textarea
+                        value={editingHandoverText}
+                        onChange={e=>setEditingHandoverText(e.target.value)}
+                        style={{...S.inp,resize:"vertical",lineHeight:1.5,minHeight:64,fontSize:".8rem"}}
+                      />
+                      <div style={{display:"flex",gap:".35rem",marginTop:".35rem"}}>
+                        <button type="button" style={{...S.btn("gold"),padding:".25rem .55rem",fontSize:".6rem"}} onClick={()=>saveEditHandover(h._id)} disabled={savingHandoverEditId===h._id}>
+                          {savingHandoverEditId===h._id ? "保存中…" : "保存"}
+                        </button>
+                        <button type="button" style={{...S.btn("ghost"),padding:".25rem .55rem",fontSize:".6rem"}} onClick={cancelEditHandover} disabled={savingHandoverEditId===h._id}>キャンセル</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{fontSize:".82rem",color:h.done?"rgba(126,200,127,0.6)":"rgba(240,232,208,0.85)",textDecoration:h.done?"line-through":"none",lineHeight:1.6,whiteSpace:"pre-wrap",wordBreak:"break-word"}}>
+                      {h.text || ((Array.isArray(h.attachments) && h.attachments.length > 0) ? "（ファイル添付）" : "")}
+                    </div>
+                  )}
                   <HandoverAttachmentsBlock attachments={h.attachments} />
                   <div style={{fontSize:".58rem",color:"rgba(240,232,208,0.4)",marginTop:".15rem",letterSpacing:".05em"}}>
                     {fromLabel}
                     {(h.targetDates||[]).length > 1 && ` / 計${h.targetDates.length}日`}
+                    {updatedLabel && ` / ${updatedLabel}`}
                   </div>
                 </div>
-                <button onClick={()=>removeHandoverItem(h._id)} style={{padding:".15rem .35rem",background:"transparent",border:"none",color:"rgba(226,75,74,0.5)",cursor:"pointer",fontSize:".7rem"}}>✕</button>
+                <div style={{display:"flex",flexDirection:"column",gap:".2rem"}}>
+                  {!isEditing && <button type="button" onClick={()=>startEditHandover(h)} style={{padding:".15rem .35rem",background:"transparent",border:"none",color:"rgba(201,168,76,0.7)",cursor:"pointer",fontSize:".68rem"}}>編集</button>}
+                  <button type="button" onClick={()=>removeHandoverItem(h._id)} style={{padding:".15rem .35rem",background:"transparent",border:"none",color:"rgba(226,75,74,0.5)",cursor:"pointer",fontSize:".7rem"}}>✕</button>
+                </div>
               </div>
             );
           })}
@@ -1308,23 +1364,46 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
       {outgoingHandovers.length > 0 && (
         <div style={{marginBottom:"1rem"}}>
           <div style={{fontSize:".62rem",color:"rgba(201,168,76,0.5)",marginBottom:".4rem",letterSpacing:".1em"}}>📤 本日送信した申し送り（{outgoingHandovers.length}件）</div>
-          {outgoingHandovers.map(h => (
+          {outgoingHandovers.map(h => {
+            const isEditing = editingHandoverId === h._id;
+            const updatedLabel = getHandoverUpdatedLabel(h);
+            return (
             <div key={h._id} style={{padding:".4rem .65rem",background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.08)",borderRadius:4,marginBottom:".25rem",display:"flex",alignItems:"flex-start",gap:".5rem"}}>
               <span style={{fontSize:".55rem",padding:".1rem .4rem",borderRadius:2,background:h.type==="item"?"rgba(126,200,127,0.13)":"rgba(126,200,227,0.13)",color:h.type==="item"?"#7ec87e":"#7ec8e3",letterSpacing:".05em"}}>
                 {h.type === "item" ? "☑" : "📝"}
               </span>
               <div style={{flex:1,minWidth:0}}>
-                <div style={{fontSize:".75rem",color:"rgba(240,232,208,0.7)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                  {h.text || ((Array.isArray(h.attachments) && h.attachments.length > 0) ? "（ファイル添付）" : "")}
-                </div>
+                {isEditing ? (
+                  <div style={{marginBottom:".3rem"}}>
+                    <textarea
+                      value={editingHandoverText}
+                      onChange={e=>setEditingHandoverText(e.target.value)}
+                      style={{...S.inp,resize:"vertical",lineHeight:1.5,minHeight:64,fontSize:".78rem"}}
+                    />
+                    <div style={{display:"flex",gap:".35rem",marginTop:".35rem"}}>
+                      <button type="button" style={{...S.btn("gold"),padding:".25rem .55rem",fontSize:".58rem"}} onClick={()=>saveEditHandover(h._id)} disabled={savingHandoverEditId===h._id}>
+                        {savingHandoverEditId===h._id ? "保存中…" : "保存"}
+                      </button>
+                      <button type="button" style={{...S.btn("ghost"),padding:".25rem .55rem",fontSize:".58rem"}} onClick={cancelEditHandover} disabled={savingHandoverEditId===h._id}>キャンセル</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{fontSize:".75rem",color:"rgba(240,232,208,0.7)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    {h.text || ((Array.isArray(h.attachments) && h.attachments.length > 0) ? "（ファイル添付）" : "")}
+                  </div>
+                )}
                 <HandoverAttachmentsBlock attachments={h.attachments} />
                 <div style={{fontSize:".58rem",color:"rgba(240,232,208,0.4)"}}>
                   {(h.targetDates||[]).length === 1 ? `→ ${h.targetDates[0]}` : `→ ${(h.targetDates||[]).length}日に送信`}
+                  {updatedLabel && ` / ${updatedLabel}`}
                 </div>
               </div>
-              <button onClick={()=>removeHandoverItem(h._id)} style={{padding:".2rem .4rem",background:"transparent",border:"none",color:"rgba(226,75,74,0.5)",cursor:"pointer",fontSize:".7rem"}}>✕</button>
+              <div style={{display:"flex",flexDirection:"column",gap:".2rem"}}>
+                {!isEditing && <button type="button" onClick={()=>startEditHandover(h)} style={{padding:".15rem .35rem",background:"transparent",border:"none",color:"rgba(201,168,76,0.7)",cursor:"pointer",fontSize:".65rem"}}>編集</button>}
+                <button type="button" onClick={()=>removeHandoverItem(h._id)} style={{padding:".2rem .4rem",background:"transparent",border:"none",color:"rgba(226,75,74,0.5)",cursor:"pointer",fontSize:".7rem"}}>✕</button>
+              </div>
             </div>
-          ))}
+          );})}
         </div>
       )}
 
@@ -1356,6 +1435,7 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                         {h.type === "item" ? (h.done?"✓":"☐") : "📝"}{" "}
                         {h.text || ((Array.isArray(h.attachments) && h.attachments.length > 0) ? "（ファイル添付）" : "")}
                         <span style={{fontSize:".58rem",color:"rgba(240,232,208,0.35)",marginLeft:".5rem"}}>→ {(h.targetDates||[]).length}日</span>
+                        {getHandoverUpdatedLabel(h) && <span style={{fontSize:".58rem",color:"rgba(240,232,208,0.35)",marginLeft:".5rem"}}>{getHandoverUpdatedLabel(h)}</span>}
                       </div>
                       <HandoverAttachmentsBlock attachments={h.attachments} />
                     </div>
