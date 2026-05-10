@@ -118,6 +118,36 @@ function getNoteType(n) {
   return "item";
 }
 
+function normalizeDateStrings(arr) {
+  const seen = new Set();
+  const out = [];
+  for (const d of arr || []) {
+    const s = String(d || "").trim();
+    if (!s || seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+  out.sort();
+  return out;
+}
+
+/** sortOrder 昇順。無いものは末尾相当として createdAt → _id で安定化 */
+function compareIncomingKitchenNotes(a, b) {
+  const pa =
+    typeof a.sortOrder === "number" && !Number.isNaN(a.sortOrder)
+      ? a.sortOrder
+      : Number.MAX_SAFE_INTEGER;
+  const pb =
+    typeof b.sortOrder === "number" && !Number.isNaN(b.sortOrder)
+      ? b.sortOrder
+      : Number.MAX_SAFE_INTEGER;
+  if (pa !== pb) return pa - pb;
+  const ca = a.createdAt || 0;
+  const cb = b.createdAt || 0;
+  if (ca !== cb) return ca - cb;
+  return String(a._id).localeCompare(String(b._id));
+}
+
 const S = {
   card: { background:"#111", border:"1px solid rgba(201,168,76,0.1)", borderRadius:6, padding:"1rem 1.25rem", marginBottom:".75rem" },
   secTitle: { fontFamily:"Georgia,serif", fontSize:".7rem", letterSpacing:".25em", textTransform:"uppercase", color:"#c9a84c", borderBottom:"1px solid rgba(201,168,76,0.2)", paddingBottom:".5rem", marginBottom:".75rem", marginTop:"1.25rem" },
@@ -245,6 +275,15 @@ export default function KitchenNotesModule() {
   const notePhotoInputRef = useRef(null);
   const itemPhotoInputRef = useRef(null);
 
+  const [textEditId, setTextEditId] = useState(null);
+  const [textEditDraft, setTextEditDraft] = useState("");
+  const [displayEditId, setDisplayEditId] = useState(null);
+  const [displayEditMode, setDisplayEditMode] = useState("multi");
+  const [displayEditSingle, setDisplayEditSingle] = useState("");
+  const [displayEditMulti, setDisplayEditMulti] = useState([]);
+  const [displayEditRangeStart, setDisplayEditRangeStart] = useState("");
+  const [displayEditRangeEnd, setDisplayEditRangeEnd] = useState("");
+
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "kitchenNotes"), (snap) => {
       const list = [];
@@ -354,6 +393,11 @@ export default function KitchenNotesModule() {
     await setDoc(doc(db, "kitchenNotes", id), { ...patch, updatedAt: Date.now() }, { merge: true });
   };
 
+  const patchKitchenNoteEdited = async (id, patch) => {
+    const now = Date.now();
+    await setDoc(doc(db, "kitchenNotes", id), { ...patch, updatedAt: now, editedAt: now }, { merge: true });
+  };
+
   const removeKitchenNote = async (id) => {
     if (!window.confirm("この厨房共有を削除しますか？")) return;
     const note = allKitchenNotes.find(x => x._id === id);
@@ -380,10 +424,143 @@ export default function KitchenNotesModule() {
 
   const incomingKitchenNotes = allKitchenNotes
     .filter(n => getResolvedTargetDates(n).includes(selectedDate))
-    .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+    .sort(compareIncomingKitchenNotes);
+
+  const controlsLocked = !!textEditId || !!displayEditId;
+
+  const beginTextEdit = (n) => {
+    setDisplayEditId(null);
+    setTextEditId(n._id);
+    setTextEditDraft(getNoteText(n));
+  };
+
+  const cancelTextEdit = () => {
+    setTextEditId(null);
+    setTextEditDraft("");
+  };
+
+  const saveTextEdit = async () => {
+    const tid = textEditId;
+    if (!tid) return;
+    const trimmed = textEditDraft.trim();
+    if (!trimmed) {
+      alert("本文を入力してください");
+      return;
+    }
+    await patchKitchenNoteEdited(tid, { text: trimmed });
+    cancelTextEdit();
+  };
+
+  const beginDisplayEdit = (n) => {
+    setTextEditId(null);
+    const resolved = normalizeDateStrings(getResolvedTargetDates(n));
+    setDisplayEditId(n._id);
+    setDisplayEditMode("multi");
+    setDisplayEditMulti(resolved);
+    setDisplayEditSingle(resolved.length === 1 ? resolved[0] : "");
+    setDisplayEditRangeStart("");
+    setDisplayEditRangeEnd("");
+  };
+
+  const cancelDisplayEdit = () => {
+    setDisplayEditId(null);
+  };
+
+  const computeEditTargetDates = () => {
+    if (displayEditMode === "nextday") {
+      return [shiftDate(selectedDate, 1)];
+    }
+    if (displayEditMode === "single") {
+      if (!displayEditSingle) return [];
+      return [displayEditSingle];
+    }
+    if (displayEditMode === "multi") {
+      return [...displayEditMulti];
+    }
+    if (displayEditMode === "range") {
+      if (!displayEditRangeStart || !displayEditRangeEnd) return [];
+      if (displayEditRangeEnd < displayEditRangeStart) {
+        alert("終了日が開始日より前になっています");
+        return null;
+      }
+      const dates = [];
+      let cur = displayEditRangeStart;
+      while (cur <= displayEditRangeEnd) {
+        dates.push(cur);
+        cur = shiftDate(cur, 1);
+      }
+      return dates;
+    }
+    return [];
+  };
+
+  const saveDisplayEdit = async () => {
+    const id = displayEditId;
+    if (!id) return;
+    const raw = computeEditTargetDates();
+    if (raw === null) return;
+    const normalized = normalizeDateStrings(raw);
+    if (normalized.length === 0) {
+      alert("表示日を1つ以上選んでください");
+      return;
+    }
+    await patchKitchenNoteEdited(id, { targetDates: normalized });
+    cancelDisplayEdit();
+  };
+
+  const toggleDisplayEditMultiDate = (dateStr) => {
+    setDisplayEditMulti((prev) => {
+      if (prev.includes(dateStr)) return normalizeDateStrings(prev.filter(d => d !== dateStr));
+      return normalizeDateStrings([...prev, dateStr]);
+    });
+  };
+
+  const applyIncomingReorder = async (orderedNotes) => {
+    const now = Date.now();
+    await Promise.all(
+      orderedNotes.map((note, i) =>
+        setDoc(doc(db, "kitchenNotes", note._id), { sortOrder: i, updatedAt: now }, { merge: true })
+      )
+    );
+  };
+
+  const moveIncoming = async (index, delta) => {
+    if (controlsLocked) return;
+    const list = [...incomingKitchenNotes];
+    const j = index + delta;
+    if (j < 0 || j >= list.length) return;
+    const tmp = list[index];
+    list[index] = list[j];
+    list[j] = tmp;
+    await applyIncomingReorder(list);
+  };
 
   return (
     <div style={{ padding:"1rem .85rem", maxWidth:720, margin:"0 auto" }} className="hb-view">
+      <style>{`
+        .hb-view .ho-meta-act {
+          padding: 0 .06rem;
+          margin: 0;
+          font-size: 0.63rem;
+          font-family: inherit;
+          line-height: 1.22;
+          font-weight: 400;
+          border: 1px solid transparent;
+          border-radius: 2px;
+          background: transparent;
+          color: rgba(240,232,208,0.24);
+          cursor: pointer;
+        }
+        .hb-view .ho-meta-act:hover:not(:disabled) {
+          border-color: rgba(201,168,76,0.14);
+          color: rgba(220,210,190,0.42);
+          background: rgba(201,168,76,0.04);
+        }
+        .hb-view .ho-meta-act:disabled {
+          opacity: 0.22;
+          cursor: not-allowed;
+        }
+      `}</style>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:".5rem", marginBottom:"1rem", flexWrap:"wrap" }}>
         <h1 style={{ fontFamily:"Georgia,serif", fontSize:"1.05rem", color:"rgba(126,200,127,0.95)", letterSpacing:".12em", margin:0 }}>🍳 厨房共有</h1>
       </div>
@@ -421,15 +598,18 @@ export default function KitchenNotesModule() {
             </div>
           ) : (
             <div style={{ display:"flex", flexDirection:"column", gap:".5rem" }}>
-              {incomingKitchenNotes.map(n => {
+              {incomingKitchenNotes.map((n, index) => {
                 const nt = getNoteType(n);
                 const cv = getCategoryVisual(n.category);
                 const bodyText = getNoteText(n);
+                const isTextEditing = textEditId === n._id;
+                const isDisplayEditing = displayEditId === n._id;
                 const fromLabel = n.sourceDate === selectedDate
                   ? "本日投稿"
                   : `${fmtDate(n.sourceDate || "").replace(/^\d+年/, "")} 投稿`;
                 const rowBackground = cv.rowBg;
                 const rowBorder = cv.border;
+                const lastIdx = incomingKitchenNotes.length - 1;
                 return (
                   <div
                     key={n._id}
@@ -468,9 +648,126 @@ export default function KitchenNotesModule() {
                       )}
                       <button type="button" onClick={() => removeKitchenNote(n._id)} style={{ padding:".1rem .35rem", background:"transparent", border:"none", color:"rgba(226,75,74,0.55)", cursor:"pointer", fontSize:".68rem", marginLeft:".15rem" }}>削除</button>
                     </div>
-                    <div style={{ fontSize:".84rem", color: nt === "item" && n.done ? "rgba(240,232,208,0.45)" : "rgba(240,232,208,0.88)", lineHeight:1.65, whiteSpace:"pre-wrap", wordBreak:"break-word", textDecoration: nt === "item" && n.done ? "line-through" : "none" }}>
-                      {bodyText}
+                    <div style={{ display:"flex", flexWrap:"wrap", alignItems:"center", gap:".15rem", marginBottom:isTextEditing || isDisplayEditing ? ".45rem" : ".25rem", marginTop:"-.05rem" }}>
+                      <button type="button" className="ho-meta-act" disabled={controlsLocked || index === 0} onClick={() => moveIncoming(index, -1)} title="上へ">▲</button>
+                      <button type="button" className="ho-meta-act" disabled={controlsLocked || index === lastIdx} onClick={() => moveIncoming(index, 1)} title="下へ">▼</button>
+                      <button type="button" className="ho-meta-act" disabled={controlsLocked || isDisplayEditing} onClick={() => beginTextEdit(n)}>編集</button>
+                      <button type="button" className="ho-meta-act" disabled={controlsLocked || isTextEditing} onClick={() => beginDisplayEdit(n)}>表示日変更</button>
                     </div>
+                    {isTextEditing ? (
+                      <div style={{ marginBottom:".5rem" }}>
+                        <textarea
+                          value={textEditDraft}
+                          onChange={e => setTextEditDraft(e.target.value)}
+                          style={{ ...S.inp, resize:"vertical", lineHeight:1.6, minHeight:72, width:"100%", fontSize:".84rem", marginBottom:".35rem" }}
+                        />
+                        <div style={{ display:"flex", gap:".35rem", flexWrap:"wrap" }}>
+                          <button type="button" className="ho-meta-act" onClick={saveTextEdit}>保存</button>
+                          <button type="button" className="ho-meta-act" onClick={cancelTextEdit}>キャンセル</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize:".84rem", color: nt === "item" && n.done ? "rgba(240,232,208,0.45)" : "rgba(240,232,208,0.88)", lineHeight:1.65, whiteSpace:"pre-wrap", wordBreak:"break-word", textDecoration: nt === "item" && n.done ? "line-through" : "none" }}>
+                        {bodyText}
+                      </div>
+                    )}
+                    {isDisplayEditing ? (
+                      <div style={{ marginTop:".55rem", padding:".55rem .65rem", background:"#0a0a0a", border:`1px solid ${cv.border}`, borderRadius:4 }}>
+                        <div style={{ fontSize:".62rem", color:"rgba(126,200,127,0.75)", marginBottom:".4rem", letterSpacing:".08em" }}>📅 表示日（編集）</div>
+                        <div style={{ display:"flex", flexWrap:"wrap", gap:".35rem", marginBottom:".45rem" }}>
+                          {[
+                            { k:"nextday", l:"明日" },
+                            { k:"single", l:"日付指定" },
+                            { k:"multi", l:"複数日" },
+                            { k:"range", l:"期間" },
+                          ].map(m => (
+                            <button key={m.k} type="button" onClick={() => setDisplayEditMode(m.k)} style={{ padding:".22rem .55rem", borderRadius:3, border:`1px solid ${displayEditMode === m.k ? "#7ec8b8" : "rgba(126,200,127,0.25)"}`, background: displayEditMode === m.k ? "#7ec8b8" : "transparent", color: displayEditMode === m.k ? "#0a0a0a" : "rgba(126,200,127,0.75)", fontSize:".62rem", cursor:"pointer", fontFamily:"inherit", letterSpacing:".05em" }}>{m.l}</button>
+                          ))}
+                        </div>
+                        {displayEditMode === "nextday" && (
+                          <div style={{ fontSize:".65rem", color:"rgba(240,232,208,0.55)", marginBottom:".35rem" }}>
+                            → 翌日（{fmtDate(shiftDate(selectedDate, 1))}）に表示
+                          </div>
+                        )}
+                        {displayEditMode === "single" && (
+                          <>
+                            <div style={{ fontSize:".6rem", color:"rgba(240,232,208,0.45)", marginBottom:".25rem" }}>
+                              {displayEditSingle ? `→ ${fmtDate(displayEditSingle)} に表示` : "カレンダーから日付を選択"}
+                            </div>
+                            <MiniCalendar
+                              selectedDates={displayEditSingle ? [displayEditSingle] : []}
+                              onToggle={(d) => setDisplayEditSingle(d === displayEditSingle ? "" : d)}
+                              mode="single"
+                              fromDate={selectedDate}
+                            />
+                          </>
+                        )}
+                        {displayEditMode === "multi" && (
+                          <>
+                            <div style={{ fontSize:".6rem", color:"rgba(240,232,208,0.45)", marginBottom:".25rem" }}>
+                              {displayEditMulti.length === 0 ? "カレンダーから複数の日付を選択" : `${displayEditMulti.length}日に表示`}
+                            </div>
+                            <MiniCalendar
+                              selectedDates={displayEditMulti}
+                              onToggle={toggleDisplayEditMultiDate}
+                              mode="multi"
+                              fromDate={selectedDate}
+                            />
+                            {displayEditMulti.length > 0 && (
+                              <div style={{ display:"flex", flexWrap:"wrap", gap:".28rem", marginTop:".35rem" }}>
+                                {displayEditMulti.map(d => (
+                                  <span key={d} style={{ padding:".12rem .4rem", background:"rgba(126,200,127,0.13)", borderRadius:3, fontSize:".58rem", color:"#7ec8b8", display:"inline-flex", alignItems:"center", gap:".22rem" }}>
+                                    {d.slice(5)}
+                                    <button type="button" onClick={() => toggleDisplayEditMultiDate(d)} style={{ background:"transparent", border:"none", color:"#7ec8b8", cursor:"pointer", padding:0, fontSize:".58rem" }}>✕</button>
+                                  </span>
+                                ))}
+                                <button type="button" onClick={() => setDisplayEditMulti([])} style={{ ...S.btn("sm"), padding:".08rem .35rem", fontSize:".52rem" }}>クリア</button>
+                              </div>
+                            )}
+                          </>
+                        )}
+                        {displayEditMode === "range" && (
+                          <>
+                            <div style={{ fontSize:".6rem", color:"rgba(240,232,208,0.45)", marginBottom:".25rem" }}>
+                              {!displayEditRangeStart ? "開始日をタップ" : !displayEditRangeEnd ? "終了日をタップ" : (() => {
+                                const s = new Date(displayEditRangeStart+"T00:00:00");
+                                const e = new Date(displayEditRangeEnd+"T00:00:00");
+                                return `${displayEditRangeStart} 〜 ${displayEditRangeEnd} （${Math.round((e-s)/86400000)+1}日間）`;
+                              })()}
+                            </div>
+                            <MiniCalendar
+                              selectedDates={[displayEditRangeStart, displayEditRangeEnd].filter(Boolean)}
+                              onToggle={(d) => {
+                                if (!displayEditRangeStart || (displayEditRangeStart && displayEditRangeEnd)) {
+                                  setDisplayEditRangeStart(d);
+                                  setDisplayEditRangeEnd("");
+                                } else {
+                                  if (d < displayEditRangeStart) {
+                                    setDisplayEditRangeEnd(displayEditRangeStart);
+                                    setDisplayEditRangeStart(d);
+                                  } else if (d === displayEditRangeStart) {
+                                    setDisplayEditRangeStart("");
+                                  } else {
+                                    setDisplayEditRangeEnd(d);
+                                  }
+                                }
+                              }}
+                              mode="range"
+                              rangeStart={displayEditRangeStart}
+                              rangeEnd={displayEditRangeEnd}
+                              fromDate={selectedDate}
+                            />
+                            {(displayEditRangeStart || displayEditRangeEnd) && (
+                              <button type="button" onClick={() => { setDisplayEditRangeStart(""); setDisplayEditRangeEnd(""); }} style={{ ...S.btn("sm"), padding:".12rem .45rem", fontSize:".55rem", marginTop:".35rem" }}>リセット</button>
+                            )}
+                          </>
+                        )}
+                        <div style={{ display:"flex", gap:".35rem", flexWrap:"wrap", marginTop:".5rem" }}>
+                          <button type="button" className="ho-meta-act" onClick={saveDisplayEdit}>保存</button>
+                          <button type="button" className="ho-meta-act" onClick={cancelDisplayEdit}>キャンセル</button>
+                        </div>
+                      </div>
+                    ) : null}
                     {Array.isArray(n.attachments) && n.attachments.length > 0 ? (
                       <div style={{ display:"flex", flexWrap:"wrap", gap:".45rem", marginTop:".55rem" }}>
                         {n.attachments.map((att, idx) => (
