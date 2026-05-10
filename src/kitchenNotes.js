@@ -623,37 +623,20 @@ export default function KitchenNotesModule() {
                       opacity: nt === "item" && n.done ? 0.72 : 1,
                     }}
                   >
-                    <div style={{ display:"flex", flexWrap:"wrap", alignItems:"center", gap:".4rem", marginBottom:".35rem" }}>
-                      <span style={{ fontSize:".55rem", padding:".1rem .4rem", borderRadius:3, background: nt === "note" ? "rgba(126,200,227,0.18)" : "rgba(126,200,127,0.15)", color: nt === "note" ? "#9cd4f0" : "#7ec8b8", letterSpacing:".05em" }}>
-                        {nt === "note" ? "📝 自由記載" : "☑ チェック項目"}
-                      </span>
-                      <span style={{ fontSize:".58rem", padding:".12rem .45rem", borderRadius:3, background: cv.badgeBg, color: cv.badgeColor, letterSpacing:".05em", border:`1px solid ${cv.border}` }}>
-                        {kitchenCategoryLabel(n.category)}
-                      </span>
-                      {n.author ? (
-                        <span style={{ fontSize:".62rem", color:"rgba(240,232,208,0.5)" }}>👤 {n.author}</span>
-                      ) : null}
-                      <span style={{ fontSize:".58rem", color:"rgba(240,232,208,0.38)" }}>{fromLabel}</span>
-                      <span style={{ flex:1, minWidth:".25rem" }} />
-                      {nt === "item" && (
-                        <label style={{ display:"inline-flex", alignItems:"center", gap:".25rem", cursor:"pointer", fontSize:".62rem", color:"#7ec87e" }}>
-                          <input
-                            type="checkbox"
-                            checked={!!n.done}
-                            onChange={() => patchKitchenNote(n._id, { done: !n.done })}
-                            style={{ accentColor:"#7ec87e", width:15, height:15 }}
-                          />
-                          完了
-                        </label>
-                      )}
-                      <button type="button" onClick={() => removeKitchenNote(n._id)} style={{ padding:".1rem .35rem", background:"transparent", border:"none", color:"rgba(226,75,74,0.55)", cursor:"pointer", fontSize:".68rem", marginLeft:".15rem" }}>削除</button>
-                    </div>
-                    <div style={{ display:"flex", flexWrap:"wrap", alignItems:"center", gap:".15rem", marginBottom:isTextEditing || isDisplayEditing ? ".45rem" : ".25rem", marginTop:"-.05rem" }}>
-                      <button type="button" className="ho-meta-act" disabled={controlsLocked || index === 0} onClick={() => moveIncoming(index, -1)} title="上へ">▲</button>
-                      <button type="button" className="ho-meta-act" disabled={controlsLocked || index === lastIdx} onClick={() => moveIncoming(index, 1)} title="下へ">▼</button>
-                      <button type="button" className="ho-meta-act" disabled={controlsLocked || isDisplayEditing} onClick={() => beginTextEdit(n)}>編集</button>
-                      <button type="button" className="ho-meta-act" disabled={controlsLocked || isTextEditing} onClick={() => beginDisplayEdit(n)}>表示日変更</button>
-                    </div>
+                    <div style={{ display:"flex", flexWrap:"wrap", gap:".55rem .65rem", alignItems:"flex-start", justifyContent:"space-between" }}>
+                      <div style={{ flex:"1 1 180px", minWidth:0 }}>
+                        <div style={{ display:"flex", flexWrap:"wrap", alignItems:"center", gap:".4rem", marginBottom:".35rem" }}>
+                          <span style={{ fontSize:".55rem", padding:".1rem .4rem", borderRadius:3, background: nt === "note" ? "rgba(126,200,227,0.18)" : "rgba(126,200,127,0.15)", color: nt === "note" ? "#9cd4f0" : "#7ec8b8", letterSpacing:".05em" }}>
+                            {nt === "note" ? "📝 自由記載" : "☑ チェック項目"}
+                          </span>
+                          <span style={{ fontSize:".58rem", padding:".12rem .45rem", borderRadius:3, background: cv.badgeBg, color: cv.badgeColor, letterSpacing:".05em", border:`1px solid ${cv.border}` }}>
+                            {kitchenCategoryLabel(n.category)}
+                          </span>
+                          {n.author ? (
+                            <span style={{ fontSize:".62rem", color:"rgba(240,232,208,0.5)" }}>👤 {n.author}</span>
+                          ) : null}
+                          <span style={{ fontSize:".58rem", color:"rgba(240,232,208,0.38)" }}>{fromLabel}</span>
+                        </div>
                     {isTextEditing ? (
                       <div style={{ marginBottom:".5rem" }}>
                         <textarea
@@ -788,6 +771,30 @@ export default function KitchenNotesModule() {
                         ))}
                       </div>
                     ) : null}
+                      </div>
+                      <div style={{ flexShrink:0, display:"flex", flexDirection:"column", alignItems:"flex-end", gap:".32rem", paddingTop:".02rem" }}>
+                        <div style={{ display:"flex", flexWrap:"wrap", alignItems:"center", justifyContent:"flex-end", gap:".35rem" }}>
+                          {nt === "item" && (
+                            <label style={{ display:"inline-flex", alignItems:"center", gap:".25rem", cursor:"pointer", fontSize:".62rem", color:"#7ec87e" }}>
+                              <input
+                                type="checkbox"
+                                checked={!!n.done}
+                                onChange={() => patchKitchenNote(n._id, { done: !n.done })}
+                                style={{ accentColor:"#7ec87e", width:15, height:15 }}
+                              />
+                              完了
+                            </label>
+                          )}
+                          <button type="button" onClick={() => removeKitchenNote(n._id)} style={{ padding:".1rem .35rem", background:"transparent", border:"none", color:"rgba(226,75,74,0.55)", cursor:"pointer", fontSize:".68rem" }}>削除</button>
+                        </div>
+                        <div style={{ display:"flex", flexWrap:"wrap", justifyContent:"flex-end", gap:".15rem" }}>
+                          <button type="button" className="ho-meta-act" disabled={controlsLocked || index === 0} onClick={() => moveIncoming(index, -1)} title="上へ">▲</button>
+                          <button type="button" className="ho-meta-act" disabled={controlsLocked || index === lastIdx} onClick={() => moveIncoming(index, 1)} title="下へ">▼</button>
+                          <button type="button" className="ho-meta-act" disabled={controlsLocked || isDisplayEditing} onClick={() => beginTextEdit(n)}>編集</button>
+                          <button type="button" className="ho-meta-act" disabled={controlsLocked || isTextEditing} onClick={() => beginDisplayEdit(n)}>表示日変更</button>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 );
               })}
