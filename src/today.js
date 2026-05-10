@@ -65,13 +65,6 @@ function normalizeHandoverTargetDates(arr) {
   return [...set].sort();
 }
 
-/** 3行クランプ相当で省略される可能性がある長さか（本文のみ判定） */
-function handoverTextNeedsMoreToggle(text) {
-  const t = String(text || "").trim();
-  if (!t) return false;
-  return t.length > 88 || (t.match(/\n/g) || []).length >= 2;
-}
-
 function HandoverAttachmentsBlock({ attachments, compact }) {
   const list = Array.isArray(attachments) ? attachments : [];
   if (list.length === 0) return null;
@@ -399,7 +392,6 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
   const [editTargetRangeStart, setEditTargetRangeStart] = useState("");
   const [editTargetRangeEnd, setEditTargetRangeEnd] = useState("");
   const [savingTargetDatesId, setSavingTargetDatesId] = useState("");
-  const [expandedHandoverBodyId, setExpandedHandoverBodyId] = useState("");
   const handoverNoteFileRef = useRef(null);
   const handoverItemFileRef = useRef(null);
 
@@ -519,7 +511,6 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
 
   const startEditHandover = (h) => {
     cancelEditTargetDates();
-    setExpandedHandoverBodyId("");
     setEditingHandoverId(h._id);
     setEditingHandoverText(String(h.text || ""));
   };
@@ -531,7 +522,6 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
 
   const startEditTargetDates = (h) => {
     cancelEditHandover();
-    setExpandedHandoverBodyId("");
     const initial = normalizeHandoverTargetDates(h.targetDates);
     setEditingTargetHandoverId(h._id);
     setEditTargetMode("multi");
@@ -648,7 +638,6 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
     if (!window.confirm("この申し送りを削除しますか？")) return;
     if (id === editingHandoverId) cancelEditHandover();
     if (id === editingTargetHandoverId) cancelEditTargetDates();
-    if (id === expandedHandoverBodyId) setExpandedHandoverBodyId("");
     const h = allHandovers.find(x => x._id === id);
     if (h && Array.isArray(h.attachments)) {
       for (const att of h.attachments) {
@@ -937,34 +926,34 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
     <div style={{padding:"1rem .85rem",maxWidth:720,margin:"0 auto"}} className="hb-view">
       <style>{`
         .hb-view .ho-meta-act {
-          padding: .1rem .22rem;
+          padding: .03rem .12rem;
           margin: 0;
-          font-size: inherit;
+          font-size: 0.68rem;
           font-family: inherit;
-          line-height: 1.35;
+          line-height: 1.28;
           border: 1px solid transparent;
-          border-radius: 3px;
+          border-radius: 2px;
           background: transparent;
-          color: rgba(201,168,76,0.58);
+          color: rgba(201,168,76,0.4);
           cursor: pointer;
         }
         .hb-view .ho-meta-act:hover:not(:disabled) {
-          border-color: rgba(201,168,76,0.32);
-          color: rgba(244,213,140,0.92);
-          background: rgba(201,168,76,0.07);
+          border-color: rgba(201,168,76,0.2);
+          color: rgba(210,185,125,0.75);
+          background: rgba(201,168,76,0.05);
         }
         .hb-view .ho-meta-act:disabled {
-          opacity: 0.32;
+          opacity: 0.28;
           cursor: not-allowed;
         }
         .hb-view .ho-meta-act-del {
-          color: rgba(226,75,74,0.42);
-          padding: .08rem .2rem;
+          color: rgba(226,75,74,0.32);
+          padding: .02rem .1rem;
         }
         .hb-view .ho-meta-act-del:hover:not(:disabled) {
-          color: rgba(255,150,148,0.95);
-          border-color: rgba(226,75,74,0.22);
-          background: rgba(226,75,74,0.06);
+          color: rgba(230,130,128,0.85);
+          border-color: rgba(226,75,74,0.18);
+          background: rgba(226,75,74,0.05);
         }
       `}</style>
       {/* ヘッダー：日付選択 */}
@@ -1028,7 +1017,6 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
             const isEditingTarget = editingTargetHandoverId === h._id;
             const updatedLabel = getHandoverUpdatedLabel(h);
             const sortingDisabled = !!editingHandoverId || !!editingTargetHandoverId;
-            const bodyExpanded = expandedHandoverBodyId === h._id;
             const metaLine = `${fromLabel}${(h.targetDates||[]).length > 1 ? ` · ${(h.targetDates||[]).length}日` : ""}${updatedLabel ? ` · ${updatedLabel}` : ""}`;
             return (
               <div key={h._id} style={{padding:".32rem .42rem",marginBottom: idx === sortedIncomingHandovers.length - 1 ? 0 : ".18rem",background:h.done?"rgba(126,200,127,0.06)":"rgba(0,0,0,0.28)",borderRadius:4,borderLeft:"2px solid rgba(201,168,76,0.38)"}}>
@@ -1053,39 +1041,18 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                       </div>
                     </div>
                   ) : (
-                    <>
-                      <div
-                        style={{
-                          fontSize: ".78rem",
-                          color: h.done ? "rgba(126,200,127,0.62)" : "rgba(240,232,208,0.88)",
-                          textDecoration: h.done ? "line-through" : "none",
-                          lineHeight: 1.45,
-                          whiteSpace: "pre-wrap",
-                          wordBreak: "break-word",
-                          overflow: "hidden",
-                          ...(bodyExpanded
-                            ? {}
-                            : {
-                                display: "-webkit-box",
-                                WebkitBoxOrient: "vertical",
-                                WebkitLineClamp: 3,
-                              }),
-                        }}
-                      >
-                        {h.text || ((Array.isArray(h.attachments) && h.attachments.length > 0) ? "（ファイル添付）" : "")}
-                      </div>
-                      {(handoverTextNeedsMoreToggle(h.text) || bodyExpanded) && (
-                        <div style={{ marginTop: ".08rem" }}>
-                          {!bodyExpanded && handoverTextNeedsMoreToggle(h.text) ? (
-                            <button type="button" onClick={()=>setExpandedHandoverBodyId(h._id)} style={{padding:".12rem 0",background:"transparent",border:"none",color:"#c9a84c",cursor:"pointer",fontSize:".58rem",fontFamily:"inherit",textDecoration:"underline",textUnderlineOffset:"2px"}}>もっと見る</button>
-                          ) : (
-                            handoverTextNeedsMoreToggle(h.text) && (
-                              <button type="button" onClick={()=>setExpandedHandoverBodyId("")} style={{padding:".12rem 0",background:"transparent",border:"none",color:"rgba(201,168,76,0.75)",cursor:"pointer",fontSize:".58rem",fontFamily:"inherit"}}>閉じる</button>
-                            )
-                          )}
-                        </div>
-                      )}
-                    </>
+                    <div
+                      style={{
+                        fontSize: ".78rem",
+                        color: h.done ? "rgba(126,200,127,0.62)" : "rgba(240,232,208,0.88)",
+                        textDecoration: h.done ? "line-through" : "none",
+                        lineHeight: 1.45,
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-word",
+                      }}
+                    >
+                      {h.text || ((Array.isArray(h.attachments) && h.attachments.length > 0) ? "（ファイル添付）" : "")}
+                    </div>
                   )}
                   <HandoverAttachmentsBlock attachments={h.attachments} compact />
                   {isEditingTarget && (
@@ -1192,17 +1159,17 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                       display: "flex",
                       flexWrap: "wrap",
                       alignItems: "baseline",
-                      gap: ".18rem .28rem",
-                      marginTop: ".16rem",
-                      fontSize: "0.72rem",
-                      lineHeight: 1.45,
+                      gap: ".12rem .22rem",
+                      marginTop: ".14rem",
+                      fontSize: "0.68rem",
+                      lineHeight: 1.35,
                     }}
                   >
                     <span
                       style={{
                         flex: "1 1 120px",
                         minWidth: 0,
-                        color: "rgba(240,232,208,0.38)",
+                        color: "rgba(240,232,208,0.30)",
                         letterSpacing: ".02em",
                         wordBreak: "break-word",
                       }}
@@ -1210,7 +1177,7 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                     >
                       {metaLine}
                     </span>
-                    <span style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: ".08rem", flexShrink: 0 }}>
+                    <span style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: ".06rem", flexShrink: 0 }}>
                       <button type="button" className="ho-meta-act" onClick={()=>moveIncomingHandover(idx, -1)} disabled={sortingDisabled || idx === 0}>▲</button>
                       <button type="button" className="ho-meta-act" onClick={()=>moveIncomingHandover(idx, 1)} disabled={sortingDisabled || idx === sortedIncomingHandovers.length - 1}>▼</button>
                       {!isEditing && !isEditingTarget && (
@@ -1693,7 +1660,6 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
             const isEditing = editingHandoverId === h._id;
             const isEditingTarget = editingTargetHandoverId === h._id;
             const updatedLabel = getHandoverUpdatedLabel(h);
-            const bodyExpanded = expandedHandoverBodyId === h._id;
             const outgoingMeta = `→ ${(h.targetDates||[]).length === 1 ? (h.targetDates||[])[0] : `${(h.targetDates||[]).length}日に送信`}${updatedLabel ? ` · ${updatedLabel}` : ""}`;
             return (
             <div key={h._id} style={{padding:".32rem .42rem",marginBottom:".18rem",background:"#0c0c0c",border:"1px solid rgba(201,168,76,0.1)",borderRadius:4,display:"flex",alignItems:"flex-start",gap:".38rem"}}>
@@ -1716,38 +1682,17 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                     </div>
                   </div>
                 ) : (
-                  <>
-                    <div
-                      style={{
-                        fontSize: ".76rem",
-                        color: "rgba(240,232,208,0.78)",
-                        lineHeight: 1.45,
-                        whiteSpace: "pre-wrap",
-                        wordBreak: "break-word",
-                        overflow: "hidden",
-                        ...(bodyExpanded
-                          ? {}
-                          : {
-                              display: "-webkit-box",
-                              WebkitBoxOrient: "vertical",
-                              WebkitLineClamp: 3,
-                            }),
-                      }}
-                    >
-                      {h.text || ((Array.isArray(h.attachments) && h.attachments.length > 0) ? "（ファイル添付）" : "")}
-                    </div>
-                    {(handoverTextNeedsMoreToggle(h.text) || bodyExpanded) && (
-                      <div style={{ marginTop: ".08rem" }}>
-                        {!bodyExpanded && handoverTextNeedsMoreToggle(h.text) ? (
-                          <button type="button" onClick={()=>setExpandedHandoverBodyId(h._id)} style={{padding:".12rem 0",background:"transparent",border:"none",color:"#c9a84c",cursor:"pointer",fontSize:".58rem",fontFamily:"inherit",textDecoration:"underline",textUnderlineOffset:"2px"}}>もっと見る</button>
-                        ) : (
-                          handoverTextNeedsMoreToggle(h.text) && (
-                            <button type="button" onClick={()=>setExpandedHandoverBodyId("")} style={{padding:".12rem 0",background:"transparent",border:"none",color:"rgba(201,168,76,0.75)",cursor:"pointer",fontSize:".58rem",fontFamily:"inherit"}}>閉じる</button>
-                          )
-                        )}
-                      </div>
-                    )}
-                  </>
+                  <div
+                    style={{
+                      fontSize: ".76rem",
+                      color: "rgba(240,232,208,0.78)",
+                      lineHeight: 1.45,
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    {h.text || ((Array.isArray(h.attachments) && h.attachments.length > 0) ? "（ファイル添付）" : "")}
+                  </div>
                 )}
                 <HandoverAttachmentsBlock attachments={h.attachments} compact />
                 {isEditingTarget && (
@@ -1854,17 +1799,17 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                     display: "flex",
                     flexWrap: "wrap",
                     alignItems: "baseline",
-                    gap: ".18rem .28rem",
-                    marginTop: ".16rem",
-                    fontSize: "0.72rem",
-                    lineHeight: 1.45,
+                    gap: ".12rem .22rem",
+                    marginTop: ".14rem",
+                    fontSize: "0.68rem",
+                    lineHeight: 1.35,
                   }}
                 >
                   <span
                     style={{
                       flex: "1 1 120px",
                       minWidth: 0,
-                      color: "rgba(240,232,208,0.38)",
+                      color: "rgba(240,232,208,0.30)",
                       letterSpacing: ".02em",
                       wordBreak: "break-word",
                     }}
@@ -1872,7 +1817,7 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                   >
                     {outgoingMeta}
                   </span>
-                  <span style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: ".08rem", flexShrink: 0 }}>
+                  <span style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: ".06rem", flexShrink: 0 }}>
                     {!isEditing && !isEditingTarget && (
                       <>
                         <button type="button" className="ho-meta-act" onClick={()=>startEditHandover(h)} disabled={!!editingTargetHandoverId}>編集</button>
