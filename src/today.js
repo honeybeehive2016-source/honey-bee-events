@@ -59,6 +59,12 @@ function isHandoverPdfAtt(att) {
   return String(att.originalName || "").toLowerCase().endsWith(".pdf");
 }
 
+/** YYYY-MM-DD 文字列の配列を重複除去して昇順ソート */
+function normalizeHandoverTargetDates(arr) {
+  const set = new Set((arr || []).filter(Boolean));
+  return [...set].sort();
+}
+
 function HandoverAttachmentsBlock({ attachments }) {
   const list = Array.isArray(attachments) ? attachments : [];
   if (list.length === 0) return null;
@@ -379,6 +385,13 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
   const [editingHandoverId, setEditingHandoverId] = useState("");
   const [editingHandoverText, setEditingHandoverText] = useState("");
   const [savingHandoverEditId, setSavingHandoverEditId] = useState("");
+  const [editingTargetHandoverId, setEditingTargetHandoverId] = useState("");
+  const [editTargetMode, setEditTargetMode] = useState("multi"); // nextday | single | multi | range
+  const [editTargetDate, setEditTargetDate] = useState("");
+  const [editTargetDates, setEditTargetDates] = useState([]);
+  const [editTargetRangeStart, setEditTargetRangeStart] = useState("");
+  const [editTargetRangeEnd, setEditTargetRangeEnd] = useState("");
+  const [savingTargetDatesId, setSavingTargetDatesId] = useState("");
   const handoverNoteFileRef = useRef(null);
   const handoverItemFileRef = useRef(null);
 
@@ -487,7 +500,17 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
     await setDoc(doc(db, "handovers", id), { [field]: value, updatedAt: Date.now() }, { merge: true });
   };
 
+  const cancelEditTargetDates = () => {
+    setEditingTargetHandoverId("");
+    setEditTargetMode("multi");
+    setEditTargetDate("");
+    setEditTargetDates([]);
+    setEditTargetRangeStart("");
+    setEditTargetRangeEnd("");
+  };
+
   const startEditHandover = (h) => {
+    cancelEditTargetDates();
     setEditingHandoverId(h._id);
     setEditingHandoverText(String(h.text || ""));
   };
@@ -495,6 +518,17 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
   const cancelEditHandover = () => {
     setEditingHandoverId("");
     setEditingHandoverText("");
+  };
+
+  const startEditTargetDates = (h) => {
+    cancelEditHandover();
+    const initial = normalizeHandoverTargetDates(h.targetDates);
+    setEditingTargetHandoverId(h._id);
+    setEditTargetMode("multi");
+    setEditTargetDates(initial);
+    setEditTargetDate("");
+    setEditTargetRangeStart("");
+    setEditTargetRangeEnd("");
   };
 
   const saveEditHandover = async (id) => {
@@ -602,6 +636,8 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
   // 申し送り：削除
   const removeHandoverItem = async (id) => {
     if (!window.confirm("この申し送りを削除しますか？")) return;
+    if (id === editingHandoverId) cancelEditHandover();
+    if (id === editingTargetHandoverId) cancelEditTargetDates();
     const h = allHandovers.find(x => x._id === id);
     if (h && Array.isArray(h.attachments)) {
       for (const att of h.attachments) {
@@ -678,7 +714,7 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
     });
 
   const moveIncomingHandover = async (index, direction) => {
-    if (editingHandoverId) return;
+    if (editingHandoverId || editingTargetHandoverId) return;
     const target = index + direction;
     if (target < 0 || target >= sortedIncomingHandovers.length) return;
     const next = [...sortedIncomingHandovers];
@@ -700,6 +736,64 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
     const dd = String(dt.getDate()).padStart(2, "0");
     return `${yy}-${mm}-${dd}`;
   };
+
+  const computeEditTargetDates = () => {
+    if (editTargetMode === "nextday") {
+      return [shiftDate(selectedDate, 1)];
+    }
+    if (editTargetMode === "single") {
+      if (!editTargetDate) return [];
+      return [editTargetDate];
+    }
+    if (editTargetMode === "multi") {
+      return [...editTargetDates];
+    }
+    if (editTargetMode === "range") {
+      if (!editTargetRangeStart || !editTargetRangeEnd) return [];
+      if (editTargetRangeEnd < editTargetRangeStart) {
+        alert("終了日が開始日より前になっています");
+        return null;
+      }
+      const dates = [];
+      let cur = editTargetRangeStart;
+      while (cur <= editTargetRangeEnd) {
+        dates.push(cur);
+        cur = shiftDate(cur, 1);
+      }
+      return dates;
+    }
+    return [];
+  };
+
+  const toggleEditMultiDate = (date) => {
+    if (editTargetDates.includes(date)) {
+      setEditTargetDates(editTargetDates.filter(d => d !== date));
+    } else {
+      setEditTargetDates([...editTargetDates, date].sort());
+    }
+  };
+
+  const saveEditTargetDates = async (id) => {
+    const computed = computeEditTargetDates();
+    if (computed === null) return;
+    const normalized = normalizeHandoverTargetDates(computed);
+    if (normalized.length === 0) {
+      alert("送り先の日付を指定してください");
+      return;
+    }
+    setSavingTargetDatesId(id);
+    try {
+      await setDoc(doc(db, "handovers", id), {
+        targetDates: normalized,
+        updatedAt: Date.now(),
+        editedAt: Date.now(),
+      }, { merge: true });
+      cancelEditTargetDates();
+    } finally {
+      setSavingTargetDatesId("");
+    }
+  };
+
   const prevDay = () => {
     setSelectedDate(prev => shiftDate(prev, -1));
   };
@@ -889,8 +983,9 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
               ? "本日"
               : fmtDate(h.sourceDate || "").replace(/^\d+年/,"") + " から";
             const isEditing = editingHandoverId === h._id;
+            const isEditingTarget = editingTargetHandoverId === h._id;
             const updatedLabel = getHandoverUpdatedLabel(h);
-            const sortingDisabled = !!editingHandoverId;
+            const sortingDisabled = !!editingHandoverId || !!editingTargetHandoverId;
             return (
               <div key={h._id} style={{padding:".55rem .7rem",background:h.done?"rgba(126,200,127,0.08)":"rgba(244,162,97,0.04)",borderRadius:5,marginBottom:".4rem",display:"flex",alignItems:"flex-start",gap:".5rem"}}>
                 {h.type === "item" && (
@@ -918,6 +1013,105 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                     </div>
                   )}
                   <HandoverAttachmentsBlock attachments={h.attachments} />
+                  {isEditingTarget && (
+                    <div style={{marginTop:".5rem",padding:".65rem .75rem",background:"#111",border:"1px solid rgba(244,162,97,0.25)",borderRadius:5}}>
+                      <div style={{fontSize:".62rem",color:"rgba(244,162,97,0.85)",marginBottom:".45rem",letterSpacing:".1em"}}>📅 表示日変更</div>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:".4rem",marginBottom:".5rem"}}>
+                        {[
+                          {k:"nextday",l:"明日"},
+                          {k:"single",l:"日付指定"},
+                          {k:"multi",l:"複数日"},
+                          {k:"range",l:"期間"},
+                        ].map(m => (
+                          <button key={m.k} type="button" onClick={()=>setEditTargetMode(m.k)} style={{padding:".3rem .7rem",borderRadius:3,border:"1px solid "+(editTargetMode===m.k?"#f4a261":"rgba(244,162,97,0.2)"),background:editTargetMode===m.k?"#f4a261":"transparent",color:editTargetMode===m.k?"#0a0a0a":"rgba(244,162,97,0.7)",fontSize:".65rem",cursor:"pointer",fontFamily:"inherit",letterSpacing:".05em"}}>{m.l}</button>
+                        ))}
+                      </div>
+                      {editTargetMode === "nextday" && (
+                        <div style={{fontSize:".7rem",color:"rgba(240,232,208,0.6)"}}>
+                          → 翌日（{fmtDate(shiftDate(selectedDate, 1))}）に表示
+                        </div>
+                      )}
+                      {editTargetMode === "single" && (
+                        <>
+                          <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.5)",marginBottom:".25rem"}}>
+                            {editTargetDate ? `→ ${fmtDate(editTargetDate)} に表示` : "カレンダーから日付を選択"}
+                          </div>
+                          <MiniCalendar
+                            selectedDates={editTargetDate ? [editTargetDate] : []}
+                            onToggle={(d)=>setEditTargetDate(d===editTargetDate?"":d)}
+                            mode="single"
+                            fromDate={selectedDate}
+                          />
+                        </>
+                      )}
+                      {editTargetMode === "multi" && (
+                        <>
+                          <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.5)",marginBottom:".25rem"}}>
+                            {editTargetDates.length === 0 ? "カレンダーから複数の日付を選択" : `${editTargetDates.length}日間に表示`}
+                          </div>
+                          <MiniCalendar
+                            selectedDates={editTargetDates}
+                            onToggle={toggleEditMultiDate}
+                            mode="multi"
+                            fromDate={selectedDate}
+                          />
+                          {editTargetDates.length > 0 && (
+                            <div style={{display:"flex",flexWrap:"wrap",gap:".3rem",marginTop:".4rem"}}>
+                              {editTargetDates.map(d => (
+                                <span key={d} style={{padding:".15rem .45rem",background:"rgba(244,162,97,0.13)",borderRadius:3,fontSize:".62rem",color:"#f4a261",display:"inline-flex",alignItems:"center",gap:".25rem"}}>
+                                  {d.slice(5)}
+                                  <button type="button" onClick={()=>toggleEditMultiDate(d)} style={{background:"transparent",border:"none",color:"#f4a261",cursor:"pointer",padding:0,fontSize:".62rem"}}>✕</button>
+                                </span>
+                              ))}
+                              <button type="button" onClick={()=>setEditTargetDates([])} style={{...S.btn("sm"),padding:".1rem .4rem",fontSize:".55rem"}}>クリア</button>
+                            </div>
+                          )}
+                        </>
+                      )}
+                      {editTargetMode === "range" && (
+                        <>
+                          <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.5)",marginBottom:".25rem"}}>
+                            {!editTargetRangeStart ? "開始日をタップ" : !editTargetRangeEnd ? "終了日をタップ" : (() => {
+                              const s = new Date(editTargetRangeStart+"T00:00:00");
+                              const e = new Date(editTargetRangeEnd+"T00:00:00");
+                              return `${editTargetRangeStart} 〜 ${editTargetRangeEnd} （${Math.round((e-s)/86400000)+1}日間）`;
+                            })()}
+                          </div>
+                          <MiniCalendar
+                            selectedDates={[editTargetRangeStart, editTargetRangeEnd].filter(Boolean)}
+                            onToggle={(d)=>{
+                              if (!editTargetRangeStart || (editTargetRangeStart && editTargetRangeEnd)) {
+                                setEditTargetRangeStart(d);
+                                setEditTargetRangeEnd("");
+                              } else {
+                                if (d < editTargetRangeStart) {
+                                  setEditTargetRangeEnd(editTargetRangeStart);
+                                  setEditTargetRangeStart(d);
+                                } else if (d === editTargetRangeStart) {
+                                  setEditTargetRangeStart("");
+                                } else {
+                                  setEditTargetRangeEnd(d);
+                                }
+                              }
+                            }}
+                            mode="range"
+                            rangeStart={editTargetRangeStart}
+                            rangeEnd={editTargetRangeEnd}
+                            fromDate={selectedDate}
+                          />
+                          {(editTargetRangeStart || editTargetRangeEnd) && (
+                            <button type="button" onClick={()=>{setEditTargetRangeStart("");setEditTargetRangeEnd("");}} style={{...S.btn("sm"),padding:".15rem .5rem",fontSize:".58rem",marginTop:".4rem"}}>リセット</button>
+                          )}
+                        </>
+                      )}
+                      <div style={{display:"flex",gap:".35rem",marginTop:".5rem"}}>
+                        <button type="button" style={{...S.btn("gold"),padding:".25rem .55rem",fontSize:".6rem"}} onClick={()=>saveEditTargetDates(h._id)} disabled={savingTargetDatesId===h._id}>
+                          {savingTargetDatesId===h._id ? "保存中…" : "保存"}
+                        </button>
+                        <button type="button" style={{...S.btn("ghost"),padding:".25rem .55rem",fontSize:".6rem"}} onClick={cancelEditTargetDates} disabled={savingTargetDatesId===h._id}>キャンセル</button>
+                      </div>
+                    </div>
+                  )}
                   <div style={{fontSize:".58rem",color:"rgba(240,232,208,0.4)",marginTop:".15rem",letterSpacing:".05em"}}>
                     {fromLabel}
                     {(h.targetDates||[]).length > 1 && ` / 計${h.targetDates.length}日`}
@@ -939,7 +1133,12 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                       style={{padding:".25rem .45rem",minWidth:34,minHeight:30,background:"transparent",border:"1px solid rgba(201,168,76,0.35)",borderRadius:4,color:"rgba(201,168,76,0.9)",cursor:(sortingDisabled || idx===sortedIncomingHandovers.length-1)?"not-allowed":"pointer",fontSize:".72rem",lineHeight:1,opacity:(sortingDisabled || idx===sortedIncomingHandovers.length-1)?0.35:1}}
                     >▼</button>
                   </div>
-                  {!isEditing && <button type="button" onClick={()=>startEditHandover(h)} style={{padding:".15rem .35rem",background:"transparent",border:"none",color:"rgba(201,168,76,0.7)",cursor:"pointer",fontSize:".68rem"}}>編集</button>}
+                  {!isEditing && !isEditingTarget && (
+                    <>
+                      <button type="button" onClick={()=>startEditHandover(h)} disabled={!!editingTargetHandoverId} style={{padding:".15rem .35rem",background:"transparent",border:"none",color:editingTargetHandoverId?"rgba(201,168,76,0.25)":"rgba(201,168,76,0.7)",cursor:editingTargetHandoverId?"not-allowed":"pointer",fontSize:".68rem"}}>編集</button>
+                      <button type="button" onClick={()=>startEditTargetDates(h)} disabled={!!editingHandoverId} style={{padding:".15rem .35rem",background:"transparent",border:"none",color:editingHandoverId?"rgba(201,168,76,0.25)":"rgba(201,168,76,0.7)",cursor:editingHandoverId?"not-allowed":"pointer",fontSize:".65rem"}}>表示日変更</button>
+                    </>
+                  )}
                   <button type="button" onClick={()=>removeHandoverItem(h._id)} style={{padding:".15rem .35rem",background:"transparent",border:"none",color:"rgba(226,75,74,0.5)",cursor:"pointer",fontSize:".7rem"}}>✕</button>
                 </div>
               </div>
@@ -1409,6 +1608,7 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
           <div style={{fontSize:".62rem",color:"rgba(201,168,76,0.5)",marginBottom:".4rem",letterSpacing:".1em"}}>📤 本日送信した申し送り（{outgoingHandovers.length}件）</div>
           {outgoingHandovers.map(h => {
             const isEditing = editingHandoverId === h._id;
+            const isEditingTarget = editingTargetHandoverId === h._id;
             const updatedLabel = getHandoverUpdatedLabel(h);
             return (
             <div key={h._id} style={{padding:".4rem .65rem",background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.08)",borderRadius:4,marginBottom:".25rem",display:"flex",alignItems:"flex-start",gap:".5rem"}}>
@@ -1436,13 +1636,117 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                   </div>
                 )}
                 <HandoverAttachmentsBlock attachments={h.attachments} />
+                {isEditingTarget && (
+                  <div style={{marginTop:".5rem",padding:".65rem .75rem",background:"#111",border:"1px solid rgba(244,162,97,0.25)",borderRadius:5}}>
+                    <div style={{fontSize:".62rem",color:"rgba(244,162,97,0.85)",marginBottom:".45rem",letterSpacing:".1em"}}>📅 表示日変更</div>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:".4rem",marginBottom:".5rem"}}>
+                      {[
+                        {k:"nextday",l:"明日"},
+                        {k:"single",l:"日付指定"},
+                        {k:"multi",l:"複数日"},
+                        {k:"range",l:"期間"},
+                      ].map(m => (
+                        <button key={m.k} type="button" onClick={()=>setEditTargetMode(m.k)} style={{padding:".3rem .7rem",borderRadius:3,border:"1px solid "+(editTargetMode===m.k?"#f4a261":"rgba(244,162,97,0.2)"),background:editTargetMode===m.k?"#f4a261":"transparent",color:editTargetMode===m.k?"#0a0a0a":"rgba(244,162,97,0.7)",fontSize:".65rem",cursor:"pointer",fontFamily:"inherit",letterSpacing:".05em"}}>{m.l}</button>
+                      ))}
+                    </div>
+                    {editTargetMode === "nextday" && (
+                      <div style={{fontSize:".7rem",color:"rgba(240,232,208,0.6)"}}>
+                        → 翌日（{fmtDate(shiftDate(selectedDate, 1))}）に表示
+                      </div>
+                    )}
+                    {editTargetMode === "single" && (
+                      <>
+                        <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.5)",marginBottom:".25rem"}}>
+                          {editTargetDate ? `→ ${fmtDate(editTargetDate)} に表示` : "カレンダーから日付を選択"}
+                        </div>
+                        <MiniCalendar
+                          selectedDates={editTargetDate ? [editTargetDate] : []}
+                          onToggle={(d)=>setEditTargetDate(d===editTargetDate?"":d)}
+                          mode="single"
+                          fromDate={selectedDate}
+                        />
+                      </>
+                    )}
+                    {editTargetMode === "multi" && (
+                      <>
+                        <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.5)",marginBottom:".25rem"}}>
+                          {editTargetDates.length === 0 ? "カレンダーから複数の日付を選択" : `${editTargetDates.length}日間に表示`}
+                        </div>
+                        <MiniCalendar
+                          selectedDates={editTargetDates}
+                          onToggle={toggleEditMultiDate}
+                          mode="multi"
+                          fromDate={selectedDate}
+                        />
+                        {editTargetDates.length > 0 && (
+                          <div style={{display:"flex",flexWrap:"wrap",gap:".3rem",marginTop:".4rem"}}>
+                            {editTargetDates.map(d => (
+                              <span key={d} style={{padding:".15rem .45rem",background:"rgba(244,162,97,0.13)",borderRadius:3,fontSize:".62rem",color:"#f4a261",display:"inline-flex",alignItems:"center",gap:".25rem"}}>
+                                {d.slice(5)}
+                                <button type="button" onClick={()=>toggleEditMultiDate(d)} style={{background:"transparent",border:"none",color:"#f4a261",cursor:"pointer",padding:0,fontSize:".62rem"}}>✕</button>
+                              </span>
+                            ))}
+                            <button type="button" onClick={()=>setEditTargetDates([])} style={{...S.btn("sm"),padding:".1rem .4rem",fontSize:".55rem"}}>クリア</button>
+                          </div>
+                        )}
+                      </>
+                    )}
+                    {editTargetMode === "range" && (
+                      <>
+                        <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.5)",marginBottom:".25rem"}}>
+                          {!editTargetRangeStart ? "開始日をタップ" : !editTargetRangeEnd ? "終了日をタップ" : (() => {
+                            const s = new Date(editTargetRangeStart+"T00:00:00");
+                            const e = new Date(editTargetRangeEnd+"T00:00:00");
+                            return `${editTargetRangeStart} 〜 ${editTargetRangeEnd} （${Math.round((e-s)/86400000)+1}日間）`;
+                          })()}
+                        </div>
+                        <MiniCalendar
+                          selectedDates={[editTargetRangeStart, editTargetRangeEnd].filter(Boolean)}
+                          onToggle={(d)=>{
+                            if (!editTargetRangeStart || (editTargetRangeStart && editTargetRangeEnd)) {
+                              setEditTargetRangeStart(d);
+                              setEditTargetRangeEnd("");
+                            } else {
+                              if (d < editTargetRangeStart) {
+                                setEditTargetRangeEnd(editTargetRangeStart);
+                                setEditTargetRangeStart(d);
+                              } else if (d === editTargetRangeStart) {
+                                setEditTargetRangeStart("");
+                              } else {
+                                setEditTargetRangeEnd(d);
+                              }
+                            }
+                          }}
+                          mode="range"
+                          rangeStart={editTargetRangeStart}
+                          rangeEnd={editTargetRangeEnd}
+                          fromDate={selectedDate}
+                        />
+                        {(editTargetRangeStart || editTargetRangeEnd) && (
+                          <button type="button" onClick={()=>{setEditTargetRangeStart("");setEditTargetRangeEnd("");}} style={{...S.btn("sm"),padding:".15rem .5rem",fontSize:".58rem",marginTop:".4rem"}}>リセット</button>
+                        )}
+                      </>
+                    )}
+                    <div style={{display:"flex",gap:".35rem",marginTop:".5rem"}}>
+                      <button type="button" style={{...S.btn("gold"),padding:".25rem .55rem",fontSize:".6rem"}} onClick={()=>saveEditTargetDates(h._id)} disabled={savingTargetDatesId===h._id}>
+                        {savingTargetDatesId===h._id ? "保存中…" : "保存"}
+                      </button>
+                      <button type="button" style={{...S.btn("ghost"),padding:".25rem .55rem",fontSize:".6rem"}} onClick={cancelEditTargetDates} disabled={savingTargetDatesId===h._id}>キャンセル</button>
+                    </div>
+                  </div>
+                )}
                 <div style={{fontSize:".58rem",color:"rgba(240,232,208,0.4)"}}>
                   {(h.targetDates||[]).length === 1 ? `→ ${h.targetDates[0]}` : `→ ${(h.targetDates||[]).length}日に送信`}
                   {updatedLabel && ` / ${updatedLabel}`}
                 </div>
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:".2rem"}}>
-                {!isEditing && <button type="button" onClick={()=>startEditHandover(h)} style={{padding:".15rem .35rem",background:"transparent",border:"none",color:"rgba(201,168,76,0.7)",cursor:"pointer",fontSize:".65rem"}}>編集</button>}
+                {!isEditing && !isEditingTarget && (
+                  <>
+                    <button type="button" onClick={()=>startEditHandover(h)} disabled={!!editingTargetHandoverId} style={{padding:".15rem .35rem",background:"transparent",border:"none",color:editingTargetHandoverId?"rgba(201,168,76,0.25)":"rgba(201,168,76,0.7)",cursor:editingTargetHandoverId?"not-allowed":"pointer",fontSize:".65rem"}}>編集</button>
+                    <button type="button" onClick={()=>startEditTargetDates(h)} disabled={!!editingHandoverId} style={{padding:".15rem .35rem",background:"transparent",border:"none",color:editingHandoverId?"rgba(201,168,76,0.25)":"rgba(201,168,76,0.7)",cursor:editingHandoverId?"not-allowed":"pointer",fontSize:".62rem"}}>表示日変更</button>
+                  </>
+                )}
                 <button type="button" onClick={()=>removeHandoverItem(h._id)} style={{padding:".2rem .4rem",background:"transparent",border:"none",color:"rgba(226,75,74,0.5)",cursor:"pointer",fontSize:".7rem"}}>✕</button>
               </div>
             </div>
