@@ -1721,11 +1721,18 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
         <style>{`
           .hb-staffday-table-wrap {
             overflow-x: auto;
+            overflow-y: auto;
             -webkit-overflow-scrolling: touch;
+            max-height: calc(100vh - 160px);
             border-radius: 6px;
             border: 1px solid rgba(201,168,76,0.22);
             background: #0a0a0a;
             margin-bottom: 0.4rem;
+          }
+          @supports (height: 100dvh) {
+            .hb-staffday-table-wrap {
+              max-height: calc(100dvh - 168px);
+            }
           }
           .hb-staffday-table {
             border-collapse: separate;
