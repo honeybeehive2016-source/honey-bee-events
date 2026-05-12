@@ -22,6 +22,29 @@ const S = {
   },
 };
 
+/** 予約カードの操作ボタン：横並び・コンパクト（日付詳細／リスト共通） */
+const reservationCardActionsWrap = {
+  display: "flex",
+  flexDirection: "row",
+  flexWrap: "wrap",
+  gap: ".35rem",
+  justifyContent: "flex-end",
+  alignItems: "center",
+  alignSelf: "start",
+};
+const reservationCardActionBtn = {
+  padding: ".28rem .48rem",
+  fontSize: ".62rem",
+  fontFamily: "inherit",
+  letterSpacing: ".06em",
+  borderRadius: 3,
+  cursor: "pointer",
+  whiteSpace: "nowrap",
+  lineHeight: 1.25,
+  minHeight: 30,
+  boxSizing: "border-box",
+};
+
 const Field = ({ label, children, full, required }) => (
   <div style={{ gridColumn: full ? "1/-1" : undefined, display:"flex", flexDirection:"column" }}>
     <label style={S.lbl}>{label}{required && <span style={{color:"#e24b4a",marginLeft:".25rem"}}>*</span>}</label>
@@ -1446,12 +1469,12 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                   return (
                   <div key={r._id} style={{
                     ...S.card,
-                    padding:".7rem .9rem",
-                    marginBottom:".4rem",
+                    padding:".6rem .85rem",
+                    marginBottom:".35rem",
                     display:"grid",
                     gridTemplateColumns:"auto 1fr auto",
-                    gap:".6rem",
-                    alignItems:"center",
+                    gap:".55rem",
+                    alignItems:"start",
                     opacity: isCancelled ? 0.82 : 1,
                     background: isCancelled ? "#121318" : undefined,
                     border: isCancelled ? "1px solid rgba(136,136,140,0.35)" : S.card.border,
@@ -1508,15 +1531,15 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                         {r.note && <span style={{color:"#f4a261"}}>📝 {r.note}</span>}
                       </div>
                     </div>
-                    <div style={{display:"flex",gap:".25rem",flexDirection:"column"}}>
-                      <button style={{...S.btn("sm"),padding:".25rem .5rem",fontSize:".55rem"}} onClick={(e)=>{e.stopPropagation();startEdit(r);}}>編集</button>
+                    <div style={reservationCardActionsWrap}>
+                      <button type="button" style={{...S.btn("sm"), ...reservationCardActionBtn}} onClick={(e)=>{e.stopPropagation();startEdit(r);}}>編集</button>
                       {!isCancelled && (
-                        <button style={{...S.btn("ghost"),padding:".25rem .5rem",fontSize:".52rem",borderColor:"rgba(244,162,97,0.45)",color:"#f4a261"}} onClick={(e)=>{e.stopPropagation();openCancelModal(r._id);}}>キャンセル</button>
+                        <button type="button" style={{...S.btn("ghost"), ...reservationCardActionBtn, borderColor:"rgba(244,162,97,0.45)", color:"#f4a261"}} onClick={(e)=>{e.stopPropagation();openCancelModal(r._id);}}>キャンセル</button>
                       )}
                       {isCancelled && (
-                        <button style={{...S.btn("sm"),padding:".25rem .5rem",fontSize:".52rem",borderColor:"rgba(126,200,127,0.45)",color:"#7ec87e"}} onClick={(e)=>{e.stopPropagation();handleUncancelReservation(r._id);}}>解除</button>
+                        <button type="button" style={{...S.btn("sm"), ...reservationCardActionBtn, borderColor:"rgba(126,200,127,0.45)", color:"#7ec87e"}} onClick={(e)=>{e.stopPropagation();handleUncancelReservation(r._id);}}>解除</button>
                       )}
-                      <button style={{...S.btn("danger"),padding:".25rem .5rem",fontSize:".55rem"}} onClick={(e)=>{e.stopPropagation();handleDelete(r._id);}}>削除</button>
+                      <button type="button" style={{...S.btn("danger"), ...reservationCardActionBtn}} onClick={(e)=>{e.stopPropagation();handleDelete(r._id);}}>削除</button>
                     </div>
                   </div>
                 ); };
@@ -1649,11 +1672,11 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
               return (
                 <div key={r._id} style={{
                   ...S.card,
-                  padding:".75rem 1rem",
+                  padding:".6rem .9rem",
                   display:"grid",
                   gridTemplateColumns:"auto 1fr auto",
-                  gap:".75rem",
-                  alignItems:"center",
+                  gap:".55rem",
+                  alignItems:"start",
                   opacity: isCancelled ? 0.82 : 1,
                   background: isCancelled ? "#121318" : undefined,
                   border: isCancelled ? "1px solid rgba(136,136,140,0.35)" : S.card.border,
@@ -1712,15 +1735,15 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                       {r.note && <span style={{color:"#f4a261"}}>📝 {r.note.length>30?r.note.slice(0,30)+"...":r.note}</span>}
                     </div>
                   </div>
-                  <div style={{display:"flex",gap:".3rem",flexDirection:"column"}}>
-                    <button style={S.btn("sm")} onClick={(e)=>{e.stopPropagation();startEdit(r);}}>編集</button>
+                  <div style={reservationCardActionsWrap}>
+                    <button type="button" style={{...S.btn("sm"), ...reservationCardActionBtn}} onClick={(e)=>{e.stopPropagation();startEdit(r);}}>編集</button>
                     {!isCancelled && (
-                      <button type="button" style={{...S.btn("ghost"),padding:".28rem .55rem",fontSize:".62rem",borderColor:"rgba(244,162,97,0.45)",color:"#f4a261"}} onClick={(e)=>{e.stopPropagation();openCancelModal(r._id);}}>キャンセル</button>
+                      <button type="button" style={{...S.btn("ghost"), ...reservationCardActionBtn, borderColor:"rgba(244,162,97,0.45)", color:"#f4a261"}} onClick={(e)=>{e.stopPropagation();openCancelModal(r._id);}}>キャンセル</button>
                     )}
                     {isCancelled && (
-                      <button type="button" style={{...S.btn("sm"),padding:".28rem .55rem",fontSize:".62rem",borderColor:"rgba(126,200,127,0.45)",color:"#7ec87e"}} onClick={(e)=>{e.stopPropagation();handleUncancelReservation(r._id);}}>解除</button>
+                      <button type="button" style={{...S.btn("sm"), ...reservationCardActionBtn, borderColor:"rgba(126,200,127,0.45)", color:"#7ec87e"}} onClick={(e)=>{e.stopPropagation();handleUncancelReservation(r._id);}}>解除</button>
                     )}
-                    <button style={S.btn("danger")} onClick={(e)=>{e.stopPropagation();handleDelete(r._id);}}>削除</button>
+                    <button type="button" style={{...S.btn("danger"), ...reservationCardActionBtn}} onClick={(e)=>{e.stopPropagation();handleDelete(r._id);}}>削除</button>
                   </div>
                 </div>
               );
