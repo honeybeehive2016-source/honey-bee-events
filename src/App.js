@@ -733,8 +733,27 @@ function TimeTableTab({ form, copyText, copied }) {
   );
 }
 
+/** Apps Script の columnWidths を values の列数に合わせ正規化。有効な幅が1つも無ければ null */
+function normalizeStaffDayColumnWidths(raw, colCount) {
+  if (!Array.isArray(raw) || colCount <= 0) return null;
+  const resolved = [];
+  let any = false;
+  for (let i = 0; i < colCount; i++) {
+    const v = i < raw.length ? raw[i] : undefined;
+    const n = typeof v === "number" ? v : Number(v);
+    if (Number.isFinite(n) && n > 0) {
+      const px = Math.min(Math.max(n, 24), 1600);
+      resolved.push(px);
+      any = true;
+    } else {
+      resolved.push(null);
+    }
+  }
+  return any ? resolved : null;
+}
+
 /** Apps Script の values（string[][]）を列可変のまま表示。1行目＝ヘッダー */
-function StaffDaySpreadsheetTable({ rows }) {
+function StaffDaySpreadsheetTable({ rows, columnWidths }) {
   if (!rows || rows.length === 0) return null;
   const maxCols = rows.reduce((m, r) => Math.max(m, Array.isArray(r) ? r.length : 0), 0);
   if (maxCols === 0) return null;
@@ -746,9 +765,29 @@ function StaffDaySpreadsheetTable({ rows }) {
   const headerCells = padRow(rows[0]);
   const bodyRows = rows.slice(1).map(padRow);
   const nbsp = "\u00a0";
+  const sizedCols =
+    Array.isArray(columnWidths) &&
+    columnWidths.length === maxCols &&
+    columnWidths.some((w) => w != null && Number.isFinite(w));
+  const tableClass =
+    "hb-staffday-table" + (sizedCols ? " hb-staffday-table--colwidth" : "");
   return (
     <div className="hb-staffday-table-wrap">
-      <table className="hb-staffday-table">
+      <table className={tableClass}>
+        {sizedCols && (
+          <colgroup>
+            {columnWidths.map((w, j) => (
+              <col
+                key={j}
+                style={
+                  w != null && Number.isFinite(w) && w > 0
+                    ? { width: `${w}px`, minWidth: `${w}px` }
+                    : undefined
+                }
+              />
+            ))}
+          </colgroup>
+        )}
         <thead>
           <tr>
             {headerCells.map((cell, j) => (
@@ -842,6 +881,7 @@ export default function App() {
   const [reservationInitialDate, setReservationInitialDate] = useState(null);
 
   const [staffDayRows, setStaffDayRows] = useState(null);
+  const [staffDayColumnWidths, setStaffDayColumnWidths] = useState(null);
   const [staffDayLoading, setStaffDayLoading] = useState(false);
   const [staffDayError, setStaffDayError] = useState(null);
   const [staffDayIframeOpen, setStaffDayIframeOpen] = useState(false);
@@ -850,6 +890,7 @@ export default function App() {
     setStaffDayLoading(true);
     setStaffDayError(null);
     setStaffDayRows(null);
+    setStaffDayColumnWidths(null);
     try {
       const res = await fetch(STAFF_DAY_JSON_URL);
       if (!res.ok) {
@@ -871,6 +912,11 @@ export default function App() {
           ? row.map((c) => (c === null || c === undefined ? "" : String(c)))
           : [],
       );
+      const maxCols = normalized.reduce(
+        (m, r) => Math.max(m, Array.isArray(r) ? r.length : 0),
+        0,
+      );
+      setStaffDayColumnWidths(normalizeStaffDayColumnWidths(json.columnWidths, maxCols));
       setStaffDayRows(normalized);
       if (normalized.length === 0) {
         setStaffDayError("表にデータがありません");
@@ -880,6 +926,7 @@ export default function App() {
       }
     } catch (e) {
       setStaffDayRows(null);
+      setStaffDayColumnWidths(null);
       setStaffDayError(e.message || "読み込みに失敗しました");
       setStaffDayIframeOpen(true);
     } finally {
@@ -1688,6 +1735,11 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
             width: max-content;
             min-width: 100%;
           }
+          .hb-staffday-table.hb-staffday-table--colwidth {
+            table-layout: fixed;
+            width: max-content;
+            min-width: max-content;
+          }
           .hb-staffday-table th,
           .hb-staffday-table td {
             border-right: 1px solid rgba(201,168,76,0.14);
@@ -1848,7 +1900,7 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
           )}
 
           {!staffDayLoading && staffDayRows && staffDayRows.length > 0 && (
-            <StaffDaySpreadsheetTable rows={staffDayRows} />
+            <StaffDaySpreadsheetTable rows={staffDayRows} columnWidths={staffDayColumnWidths} />
           )}
 
           <div style={{ marginTop:"0.35rem" }}>
