@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { db } from "./firebase";
 import { collection, doc, getDocs, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
 import RentalsModule from "./rentals";
@@ -15,6 +15,9 @@ import { getBusinessDate } from "./businessDate";
 const DAYS = ["日","月","火","水","木","金","土"];
 const MONTH_NAMES = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
 const STAFF_DAY_SHEET_URL = "https://docs.google.com/spreadsheets/d/1qD302u-RornvrxYd1-FDuTzEDiFU8krBQ6JuWT0pbE8/edit?usp=drive_link";
+/** Apps Script Web アプリ：シートの values（string[][]）を JSON で返す */
+const STAFF_DAY_JSON_URL =
+  "https://script.google.com/macros/s/AKfycbxk7JrR0qBDqaE-0e4t_mx0Awvh3yjHnQq4JQ1A1oJSXff_Eb-vHO3VcGvH6INeEUVQ/exec";
 
 // 貸切判定 + お客様名抽出（モジュール間で共有）
 export const isRentalEvent = (name) => /貸切|貸し切り/.test(name||"");
@@ -730,6 +733,43 @@ function TimeTableTab({ form, copyText, copied }) {
   );
 }
 
+/** Apps Script の values（string[][]）を列可変のまま表示。1行目＝ヘッダー */
+function StaffDaySpreadsheetTable({ rows }) {
+  if (!rows || rows.length === 0) return null;
+  const maxCols = rows.reduce((m, r) => Math.max(m, Array.isArray(r) ? r.length : 0), 0);
+  if (maxCols === 0) return null;
+  const padRow = (r) => {
+    const arr = Array.isArray(r) ? [...r] : [];
+    while (arr.length < maxCols) arr.push("");
+    return arr;
+  };
+  const headerCells = padRow(rows[0]);
+  const bodyRows = rows.slice(1).map(padRow);
+  const nbsp = "\u00a0";
+  return (
+    <div className="hb-staffday-table-wrap">
+      <table className="hb-staffday-table">
+        <thead>
+          <tr>
+            {headerCells.map((cell, j) => (
+              <th key={j}>{cell === "" ? nbsp : cell}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {bodyRows.map((row, i) => (
+            <tr key={i}>
+              {row.map((cell, j) => (
+                <td key={j}>{cell === "" ? nbsp : cell}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function App() {
   // ナビゲーション履歴スタック（戻るボタンの動作を制御）
   // home → events_list → events_form と進んだら、戻るボタンで events_list に戻る
@@ -800,6 +840,57 @@ export default function App() {
   const [shiftsList, setShiftsList] = useState([]);
   const [reservationsList, setReservationsList] = useState([]);
   const [reservationInitialDate, setReservationInitialDate] = useState(null);
+
+  const [staffDayRows, setStaffDayRows] = useState(null);
+  const [staffDayLoading, setStaffDayLoading] = useState(false);
+  const [staffDayError, setStaffDayError] = useState(null);
+  const [staffDayIframeOpen, setStaffDayIframeOpen] = useState(false);
+
+  const loadStaffDay = useCallback(async () => {
+    setStaffDayLoading(true);
+    setStaffDayError(null);
+    setStaffDayRows(null);
+    try {
+      const res = await fetch(STAFF_DAY_JSON_URL);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const text = await res.text();
+      let json;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        throw new Error("サーバー応答を解析できませんでした");
+      }
+      const values = json.values;
+      if (!Array.isArray(values)) {
+        throw new Error("values がありません");
+      }
+      const normalized = values.map((row) =>
+        Array.isArray(row)
+          ? row.map((c) => (c === null || c === undefined ? "" : String(c)))
+          : [],
+      );
+      setStaffDayRows(normalized);
+      if (normalized.length === 0) {
+        setStaffDayError("表にデータがありません");
+        setStaffDayIframeOpen(true);
+      } else {
+        setStaffDayIframeOpen(false);
+      }
+    } catch (e) {
+      setStaffDayRows(null);
+      setStaffDayError(e.message || "読み込みに失敗しました");
+      setStaffDayIframeOpen(true);
+    } finally {
+      setStaffDayLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (view !== "staffDay") return;
+    loadStaffDay();
+  }, [view, loadStaffDay]);
 
   // Firestore リアルタイム同期
   useEffect(() => {
@@ -1581,14 +1672,81 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
       {view==="staffDay"&&(
         <>
         <style>{`
-          .hb-staffday-sheet iframe {
-            height: calc(100vh - 124px);
-            min-height: 300px;
+          .hb-staffday-table-wrap {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            border-radius: 6px;
+            border: 1px solid rgba(201,168,76,0.22);
+            background: #0a0a0a;
+            margin-bottom: 0.4rem;
+          }
+          .hb-staffday-table {
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 0.72rem;
+            color: #f0e8d0;
+            width: max-content;
+            min-width: 100%;
+          }
+          .hb-staffday-table th,
+          .hb-staffday-table td {
+            border-right: 1px solid rgba(201,168,76,0.14);
+            border-bottom: 1px solid rgba(201,168,76,0.14);
+            padding: 0.32rem 0.48rem;
+            vertical-align: top;
+            white-space: pre-wrap;
+            word-break: break-word;
+            min-width: 2.4rem;
+            min-height: 1.35em;
+            box-sizing: border-box;
+          }
+          .hb-staffday-table th:last-child,
+          .hb-staffday-table td:last-child {
+            border-right: none;
+          }
+          .hb-staffday-table thead th {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            background: linear-gradient(180deg, rgba(74,58,22,0.98) 0%, rgba(42,36,18,0.99) 100%);
+            color: #e8d5a0;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            box-shadow: 0 1px 0 rgba(201,168,76,0.35);
+          }
+          .hb-staffday-table tbody tr:nth-child(odd) td {
+            background: rgba(255,255,255,0.02);
+          }
+          .hb-staffday-table tbody tr:nth-child(even) td {
+            background: rgba(255,255,255,0.055);
+          }
+          .hb-staffday-table tbody td:first-child,
+          .hb-staffday-table thead th:first-child {
+            position: sticky;
+            left: 0;
+            z-index: 1;
+            box-shadow: 3px 0 6px rgba(0,0,0,0.45);
+          }
+          .hb-staffday-table thead th:first-child {
+            z-index: 3;
+            background: linear-gradient(180deg, rgba(82,64,26,0.99) 0%, rgba(48,40,20,0.995) 100%);
+          }
+          .hb-staffday-table tbody tr:nth-child(odd) td:first-child {
+            background: #141413;
+          }
+          .hb-staffday-table tbody tr:nth-child(even) td:first-child {
+            background: #191918;
+          }
+          .hb-staffday-iframe {
+            width: 100%;
+            border: none;
+            display: block;
+            height: min(420px, 42vh);
+            min-height: 260px;
           }
           @supports (height: 100dvh) {
-            .hb-staffday-sheet iframe {
-              height: calc(100dvh - 128px);
-              min-height: 280px;
+            .hb-staffday-iframe {
+              height: min(380px, 38dvh);
             }
           }
         `}</style>
@@ -1609,7 +1767,7 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
             alignItems:"center",
             justifyContent:"space-between",
             gap:"0.45rem",
-            marginBottom:"0.35rem",
+            marginBottom:"0.4rem",
           }}>
             <h2 style={{
               fontFamily:"Georgia,serif",
@@ -1621,52 +1779,119 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
             }}>
               🎤 STAFF DAY
             </h2>
-            <a
-              href={STAFF_DAY_SHEET_URL}
-              target="_blank"
-              rel="noopener noreferrer"
+            <div style={{ display:"flex", flexWrap:"wrap", gap:"0.35rem", alignItems:"center" }}>
+              <a
+                href={STAFF_DAY_SHEET_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  ...S.btn("ghost"),
+                  padding:"0.38rem 0.75rem",
+                  fontSize:"0.66rem",
+                  letterSpacing:"0.06em",
+                  textDecoration:"none",
+                  display:"inline-flex",
+                  alignItems:"center",
+                  gap:"0.25rem",
+                  minHeight:38,
+                  flexShrink:0,
+                }}
+              >
+                Googleスプレッドシートで編集 <span aria-hidden="true">↗</span>
+              </a>
+              <button
+                type="button"
+                disabled={staffDayLoading}
+                onClick={() => loadStaffDay()}
+                style={{
+                  ...S.btn("ghost"),
+                  padding:"0.38rem 0.65rem",
+                  fontSize:"0.65rem",
+                  letterSpacing:"0.06em",
+                  opacity: staffDayLoading ? 0.55 : 1,
+                  cursor: staffDayLoading ? "wait" : "pointer",
+                }}
+              >
+                {staffDayLoading ? "読み込み中…" : "🔄 再読み込み"}
+              </button>
+            </div>
+          </div>
+
+          {staffDayLoading && (
+            <div style={{
+              padding:"2rem 1rem",
+              textAlign:"center",
+              fontSize:"0.78rem",
+              color:"rgba(201,168,76,0.75)",
+              letterSpacing:"0.08em",
+              border:"1px dashed rgba(201,168,76,0.25)",
+              borderRadius:6,
+              marginBottom:"0.4rem",
+            }}>
+              表を読み込んでいます…
+            </div>
+          )}
+
+          {!staffDayLoading && staffDayError && (
+            <div style={{
+              padding:"0.65rem 0.75rem",
+              marginBottom:"0.4rem",
+              fontSize:"0.72rem",
+              color:"#f4a261",
+              background:"rgba(244,162,97,0.08)",
+              border:"1px solid rgba(244,162,97,0.35)",
+              borderRadius:5,
+              lineHeight:1.5,
+            }}>
+              ⚠️ {staffDayError}
+            </div>
+          )}
+
+          {!staffDayLoading && staffDayRows && staffDayRows.length > 0 && (
+            <StaffDaySpreadsheetTable rows={staffDayRows} />
+          )}
+
+          <div style={{ marginTop:"0.35rem" }}>
+            <button
+              type="button"
+              onClick={() => setStaffDayIframeOpen((o) => !o)}
               style={{
                 ...S.btn("ghost"),
-                padding:"0.42rem 0.85rem",
-                fontSize:"0.68rem",
+                width:"100%",
+                padding:"0.42rem 0.65rem",
+                fontSize:"0.66rem",
                 letterSpacing:"0.06em",
-                textDecoration:"none",
-                display:"inline-flex",
-                alignItems:"center",
-                gap:"0.25rem",
-                minHeight:40,
-                flexShrink:0,
+                justifyContent:"center",
               }}
             >
-              Googleスプレッドシートで編集 <span aria-hidden="true">↗</span>
-            </a>
+              {staffDayIframeOpen ? "▲ 埋め込みを閉じる" : "▼ 元のスプレッドシートを表示（埋め込み）"}
+            </button>
+            {staffDayIframeOpen && (
+              <div style={{
+                marginTop:"0.35rem",
+                borderRadius:6,
+                border:"1px solid rgba(201,168,76,0.22)",
+                overflow:"hidden",
+                background:"#111",
+                lineHeight:0,
+              }}>
+                <iframe
+                  className="hb-staffday-iframe"
+                  title="STAFF DAY Spreadsheet（埋め込み）"
+                  src={STAFF_DAY_SHEET_URL}
+                />
+              </div>
+            )}
           </div>
-          <div style={{
-            width:"100%",
-            borderRadius:6,
-            border:"1px solid rgba(201,168,76,0.22)",
-            overflow:"hidden",
-            background:"#111",
-            lineHeight:0,
-          }}>
-            <iframe
-              title="STAFF DAY Spreadsheet"
-              src={STAFF_DAY_SHEET_URL}
-              style={{
-                width:"100%",
-                border:"none",
-                display:"block",
-              }}
-            />
-          </div>
+
           <p style={{
-            margin:"0.4rem 0 0",
-            fontSize:"0.62rem",
-            color:"rgba(240,232,208,0.48)",
+            margin:"0.45rem 0 0",
+            fontSize:"0.6rem",
+            color:"rgba(240,232,208,0.45)",
             lineHeight:1.45,
             textAlign:"center",
           }}>
-            表が横に長い場合は、上のリンクから開くと見やすいことがあります。
+            横に長い表はスクロールできます。編集は Google スプレッドシート側で行ってください。
           </p>
         </div>
         </>
