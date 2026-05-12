@@ -70,7 +70,7 @@ function getSeatColor(state) {
 // 当該席の状態を計算（その日の予約から、複数席対応）
 function getSeatStateForDate(seatNumber, reservations, dateKey) {
   const r = reservations.find(r => {
-    if (r.date !== dateKey || r._deleted) return false;
+    if (r.date !== dateKey || r._deleted || r.cancelled) return false;
     const seats = (r.seatNumber || "").split(",").map(s => s.trim()).filter(Boolean);
     return seats.includes(seatNumber);
   });
@@ -906,6 +906,7 @@ export function SeatPicker({ layoutId, reservations, currentDate, currentReserva
                       r.date === currentDate &&
                       (r.seatNumber || "").split(",").map(s=>s.trim()).includes(seat.number) &&
                       !r._deleted &&
+                      !r.cancelled &&
                       r._id !== currentReservationId
                     );
                     const isSelected = selected.includes(seat.number);

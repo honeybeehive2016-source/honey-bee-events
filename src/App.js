@@ -842,7 +842,7 @@ export default function App() {
     const unsubRes = onSnapshot(collection(db, "reservations"), (snap) => {
       const list = [];
       snap.forEach(d => list.push({ ...d.data(), _id: d.id }));
-      setReservationsList(list.filter(r => !r._deleted));
+      setReservationsList(list.filter(r => !r._deleted && !r.cancelled));
     }, (err) => { console.error("reservations sync error:", err); });
     return () => { unsubE(); unsubT(); unsubR(); unsubS(); unsubRes(); };
   }, []);

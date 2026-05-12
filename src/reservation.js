@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { db } from "./firebase";
-import { collection, doc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
+import { collection, doc, setDoc, deleteDoc, onSnapshot, deleteField } from "firebase/firestore";
 import { getOrderedStaffNames } from "./shift";
 import { sendReservationEmails } from "./email";
 import { SeatPicker, DayLayoutView, getDefaultLayout, sortLayouts } from "./seatLayout";
@@ -107,11 +107,28 @@ function getStaffBookingStatusNotice(ev) {
 }
 function summarizeTargetArtistPeople(list) {
   const m = {};
-  list.forEach(r => {
+  (list || []).filter(r => !r.cancelled).forEach(r => {
     const key = normalizeTargetArtist(r.targetArtist);
     m[key] = (m[key] || 0) + Number(r.people || 0);
   });
   return Object.entries(m).sort((a, b) => b[1] - a[1]);
+}
+
+/** アクティブ予約（集計・席占有・本日画面と同じ定義） */
+function isActiveReservation(r) {
+  return !!(r && !r._deleted && !r.cancelled);
+}
+
+function fmtCancelledAt(ts) {
+  if (ts == null || ts === "") return "";
+  try {
+    const n = typeof ts === "number" ? ts : Number(ts);
+    const d = Number.isFinite(n) && !Number.isNaN(n) ? new Date(n) : new Date(ts);
+    if (Number.isNaN(d.getTime())) return String(ts);
+    return d.toLocaleString("ja-JP");
+  } catch {
+    return String(ts);
+  }
 }
 
 const SEAT_LAYOUT_LOCK_MESSAGE =
@@ -121,6 +138,7 @@ const SEAT_LAYOUT_LOCK_MESSAGE =
 function reservationsHaveAssignedSeats(list) {
   if (!Array.isArray(list)) return false;
   return list.some(r => {
+    if (!isActiveReservation(r)) return false;
     const parts = String(r.seatNumber || "").split(",").map(s => s.trim()).filter(Boolean);
     return parts.length > 0;
   });
@@ -222,6 +240,8 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   const [filter, setFilter] = useState("upcoming");
   const [dateFilter, setDateFilter] = useState("");
   const [showTrash, setShowTrash] = useState(false);
+  const [cancelModalId, setCancelModalId] = useState(null);
+  const [cancelForm, setCancelForm] = useState({ cancelledBy: "", cancelReason: "" });
   const [showImport, setShowImport] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
@@ -554,12 +574,19 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
     if (!form.date) { alert("日付を選択してください"); return; }
     try {
       const id = editingId || `res_${Date.now().toString(36)}`;
+      const prior = allReservations.find(r => r._id === id);
       const { _id, ...data } = form;
       const linkedEvent = findEventByDateAndName(events, data.date, data.eventName);
       data.targetArtist = resolveTargetArtistValue(data.targetArtist, linkedEvent);
       Object.assign(data, normalizeArrivedForSave(data));
       data.savedAt = new Date().toLocaleString("ja-JP");
       if (!data.createdAt) data.createdAt = Date.now();
+      if (prior?.cancelled) {
+        data.cancelled = true;
+        data.cancelledAt = prior.cancelledAt;
+        data.cancelledBy = prior.cancelledBy;
+        data.cancelReason = prior.cancelReason;
+      }
       await setDoc(doc(db, "reservations", id), data);
 
       // 新規予約でメアドあり、かつ確認メール送信が選択されていたら送る
@@ -584,6 +611,49 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
     await setDoc(doc(db, "reservations", id), { ...data, _deleted: true, _deletedAt: Date.now() });
   };
 
+  const openCancelModal = (id) => {
+    setCancelForm({ cancelledBy: "", cancelReason: "" });
+    setCancelModalId(id);
+  };
+
+  const submitCancelReservation = async () => {
+    const id = cancelModalId;
+    if (!id) return;
+    const target = allReservations.find(r => r._id === id);
+    if (!target || target._deleted) return;
+    const { _id, ...data } = target;
+    try {
+      await setDoc(doc(db, "reservations", id), {
+        ...data,
+        cancelled: true,
+        cancelledAt: Date.now(),
+        cancelledBy: String(cancelForm.cancelledBy || "").trim(),
+        cancelReason: String(cancelForm.cancelReason || "").trim(),
+      });
+      setCancelModalId(null);
+    } catch (e) {
+      alert("キャンセル処理に失敗しました：" + e.message);
+    }
+  };
+
+  const handleUncancelReservation = async (id) => {
+    if (!window.confirm("この予約のキャンセルを解除し、有効な予約として戻しますか？")) return;
+    const target = allReservations.find(r => r._id === id);
+    if (!target || !target.cancelled) return;
+    const { _id, cancelled, cancelledAt, cancelledBy, cancelReason, ...rest } = target;
+    try {
+      await setDoc(doc(db, "reservations", id), {
+        ...rest,
+        cancelled: false,
+        cancelledAt: deleteField(),
+        cancelledBy: deleteField(),
+        cancelReason: deleteField(),
+      }, { merge: true });
+    } catch (e) {
+      alert("キャンセル解除に失敗しました：" + e.message);
+    }
+  };
+
   const restoreReservation = async (id) => {
     const target = allReservations.find(r => r._id === id);
     if (!target) return;
@@ -599,7 +669,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   // 受付チェック切替
   const toggleArrived = async (id) => {
     const target = reservations.find(r => r._id === id);
-    if (!target) return;
+    if (!target || target.cancelled) return;
     const people = getPeopleCount(target.people);
     const currentArrivedCount = getArrivedCount(target);
     const newArrivedCount = people <= 1
@@ -618,7 +688,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   // arrivedCount / arrived / arrivedAt を「指定値」で更新する（カードの select 用）
   const patchReservationArrival = async (id, nextArrivedCountRaw) => {
     const target = allReservations.find(r => r._id === id) || reservations.find(r => r._id === id);
-    if (!target) return;
+    if (!target || target.cancelled) return;
 
     const people = getPeopleCount(target.people);
     const nextArrivedCount = Math.min(people, Math.max(0, Math.floor(Number(nextArrivedCountRaw) || 0)));
@@ -662,12 +732,13 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
     grouped[d].push(r);
   });
 
-  const upcomingCount = reservations.filter(r => r.date >= today).length;
-  const todayCount = reservations.filter(r => r.date === today).length;
-  const pastCount = reservations.filter(r => r.date < today).length;
+  const upcomingCount = reservations.filter(r => r.date >= today && isActiveReservation(r)).length;
+  const todayCount = reservations.filter(r => r.date === today && isActiveReservation(r)).length;
+  const pastCount = reservations.filter(r => r.date < today && isActiveReservation(r)).length;
 
   // ===== 編集画面 =====
   if (view === "edit") {
+    const editingPrior = editingId ? allReservations.find(x => x._id === editingId) : null;
     // 選択日のイベント候補（貸切は電話予約の対象外）
     const candidateEvents = staffReservationEventsForDate(events, form.date);
     const staffBookingNotice = getStaffBookingStatusNotice(selectedFormEvent);
@@ -681,6 +752,17 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
           </h2>
           <button style={S.btn("sm")} onClick={()=>setView(returnView || "calendar")}>← 戻る</button>
         </div>
+
+        {editingPrior?.cancelled && (
+          <div style={{ marginBottom: "1rem", padding: ".8rem 1rem", background: "#121318", border: "1px solid rgba(136,136,140,0.4)", borderRadius: 6, fontSize: ".75rem", color: "rgba(240,232,208,0.8)", lineHeight: 1.55 }}>
+            <div style={{ fontWeight: 600, color: "#9a9a9e", marginBottom: ".4rem", letterSpacing: ".08em" }}>キャンセル済みの予約です</div>
+            <div style={{ fontSize: ".7rem", color: "rgba(240,232,208,0.55)" }}>
+              {fmtCancelledAt(editingPrior.cancelledAt)}{editingPrior.cancelledBy ? ` · 対応: ${editingPrior.cancelledBy}` : ""}
+            </div>
+            {editingPrior.cancelReason && <div style={{ marginTop: ".35rem", color: "rgba(244,162,97,0.9)" }}>理由・メモ: {editingPrior.cancelReason}</div>}
+            <button type="button" style={{ ...S.btn("sm"), marginTop: ".75rem", borderColor: "rgba(126,200,127,0.45)", color: "#7ec87e" }} onClick={() => handleUncancelReservation(editingId)}>キャンセルを解除して有効に戻す</button>
+          </div>
+        )}
 
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:".7rem"}} className="hb-form-grid">
           <Field label="日付" required>
@@ -853,11 +935,14 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
           )}
         </div>
 
-        <div style={{display:"flex",gap:".5rem",marginTop:"1.5rem",flexWrap:"wrap"}}>
+        <div style={{display:"flex",gap:".5rem",marginTop:"1.5rem",flexWrap:"wrap",alignItems:"center"}}>
           <button style={{...S.btn("gold"),flex:1,maxWidth:200}} onClick={handleSave}>💾 保存</button>
-          <button style={S.btn("ghost")} onClick={()=>setView(returnView || "calendar")}>キャンセル</button>
+          <button style={S.btn("ghost")} onClick={()=>setView(returnView || "calendar")}>戻る</button>
+          {editingId && !editingPrior?.cancelled && (
+            <button type="button" style={{...S.btn("ghost"),borderColor:"rgba(244,162,97,0.45)",color:"#f4a261"}} onClick={()=>openCancelModal(editingId)}>予約をキャンセル</button>
+          )}
           {editingId && (
-            <button style={{...S.btn("danger"),marginLeft:"auto"}} onClick={async()=>{await handleDelete(editingId);setView(returnView || "calendar");}}>🗑 削除</button>
+            <button style={{...S.btn("danger"),marginLeft:"auto"}} onClick={async()=>{await handleDelete(editingId);setView(returnView || "calendar");}}>🗑 ゴミ箱へ</button>
           )}
         </div>
 
@@ -890,7 +975,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
     for (let i = 0; i < firstDow; i++) cells.push(null);
     for (let d = 1; d <= totalDays; d++) {
       const dateKey = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-      const dayRes = reservations.filter(r => r.date === dateKey);
+      const dayRes = reservations.filter(r => r.date === dateKey && isActiveReservation(r));
       const dayEvents = events.filter(e => e.date === dateKey);
       cells.push({ date: dateKey, day: d, dow: (firstDow + d - 1) % 7, reservations: dayRes, events: dayEvents });
     }
@@ -919,7 +1004,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
     const seatStates = {};
     (layout.seats||[]).forEach(s => {
       const r = reservations.find(rr => {
-        if (rr.date !== calSelectedDate || rr._deleted) return false;
+        if (rr.date !== calSelectedDate || rr._deleted || rr.cancelled) return false;
         const seats = (rr.seatNumber||"").split(",").map(x=>x.trim()).filter(Boolean);
         return seats.includes(s.number);
       });
@@ -989,7 +1074,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   };
 
   const handleLinkCheck = () => {
-    const activeRes = reservations; // _deleted除外済み
+    const activeRes = reservations.filter(isActiveReservation);
     const unlinked = activeRes.filter(r => {
       if (!r.eventName || !r.date) return true;
       return !events.some(e => e.date === r.date && e.name === r.eventName);
@@ -1019,7 +1104,8 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   const printReservationList = () => {
     const dt = new Date(calSelectedDate + "T00:00:00");
     const dowJp = ["日","月","火","水","木","金","土"][dt.getDay()];
-    const totalPeople = dayReservations.reduce((s,r)=>s+Number(r.people||0),0);
+    const activeDayOnly = dayReservations.filter(isActiveReservation);
+    const totalPeople = activeDayOnly.reduce((s,r)=>s+Number(r.people||0),0);
     const win = window.open("", "_blank");
     if (!win) { alert("ポップアップがブロックされました"); return; }
 
@@ -1046,24 +1132,30 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
       }
     }
 
-    const renderRows = (list, showArtist) => list.map(r => `
-      <tr>
-        <td style="text-align:center;width:40px"><div style="display:inline-block;width:18px;height:18px;border:1.5px solid #555;border-radius:3px;background:${isArrivedReservation(r)?"#5a8eae":"#fff"};color:#fff;font-weight:700;line-height:18px;text-align:center;font-size:12px">${isArrivedReservation(r)?"✓":""}</div></td>
-        <td>${r.customerName||""}</td>
+    const renderRows = (list, showArtist) => list.map(r => {
+      const cx = r.cancelled ? "opacity:0.82;background:#f0f0f3" : "";
+      const cn = r.cancelled ? ` <span style="font-size:10px;background:#777;color:#fff;padding:1px 6px;border-radius:3px;vertical-align:middle">キャンセル</span>` : "";
+      const cr = r.cancelled ? `<div style="font-size:10px;color:#666;margin-top:2px">${fmtCancelledAt(r.cancelledAt)||""}${r.cancelledBy ? ` · 対応:${String(r.cancelledBy).replace(/[<>]/g,"")}` : ""}${r.cancelReason ? `<div style="margin-top:2px;color:#a0522d">理由: ${String(r.cancelReason).replace(/[<>]/g,"")}</div>` : ""}</div>` : "";
+      return `
+      <tr style="${cx}">
+        <td style="text-align:center;width:40px"><div style="display:inline-block;width:18px;height:18px;border:1.5px solid #555;border-radius:3px;background:${isArrivedReservation(r)&&!r.cancelled?"#5a8eae":"#fff"};color:#fff;font-weight:700;line-height:18px;text-align:center;font-size:12px">${isArrivedReservation(r)&&!r.cancelled?"✓":""}</div></td>
+        <td>${r.customerName||""}${cn}${cr}</td>
         <td style="text-align:center">${r.people||""}名</td>
         ${showArtist ? `<td>${normalizeTargetArtist(r.targetArtist)}</td>` : ""}
         <td>${r.phone||""}</td>
         <td>${sourceLabel(r.source)||""}</td>
         <td>${r.seatNumber||""}</td>
         <td style="font-size:11px">${(r.note||"").replace(/[<>]/g,"")}</td>
-      </tr>`).join("");
+      </tr>`;
+    }).join("");
 
     const sections = groups.map(g => {
-      const totalP = g.reservations.reduce((s,r)=>s+Number(r.people||0),0);
-      const arrivedC = g.reservations.reduce((s, r) => s + getArrivedCount(r), 0);
+      const activeInGroup = g.reservations.filter(isActiveReservation);
+      const totalP = activeInGroup.reduce((s,r)=>s+Number(r.people||0),0);
+      const arrivedC = activeInGroup.reduce((s, r) => s + getArrivedCount(r), 0);
       const showArtist = g.event && isMultiArtistEvent(g.event);
       const artistSummary = showArtist
-        ? summarizeTargetArtistPeople(g.reservations).map(([name, ppl]) => `${name} ${ppl}名`).join(" / ")
+        ? summarizeTargetArtistPeople(activeInGroup).map(([name, ppl]) => `${name} ${ppl}名`).join(" / ")
         : "";
       const ev = g.event;
       const evMeta = ev ? `${ev.open?`開店 ${ev.open}`:""}${ev.open&&ev.start?" / ":""}${ev.start?`開演 ${ev.start}`:""}` : "";
@@ -1074,7 +1166,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
           ${dayEvents.length > 1 || g.title ? `<div class="section-title">🎵 ${g.title || "（イベントなし）"}${noBookingBadge}</div>` : ""}
           ${evMeta ? `<div class="section-meta">🕒 ${evMeta}</div>` : ""}
           ${ev && ev.notes ? `<div class="notes">⚠️ <b>スタッフへの注意事項</b><br/>${(ev.notes||"").replace(/[<>]/g,"").replace(/\n/g,"<br/>")}</div>` : ""}
-          <div class="section-stat">${g.reservations.length}組 / 計${totalP}名 / 来店 ${arrivedC}/${totalP}名</div>
+          <div class="section-stat">${activeInGroup.length}組 / 計${totalP}名 / 来店 ${arrivedC}/${totalP}名</div>
           ${showArtist && artistSummary ? `<div class="section-meta">🎤 ご予約アーティスト別：${artistSummary}</div>` : ""}
           <table>
             <thead><tr><th>受付</th><th>お名前</th><th>人数</th>${showArtist ? "<th>ご予約アーティスト</th>" : ""}<th>電話</th><th>経路</th><th>席</th><th>備考</th></tr></thead>
@@ -1098,7 +1190,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
       @media print{ body{padding:8px} .noprint{display:none} }
     </style></head><body>
       <h1>予約リスト：${dt.getFullYear()}年${dt.getMonth()+1}月${dt.getDate()}日（${dowJp}）</h1>
-      <div class="meta">${dayReservations.length}組 / 計${totalPeople}名 / 来店 ${dayReservations.reduce((s, r) => s + getArrivedCount(r), 0)}/${totalPeople}名</div>
+      <div class="meta">${activeDayOnly.length}組 / 計${totalPeople}名 / 来店 ${activeDayOnly.reduce((s, r) => s + getArrivedCount(r), 0)}/${totalPeople}名</div>
       ${sections}
       <div class="noprint" style="margin-top:16px;text-align:center"><button onclick="window.print()" style="padding:8px 24px">印刷</button></div>
     </body></html>`);
@@ -1350,9 +1442,24 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                 const renderReservationCard = (r) => {
                   const evForCard = findEventByDateAndName(events, calSelectedDate, r.eventName);
                   const showArtistBadge = evForCard && isMultiArtistEvent(evForCard);
+                  const isCancelled = !!r.cancelled;
                   return (
-                  <div key={r._id} style={{...S.card,padding:".7rem .9rem",marginBottom:".4rem",display:"grid",gridTemplateColumns:"auto 1fr auto",gap:".6rem",alignItems:"center",borderLeft:isArrivedReservation(r)?"3px solid #7ec87e":"3px solid rgba(244,162,97,0.3)"}}>
-                    {getPeopleCount(r.people) <= 1 ? (
+                  <div key={r._id} style={{
+                    ...S.card,
+                    padding:".7rem .9rem",
+                    marginBottom:".4rem",
+                    display:"grid",
+                    gridTemplateColumns:"auto 1fr auto",
+                    gap:".6rem",
+                    alignItems:"center",
+                    opacity: isCancelled ? 0.82 : 1,
+                    background: isCancelled ? "#121318" : undefined,
+                    border: isCancelled ? "1px solid rgba(136,136,140,0.35)" : S.card.border,
+                    borderLeft: isCancelled ? "3px solid rgba(136,136,140,0.55)" : (isArrivedReservation(r)?"3px solid #7ec87e":"3px solid rgba(244,162,97,0.3)"),
+                  }}>
+                    {isCancelled ? (
+                      <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.35)",minWidth:60,textAlign:"center",letterSpacing:".05em"}}>—</div>
+                    ) : getPeopleCount(r.people) <= 1 ? (
                       <button onClick={()=>toggleArrived(r._id)} style={{
                         padding:".35rem .55rem",
                         background:isArrivedReservation(r)?"rgba(126,200,127,0.13)":"transparent",
@@ -1380,30 +1487,45 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                         </select>
                       </div>
                     )}
-                    <div onClick={()=>startEdit(r)} style={{cursor:"pointer",minWidth:0}}>
+                    <div onClick={()=>startEdit(r)} style={{cursor:"pointer",minWidth:0,color: isCancelled ? "rgba(240,232,208,0.62)" : undefined}}>
                       <div style={{display:"flex",alignItems:"center",gap:".5rem",marginBottom:".15rem",flexWrap:"wrap"}}>
                         <span style={{fontSize:".7rem"}}>{sourceIcon(r.source)}</span>
+                        {isCancelled && <span style={{padding:".12rem .42rem",background:"rgba(136,136,140,0.35)",borderRadius:2,fontSize:".58rem",color:"#d8d8dc",letterSpacing:".08em"}}>キャンセル</span>}
                         <span style={{fontFamily:"Georgia,serif",fontSize:".92rem"}}>{r.customerName||"（無名）"}</span>
                         <span style={{padding:".1rem .4rem",background:"rgba(201,168,76,0.13)",borderRadius:2,fontSize:".62rem",color:"#c9a84c"}}>{r.people}名</span>
                         {showArtistBadge && <span style={{padding:".1rem .4rem",background:"rgba(126,200,227,0.13)",borderRadius:2,fontSize:".62rem",color:"#7ec8e3"}}>🎤 {normalizeTargetArtist(r.targetArtist)}</span>}
                         {r.seatNumber && <span style={{padding:".1rem .4rem",background:"rgba(126,200,227,0.13)",borderRadius:2,fontSize:".62rem",color:"#7ec8e3"}}>🪑 {r.seatNumber}</span>}
                       </div>
+                      {isCancelled && (
+                        <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.42)",marginBottom:".2rem",lineHeight:1.45}}>
+                          {fmtCancelledAt(r.cancelledAt) && <span>{fmtCancelledAt(r.cancelledAt)}</span>}
+                          {r.cancelledBy && <span>{fmtCancelledAt(r.cancelledAt) ? " · " : ""}対応: {r.cancelledBy}</span>}
+                          {r.cancelReason && <div style={{marginTop:".12rem",color:"rgba(244,162,97,0.65)"}}>理由・メモ: {r.cancelReason}</div>}
+                        </div>
+                      )}
                       <div style={{fontSize:".66rem",color:"rgba(240,232,208,0.55)",display:"flex",gap:".7rem",flexWrap:"wrap"}}>
                         {r.phone && <span>📞 {r.phone}</span>}
                         {r.note && <span style={{color:"#f4a261"}}>📝 {r.note}</span>}
                       </div>
                     </div>
                     <div style={{display:"flex",gap:".25rem",flexDirection:"column"}}>
-                      <button style={{...S.btn("sm"),padding:".25rem .5rem",fontSize:".55rem"}} onClick={()=>startEdit(r)}>編集</button>
-                      <button style={{...S.btn("danger"),padding:".25rem .5rem",fontSize:".55rem"}} onClick={()=>handleDelete(r._id)}>削除</button>
+                      <button style={{...S.btn("sm"),padding:".25rem .5rem",fontSize:".55rem"}} onClick={(e)=>{e.stopPropagation();startEdit(r);}}>編集</button>
+                      {!isCancelled && (
+                        <button style={{...S.btn("ghost"),padding:".25rem .5rem",fontSize:".52rem",borderColor:"rgba(244,162,97,0.45)",color:"#f4a261"}} onClick={(e)=>{e.stopPropagation();openCancelModal(r._id);}}>キャンセル</button>
+                      )}
+                      {isCancelled && (
+                        <button style={{...S.btn("sm"),padding:".25rem .5rem",fontSize:".52rem",borderColor:"rgba(126,200,127,0.45)",color:"#7ec87e"}} onClick={(e)=>{e.stopPropagation();handleUncancelReservation(r._id);}}>解除</button>
+                      )}
+                      <button style={{...S.btn("danger"),padding:".25rem .5rem",fontSize:".55rem"}} onClick={(e)=>{e.stopPropagation();handleDelete(r._id);}}>削除</button>
                     </div>
                   </div>
                 ); };
 
                 return groups.map((g, gi) => {
-                  const totalP = g.reservations.reduce((s,r)=>s+Number(r.people||0),0);
-                  const arrivedC = g.reservations.reduce((s,r)=>s+getArrivedCount(r),0);
-                  const artistSummary = summarizeTargetArtistPeople(g.reservations);
+                  const activeInGroup = g.reservations.filter(isActiveReservation);
+                  const totalP = activeInGroup.reduce((s,r)=>s+Number(r.people||0),0);
+                  const arrivedC = activeInGroup.reduce((s,r)=>s+getArrivedCount(r),0);
+                  const artistSummary = summarizeTargetArtistPeople(activeInGroup);
                   const groupBookingNotice = getStaffBookingStatusNotice(g.event);
                   // 複数イベント時は、イベント名をキーに付けて席レイアウトを分ける
                   const eventScopedKey = (dayEvents.length > 1 && g.eventName)
@@ -1426,7 +1548,12 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                           📞 {dayEvents.length > 1 && g.eventName ? `${g.eventName} の予約` : "予約リスト"}
                         </span>
                         <span style={{fontSize:".68rem",color:"rgba(201,168,76,0.65)"}}>
-                          （{g.reservations.length}組 / 計{totalP}名 / 来店 {arrivedC}/{totalP}名）
+                          （{activeInGroup.length}組 / 計{totalP}名 / 来店 {arrivedC}/{totalP}名）
+                          {g.reservations.some(r => r.cancelled) && (
+                            <span style={{color:"rgba(136,136,140,0.85)",marginLeft:".35rem"}}>
+                              · キャンセル {g.reservations.filter(r => r.cancelled).length}件
+                            </span>
+                          )}
                         </span>
                       </div>
                       {groupBookingNotice && (
@@ -1500,8 +1627,10 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
         </div>
       ) : Object.keys(grouped).sort().map(date => {
         const dayReservations = grouped[date];
-        const totalPeople = dayReservations.reduce((s,r)=>s+Number(r.people||0),0);
-        const arrivedCount = dayReservations.reduce((s,r)=>s+getArrivedCount(r),0);
+        const activeDayList = dayReservations.filter(isActiveReservation);
+        const totalPeople = activeDayList.reduce((s,r)=>s+Number(r.people||0),0);
+        const arrivedCount = activeDayList.reduce((s,r)=>s+getArrivedCount(r),0);
+        const cancelCount = dayReservations.filter(r => r.cancelled).length;
         return (
           <div key={date} style={{marginBottom:"1.25rem"}}>
             <div style={{display:"flex",alignItems:"center",gap:".75rem",marginBottom:".5rem",padding:".5rem 0",borderBottom:"1px solid rgba(201,168,76,0.15)"}}>
@@ -1509,15 +1638,30 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                 {fmtDate(date)}
               </span>
               <span style={{fontSize:".68rem",color:"rgba(240,232,208,0.55)"}}>
-                {dayReservations.length}組 / 計{totalPeople}名 / 来店 {arrivedCount}/{totalPeople}名
+                {activeDayList.length}組 / 計{totalPeople}名 / 来店 {arrivedCount}/{totalPeople}名
+                {cancelCount > 0 && <span style={{color:"rgba(136,136,140,0.85)",marginLeft:".35rem"}}>· キャンセル {cancelCount}件</span>}
               </span>
             </div>
             {dayReservations.map(r => {
               const evList = findEventByDateAndName(events, r.date, r.eventName);
               const showListArtist = evList && isMultiArtistEvent(evList);
+              const isCancelled = !!r.cancelled;
               return (
-                <div key={r._id} style={{...S.card,padding:".75rem 1rem",display:"grid",gridTemplateColumns:"auto 1fr auto",gap:".75rem",alignItems:"center",borderLeft:isArrivedReservation(r)?"3px solid #7ec87e":"3px solid rgba(244,162,97,0.3)"}}>
-                  {getPeopleCount(r.people) <= 1 ? (
+                <div key={r._id} style={{
+                  ...S.card,
+                  padding:".75rem 1rem",
+                  display:"grid",
+                  gridTemplateColumns:"auto 1fr auto",
+                  gap:".75rem",
+                  alignItems:"center",
+                  opacity: isCancelled ? 0.82 : 1,
+                  background: isCancelled ? "#121318" : undefined,
+                  border: isCancelled ? "1px solid rgba(136,136,140,0.35)" : S.card.border,
+                  borderLeft: isCancelled ? "3px solid rgba(136,136,140,0.55)" : (isArrivedReservation(r)?"3px solid #7ec87e":"3px solid rgba(244,162,97,0.3)"),
+                }}>
+                  {isCancelled ? (
+                    <div style={{fontSize:".65rem",color:"rgba(240,232,208,0.35)",minWidth:60,textAlign:"center"}}>—</div>
+                  ) : getPeopleCount(r.people) <= 1 ? (
                     <button onClick={()=>toggleArrived(r._id)} style={{
                       padding:".4rem .55rem",
                       background:isArrivedReservation(r)?"rgba(126,200,127,0.13)":"transparent",
@@ -1545,24 +1689,38 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                       </select>
                     </div>
                   )}
-                  <div onClick={()=>startEdit(r)} style={{cursor:"pointer",minWidth:0}}>
+                  <div onClick={()=>startEdit(r)} style={{cursor:"pointer",minWidth:0,color: isCancelled ? "rgba(240,232,208,0.62)" : undefined}}>
                     <div style={{display:"flex",alignItems:"center",gap:".5rem",marginBottom:".2rem",flexWrap:"wrap"}}>
                       <span style={{fontSize:".7rem"}}>{sourceIcon(r.source)}</span>
+                      {isCancelled && <span style={{padding:".12rem .42rem",background:"rgba(136,136,140,0.35)",borderRadius:2,fontSize:".58rem",color:"#d8d8dc",letterSpacing:".08em"}}>キャンセル</span>}
                       <span style={{fontFamily:"Georgia,serif",fontSize:".95rem"}}>{r.customerName||"（無名）"}</span>
                       <span style={{padding:".1rem .4rem",background:"rgba(201,168,76,0.13)",borderRadius:2,fontSize:".62rem",color:"#c9a84c"}}>{r.people}名</span>
                       {showListArtist && <span style={{padding:".1rem .4rem",background:"rgba(126,200,227,0.13)",borderRadius:2,fontSize:".62rem",color:"#7ec8e3"}}>🎤 {normalizeTargetArtist(r.targetArtist)}</span>}
                       {r.seatNumber && <span style={{padding:".1rem .4rem",background:"rgba(126,200,227,0.13)",borderRadius:2,fontSize:".62rem",color:"#7ec8e3"}}>🪑 {r.seatNumber}</span>}
                       {r.staff && <span style={{padding:".1rem .4rem",background:"rgba(201,168,76,0.08)",borderRadius:2,fontSize:".58rem",color:"rgba(201,168,76,0.7)"}}>担当:{r.staff}</span>}
                     </div>
+                    {isCancelled && (
+                      <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.42)",marginBottom:".25rem",lineHeight:1.45}}>
+                        {fmtCancelledAt(r.cancelledAt) && <span>{fmtCancelledAt(r.cancelledAt)}</span>}
+                        {r.cancelledBy && <span>{fmtCancelledAt(r.cancelledAt) ? " · " : ""}対応: {r.cancelledBy}</span>}
+                        {r.cancelReason && <div style={{marginTop:".12rem",color:"rgba(244,162,97,0.65)"}}>理由・メモ: {r.cancelReason}</div>}
+                      </div>
+                    )}
                     <div style={{fontSize:".68rem",color:"rgba(240,232,208,0.55)",display:"flex",gap:".75rem",flexWrap:"wrap"}}>
                       {r.eventName && <span>🎵 {r.eventName}</span>}
                       {r.phone && <span>📞 {r.phone}</span>}
                       {r.note && <span style={{color:"#f4a261"}}>📝 {r.note.length>30?r.note.slice(0,30)+"...":r.note}</span>}
                     </div>
                   </div>
-                  <div style={{display:"flex",gap:".3rem"}}>
-                    <button style={S.btn("sm")} onClick={()=>startEdit(r)}>編集</button>
-                    <button style={S.btn("danger")} onClick={()=>handleDelete(r._id)}>削除</button>
+                  <div style={{display:"flex",gap:".3rem",flexDirection:"column"}}>
+                    <button style={S.btn("sm")} onClick={(e)=>{e.stopPropagation();startEdit(r);}}>編集</button>
+                    {!isCancelled && (
+                      <button type="button" style={{...S.btn("ghost"),padding:".28rem .55rem",fontSize:".62rem",borderColor:"rgba(244,162,97,0.45)",color:"#f4a261"}} onClick={(e)=>{e.stopPropagation();openCancelModal(r._id);}}>キャンセル</button>
+                    )}
+                    {isCancelled && (
+                      <button type="button" style={{...S.btn("sm"),padding:".28rem .55rem",fontSize:".62rem",borderColor:"rgba(126,200,127,0.45)",color:"#7ec87e"}} onClick={(e)=>{e.stopPropagation();handleUncancelReservation(r._id);}}>解除</button>
+                    )}
+                    <button style={S.btn("danger")} onClick={(e)=>{e.stopPropagation();handleDelete(r._id);}}>削除</button>
                   </div>
                 </div>
               );
@@ -1853,6 +2011,33 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
 
             <div style={{marginTop:"1.25rem",textAlign:"right"}}>
               <button style={S.btn("ghost")} onClick={()=>setShowLinkCheck(false)}>閉じる</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* キャンセル処理モーダル */}
+      {cancelModalId && (
+        <div style={{position:"fixed",top:0,left:0,width:"100%",height:"100%",background:"rgba(0,0,0,0.85)",zIndex:110,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}} onClick={()=>setCancelModalId(null)}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#0d0d0d",border:"1px solid rgba(244,162,97,0.35)",borderRadius:8,padding:"1.5rem",maxWidth:440,width:"100%"}}>
+            <div style={{fontFamily:"Georgia,serif",fontSize:"1rem",color:"#f4a261",letterSpacing:".12em",marginBottom:".75rem"}}>予約をキャンセル</div>
+            <div style={{fontSize:".72rem",color:"rgba(240,232,208,0.55)",marginBottom:"1rem",lineHeight:1.55}}>
+              予約情報は残ります。キャンセル理由・対応者を記録できます（当日共有・集計除外用）。
+            </div>
+            <Field label="キャンセル対応者">
+              <select style={S.inp} value={cancelForm.cancelledBy} onChange={e=>setCancelForm(f=>({...f,cancelledBy:e.target.value}))}>
+                <option value="">— 選択 —</option>
+                {staffNames.map(n => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="キャンセル理由・メモ" full>
+              <textarea style={{...S.inp,minHeight:88,resize:"vertical"}} value={cancelForm.cancelReason} onChange={e=>setCancelForm(f=>({...f,cancelReason:e.target.value}))} placeholder="例：当日連絡あり・体調不良 など"/>
+            </Field>
+            <div style={{display:"flex",gap:".5rem",justifyContent:"flex-end",marginTop:"1.25rem",flexWrap:"wrap"}}>
+              <button type="button" style={S.btn("ghost")} onClick={()=>setCancelModalId(null)}>閉じる</button>
+              <button type="button" style={{...S.btn("gold")}} onClick={submitCancelReservation}>キャンセル確定</button>
             </div>
           </div>
         </div>
