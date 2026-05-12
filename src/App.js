@@ -1579,26 +1579,97 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
       )}
 
       {view==="staffDay"&&(
-        <div style={{padding:"1.5rem 2rem",maxWidth:1200,margin:"0 auto"}} className="hb-view">
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:".9rem",flexWrap:"wrap",gap:".5rem"}}>
-            <h2 style={{fontFamily:"Georgia,serif",fontSize:"1.2rem",color:"#c9a84c",letterSpacing:".15em",margin:0}}>🎤 STAFF DAY</h2>
+        <>
+        <style>{`
+          .hb-staffday-sheet iframe {
+            height: calc(100vh - 124px);
+            min-height: 300px;
+          }
+          @supports (height: 100dvh) {
+            .hb-staffday-sheet iframe {
+              height: calc(100dvh - 128px);
+              min-height: 280px;
+            }
+          }
+        `}</style>
+        <div
+          className="hb-staffday-sheet"
+          style={{
+            padding:"0.35rem clamp(0.35rem, 2vw, 1.5rem) 0.55rem",
+            maxWidth:"none",
+            width:"100%",
+            margin:0,
+            boxSizing:"border-box",
+            color:"#f0e8d0",
+          }}
+        >
+          <div style={{
+            display:"flex",
+            flexWrap:"wrap",
+            alignItems:"center",
+            justifyContent:"space-between",
+            gap:"0.45rem",
+            marginBottom:"0.35rem",
+          }}>
+            <h2 style={{
+              fontFamily:"Georgia,serif",
+              fontSize:"0.82rem",
+              fontWeight:600,
+              color:"#c9a84c",
+              letterSpacing:"0.12em",
+              margin:0,
+            }}>
+              🎤 STAFF DAY
+            </h2>
             <a
               href={STAFF_DAY_SHEET_URL}
               target="_blank"
               rel="noopener noreferrer"
-              style={{...S.btn("ghost"),padding:".45rem .9rem",textDecoration:"none",display:"inline-flex",alignItems:"center"}}
+              style={{
+                ...S.btn("ghost"),
+                padding:"0.42rem 0.85rem",
+                fontSize:"0.68rem",
+                letterSpacing:"0.06em",
+                textDecoration:"none",
+                display:"inline-flex",
+                alignItems:"center",
+                gap:"0.25rem",
+                minHeight:40,
+                flexShrink:0,
+              }}
             >
-              ↗ 新しいタブで開く
+              Googleスプレッドシートで編集 <span aria-hidden="true">↗</span>
             </a>
           </div>
-          <div style={{...S.card(false),display:"block",padding:".5rem",minHeight:"calc(100vh - 140px)"}}>
+          <div style={{
+            width:"100%",
+            borderRadius:6,
+            border:"1px solid rgba(201,168,76,0.22)",
+            overflow:"hidden",
+            background:"#111",
+            lineHeight:0,
+          }}>
             <iframe
               title="STAFF DAY Spreadsheet"
               src={STAFF_DAY_SHEET_URL}
-              style={{width:"100%",height:"calc(100vh - 170px)",border:"1px solid rgba(201,168,76,0.2)",borderRadius:6,background:"#111"}}
+              style={{
+                width:"100%",
+                border:"none",
+                display:"block",
+              }}
             />
           </div>
+          <p style={{
+            margin:"0.4rem 0 0",
+            fontSize:"0.62rem",
+            color:"rgba(240,232,208,0.48)",
+            lineHeight:1.45,
+            textAlign:"center",
+          }}>
+            表が横に長い場合は、上のリンクから開くと見やすいことがあります。
+          </p>
         </div>
+        </>
       )}
 
       {view==="reservation"&&(
