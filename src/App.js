@@ -733,27 +733,35 @@ function TimeTableTab({ form, copyText, copied }) {
   );
 }
 
-/** Apps Script の columnWidths を values の列数に合わせ正規化。有効な幅が1つも無ければ null */
-function normalizeStaffDayColumnWidths(raw, colCount) {
-  if (!Array.isArray(raw) || colCount <= 0) return null;
-  const resolved = [];
-  let any = false;
-  for (let i = 0; i < colCount; i++) {
-    const v = i < raw.length ? raw[i] : undefined;
-    const n = typeof v === "number" ? v : Number(v);
-    if (Number.isFinite(n) && n > 0) {
-      const px = Math.min(Math.max(n, 24), 1600);
-      resolved.push(px);
-      any = true;
-    } else {
-      resolved.push(null);
-    }
-  }
-  return any ? resolved : null;
+/** ヘッダー表示文字のみで列の相対重みを付ける（列名・順・データは変更しない） */
+function classifyStaffDayColumnWeight(headerText, colIndex) {
+  const raw = String(headerText ?? "").trim();
+  const h = raw.replace(/\s+/g, "");
+  if (colIndex === 0) return "narrow";
+  if (/曲名|楽曲|タイトル|歌曲/.test(h)) return "wide";
+  if (/備考|メモ|コメント|注意|連絡|詳細/.test(h)) return "wide";
+  if (/^●$|^[◯○◎]$|^[Vv]o$|^[Gg]t$|^[Bb]a$|^[Dd]r$|^[Kk]ey$/i.test(raw)) return "narrow";
+  if (raw.length <= 3 && /^[A-Za-z]{1,3}$/.test(raw)) return "narrow";
+  if (/担当|氏名|名前/.test(h) && !/曲/.test(h)) return "narrow";
+  return "normal";
+}
+
+/** 画面幅に収めるための列幅（合計100%）。Apps Script の px 幅より優先 */
+function computeStaffDayFitColumnPercents(headerCells) {
+  const n = headerCells.length;
+  if (n === 0) return [];
+  const weights = headerCells.map((cell, i) => {
+    const k = classifyStaffDayColumnWeight(cell, i);
+    if (k === "wide") return 3.4;
+    if (k === "narrow") return 0.52;
+    return 1.1;
+  });
+  const sum = weights.reduce((a, b) => a + b, 0);
+  return weights.map((w) => (w / sum) * 100);
 }
 
 /** Apps Script の values（string[][]）を列可変のまま表示。1行目＝ヘッダー */
-function StaffDaySpreadsheetTable({ rows, columnWidths }) {
+function StaffDaySpreadsheetTable({ rows }) {
   if (!rows || rows.length === 0) return null;
   const maxCols = rows.reduce((m, r) => Math.max(m, Array.isArray(r) ? r.length : 0), 0);
   if (maxCols === 0) return null;
@@ -765,29 +773,15 @@ function StaffDaySpreadsheetTable({ rows, columnWidths }) {
   const headerCells = padRow(rows[0]);
   const bodyRows = rows.slice(1).map(padRow);
   const nbsp = "\u00a0";
-  const sizedCols =
-    Array.isArray(columnWidths) &&
-    columnWidths.length === maxCols &&
-    columnWidths.some((w) => w != null && Number.isFinite(w));
-  const tableClass =
-    "hb-staffday-table" + (sizedCols ? " hb-staffday-table--colwidth" : "");
+  const colPercents = computeStaffDayFitColumnPercents(headerCells);
   return (
     <div className="hb-staffday-table-wrap">
-      <table className={tableClass}>
-        {sizedCols && (
-          <colgroup>
-            {columnWidths.map((w, j) => (
-              <col
-                key={j}
-                style={
-                  w != null && Number.isFinite(w) && w > 0
-                    ? { width: `${w}px`, minWidth: `${w}px` }
-                    : undefined
-                }
-              />
-            ))}
-          </colgroup>
-        )}
+      <table className="hb-staffday-table hb-staffday-table--fit">
+        <colgroup>
+          {colPercents.map((pct, j) => (
+            <col key={j} style={{ width: `${pct}%` }} />
+          ))}
+        </colgroup>
         <thead>
           <tr>
             {headerCells.map((cell, j) => (
@@ -881,7 +875,6 @@ export default function App() {
   const [reservationInitialDate, setReservationInitialDate] = useState(null);
 
   const [staffDayRows, setStaffDayRows] = useState(null);
-  const [staffDayColumnWidths, setStaffDayColumnWidths] = useState(null);
   const [staffDayLoading, setStaffDayLoading] = useState(false);
   const [staffDayError, setStaffDayError] = useState(null);
   const [staffDayIframeOpen, setStaffDayIframeOpen] = useState(false);
@@ -890,7 +883,6 @@ export default function App() {
     setStaffDayLoading(true);
     setStaffDayError(null);
     setStaffDayRows(null);
-    setStaffDayColumnWidths(null);
     try {
       const res = await fetch(STAFF_DAY_JSON_URL);
       if (!res.ok) {
@@ -912,11 +904,6 @@ export default function App() {
           ? row.map((c) => (c === null || c === undefined ? "" : String(c)))
           : [],
       );
-      const maxCols = normalized.reduce(
-        (m, r) => Math.max(m, Array.isArray(r) ? r.length : 0),
-        0,
-      );
-      setStaffDayColumnWidths(normalizeStaffDayColumnWidths(json.columnWidths, maxCols));
       setStaffDayRows(normalized);
       if (normalized.length === 0) {
         setStaffDayError("表にデータがありません");
@@ -926,7 +913,6 @@ export default function App() {
       }
     } catch (e) {
       setStaffDayRows(null);
-      setStaffDayColumnWidths(null);
       setStaffDayError(e.message || "読み込みに失敗しました");
       setStaffDayIframeOpen(true);
     } finally {
@@ -1720,6 +1706,7 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
         <>
         <style>{`
           .hb-staffday-table-wrap {
+            width: 100%;
             overflow-x: auto;
             overflow-y: auto;
             -webkit-overflow-scrolling: touch;
@@ -1737,26 +1724,27 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
           .hb-staffday-table {
             border-collapse: separate;
             border-spacing: 0;
-            font-size: 0.72rem;
+            font-size: 0.67rem;
             color: #f0e8d0;
-            width: max-content;
-            min-width: 100%;
+            box-sizing: border-box;
           }
-          .hb-staffday-table.hb-staffday-table--colwidth {
+          .hb-staffday-table.hb-staffday-table--fit {
             table-layout: fixed;
-            width: max-content;
-            min-width: max-content;
+            width: 100%;
+            max-width: 100%;
+            min-width: 0;
           }
           .hb-staffday-table th,
           .hb-staffday-table td {
             border-right: 1px solid rgba(201,168,76,0.14);
             border-bottom: 1px solid rgba(201,168,76,0.14);
-            padding: 0.32rem 0.48rem;
+            padding: 0.2rem 0.26rem;
             vertical-align: top;
             white-space: pre-wrap;
             word-break: break-word;
-            min-width: 2.4rem;
-            min-height: 1.35em;
+            overflow-wrap: anywhere;
+            min-width: 0;
+            min-height: 1.25em;
             box-sizing: border-box;
           }
           .hb-staffday-table th:last-child,
@@ -1907,7 +1895,7 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
           )}
 
           {!staffDayLoading && staffDayRows && staffDayRows.length > 0 && (
-            <StaffDaySpreadsheetTable rows={staffDayRows} columnWidths={staffDayColumnWidths} />
+            <StaffDaySpreadsheetTable rows={staffDayRows} />
           )}
 
           <div style={{ marginTop:"0.35rem" }}>
