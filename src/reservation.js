@@ -45,6 +45,88 @@ const reservationCardActionBtn = {
   boxSizing: "border-box",
 };
 
+/** 予約カード：PCは3カラムグリッド。~640px は縦読み＋来店操作・ボタンを下段に */
+const HB_RES_CARD_CSS = `
+.hb-res-card {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.55rem;
+  align-items: start;
+}
+.hb-res-card__body { min-width: 0; }
+.hb-res-card__row1 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.5rem;
+  margin-bottom: 0.12rem;
+}
+.hb-res-card__detail-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem 0.75rem;
+  font-size: 0.68rem;
+  color: rgba(240,232,208,0.55);
+}
+@media (max-width: 639.98px) {
+  .hb-res-card {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 0.35rem 0.45rem;
+  }
+  .hb-res-card__body {
+    order: 1;
+    flex: 1 1 100%;
+    width: 100%;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid rgba(201,168,76,0.12);
+  }
+  .hb-res-card__arrival {
+    order: 2;
+    flex: 0 0 auto;
+    align-self: center;
+  }
+  .hb-res-card__actions {
+    order: 2;
+    flex: 1 1 140px;
+    justify-content: flex-end !important;
+    align-self: center;
+  }
+  .hb-res-card__row1 .hb-res-name {
+    font-size: 1rem !important;
+    font-weight: 650;
+    flex: 1 1 120px;
+    min-width: 0;
+    word-break: break-word;
+  }
+  .hb-res-card__row1 .hb-res-people {
+    flex-shrink: 0;
+  }
+  .hb-res-card__meta-line {
+    flex-basis: 100%;
+    margin-top: 0.08rem;
+    font-size: 0.66rem;
+    color: rgba(240,232,208,0.52);
+  }
+  .hb-res-card__detail-line {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.35rem;
+    width: 100%;
+    margin-top: 0.2rem;
+    font-size: 0.68rem;
+  }
+  .hb-res-card__detail-line .hb-res-note {
+    width: 100%;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.55;
+    box-sizing: border-box;
+  }
+}
+`;
+
 const Field = ({ label, children, full, required }) => (
   <div style={{ gridColumn: full ? "1/-1" : undefined, display:"flex", flexDirection:"column" }}>
     <label style={S.lbl}>{label}{required && <span style={{color:"#e24b4a",marginLeft:".25rem"}}>*</span>}</label>
@@ -759,6 +841,131 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   const todayCount = reservations.filter(r => r.date === today && isActiveReservation(r)).length;
   const pastCount = reservations.filter(r => r.date < today && isActiveReservation(r)).length;
 
+  /** カレンダー日付詳細・リスト共通の予約カード（スマホは hb-res-card の CSS のみ） */
+  const renderHbReservationCard = (r, {
+    showArtistBadge,
+    showStaff = false,
+    showEvent = false,
+    noteTruncate = false,
+    compactPad = false,
+  }) => {
+    const isCancelled = !!r.cancelled;
+    const peopleN = getPeopleCount(r.people);
+    const noteRaw = String(r.note || "").trim();
+    const noteShown = noteTruncate && noteRaw.length > 30 ? `${noteRaw.slice(0, 30)}...` : noteRaw;
+    const seatStr = String(r.seatNumber || "").trim();
+
+    const cardBase = {
+      ...S.card,
+      padding: compactPad ? ".6rem .85rem" : ".6rem .9rem",
+      ...(compactPad ? { marginBottom: ".35rem" } : {}),
+      opacity: isCancelled ? 0.82 : 1,
+      background: isCancelled ? "#121318" : undefined,
+      border: isCancelled ? "1px solid rgba(136,136,140,0.35)" : S.card.border,
+      borderLeft: isCancelled ? "3px solid rgba(136,136,140,0.55)" : (isArrivedReservation(r) ? "3px solid #7ec87e" : "3px solid rgba(244,162,97,0.3)"),
+    };
+
+    const toggleBtnStyle = compactPad ? {
+      padding: ".35rem .55rem",
+      background: isArrivedReservation(r) ? "rgba(126,200,127,0.13)" : "transparent",
+      border: `1px solid ${isArrivedReservation(r) ? "#7ec87e" : "rgba(244,162,97,0.4)"}`,
+      borderRadius: 4,
+      color: isArrivedReservation(r) ? "#7ec87e" : "#f4a261",
+      cursor: "pointer",
+      fontSize: ".68rem",
+      fontFamily: "inherit",
+      minWidth: 60,
+    } : {
+      padding: ".4rem .55rem",
+      background: isArrivedReservation(r) ? "rgba(126,200,127,0.13)" : "transparent",
+      border: `1px solid ${isArrivedReservation(r) ? "#7ec87e" : "rgba(244,162,97,0.4)"}`,
+      borderRadius: 4,
+      color: isArrivedReservation(r) ? "#7ec87e" : "#f4a261",
+      cursor: "pointer",
+      fontSize: ".7rem",
+      fontFamily: "inherit",
+      minWidth: 60,
+    };
+
+    return (
+      <div key={r._id} className="hb-res-card" style={cardBase}>
+        <div className="hb-res-card__arrival" onClick={(e) => e.stopPropagation()}>
+          {isCancelled ? (
+            <div style={{ fontSize: compactPad ? ".62rem" : ".65rem", color: "rgba(240,232,208,0.35)", minWidth: 60, textAlign: "center", letterSpacing: compactPad ? ".05em" : undefined }}>—</div>
+          ) : peopleN <= 1 ? (
+            <button type="button" onClick={() => toggleArrived(r._id)} style={toggleBtnStyle}>
+              {isArrivedReservation(r) ? "✓ 来店済" : "未来店"}
+            </button>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: ".25rem", minWidth: 92 }}>
+              <div style={{ fontSize: ".6rem", color: "rgba(240,232,208,0.55)", letterSpacing: ".02em" }}>
+                来店 {getArrivedCount(r)}/{peopleN}名
+              </div>
+              <select
+                style={{ ...S.inp, maxWidth: 110, padding: ".25rem .4rem", fontSize: ".75rem" }}
+                value={getArrivedCount(r)}
+                onChange={(e) => { e.stopPropagation(); patchReservationArrival(r._id, e.target.value); }}
+              >
+                {Array.from({ length: peopleN + 1 }, (_, n) => (
+                  <option key={n} value={n}>{n}名</option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+
+        <div className="hb-res-card__body" onClick={() => startEdit(r)} style={{ cursor: "pointer", minWidth: 0, color: isCancelled ? "rgba(240,232,208,0.62)" : undefined }}>
+          <div className="hb-res-card__row1">
+            <span style={{ fontSize: ".7rem" }}>{sourceIcon(r.source)}</span>
+            {isCancelled && (
+              <span style={{ padding: ".12rem .42rem", background: "rgba(136,136,140,0.35)", borderRadius: 2, fontSize: ".58rem", color: "#d8d8dc", letterSpacing: ".08em" }}>キャンセル</span>
+            )}
+            <span className="hb-res-name" style={{ fontFamily: "Georgia,serif", fontSize: compactPad ? ".92rem" : ".95rem" }}>{r.customerName || "（無名）"}</span>
+            <span className="hb-res-people" style={{ padding: ".1rem .4rem", background: "rgba(201,168,76,0.13)", borderRadius: 2, fontSize: ".62rem", color: "#c9a84c" }}>{r.people}名</span>
+            {showArtistBadge && (
+              <span className="hb-res-card__meta-line" style={{ padding: ".1rem .4rem", background: "rgba(126,200,227,0.13)", borderRadius: 2, fontSize: ".62rem", color: "#7ec8e3" }}>
+                🎤 {normalizeTargetArtist(r.targetArtist)}
+              </span>
+            )}
+            {!!seatStr && (
+              <span className="hb-res-card__meta-line" style={{ padding: ".1rem .4rem", background: "rgba(126,200,227,0.13)", borderRadius: 2, fontSize: ".62rem", color: "#7ec8e3" }}>
+                🪑 {r.seatNumber}
+              </span>
+            )}
+            {showStaff && r.staff && (
+              <span className="hb-res-card__meta-line" style={{ padding: ".1rem .4rem", background: "rgba(201,168,76,0.08)", borderRadius: 2, fontSize: ".58rem", color: "rgba(201,168,76,0.7)" }}>
+                担当:{r.staff}
+              </span>
+            )}
+          </div>
+          {isCancelled && (
+            <div style={{ fontSize: ".62rem", color: "rgba(240,232,208,0.42)", marginBottom: ".2rem", lineHeight: 1.45 }}>
+              {fmtCancelledAt(r.cancelledAt) && <span>{fmtCancelledAt(r.cancelledAt)}</span>}
+              {r.cancelledBy && <span>{fmtCancelledAt(r.cancelledAt) ? " · " : ""}対応: {r.cancelledBy}</span>}
+              {r.cancelReason && <div style={{ marginTop: ".12rem", color: "rgba(244,162,97,0.65)" }}>理由・メモ: {r.cancelReason}</div>}
+            </div>
+          )}
+          <div className="hb-res-card__detail-line">
+            {showEvent && r.eventName && <span>🎵 {r.eventName}</span>}
+            {r.phone && <span>📞 {r.phone}</span>}
+            {noteRaw && <span className="hb-res-note" style={{ color: "#f4a261" }}>📝 {noteShown}</span>}
+          </div>
+        </div>
+
+        <div className="hb-res-card__actions" onClick={(e) => e.stopPropagation()} style={reservationCardActionsWrap}>
+          <button type="button" style={{ ...S.btn("sm"), ...reservationCardActionBtn }} onClick={(e) => { e.stopPropagation(); startEdit(r); }}>編集</button>
+          {!isCancelled && (
+            <button type="button" style={{ ...S.btn("ghost"), ...reservationCardActionBtn, borderColor: "rgba(244,162,97,0.45)", color: "#f4a261" }} onClick={(e) => { e.stopPropagation(); openCancelModal(r._id); }}>キャンセル</button>
+          )}
+          {isCancelled && (
+            <button type="button" style={{ ...S.btn("sm"), ...reservationCardActionBtn, borderColor: "rgba(126,200,127,0.45)", color: "#7ec87e" }} onClick={(e) => { e.stopPropagation(); handleUncancelReservation(r._id); }}>解除</button>
+          )}
+          <button type="button" style={{ ...S.btn("danger"), ...reservationCardActionBtn }} onClick={(e) => { e.stopPropagation(); handleDelete(r._id); }}>削除</button>
+        </div>
+      </div>
+    );
+  };
+
   // ===== 編集画面 =====
   if (view === "edit") {
     const editingPrior = editingId ? allReservations.find(x => x._id === editingId) : null;
@@ -1222,6 +1429,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
 
   return (
     <div style={{padding:"1.5rem 2rem",maxWidth:1100,margin:"0 auto"}} className="hb-view">
+      <style>{HB_RES_CARD_CSS}</style>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1.25rem",flexWrap:"wrap",gap:".5rem"}}>
         <h2 style={{fontFamily:"Georgia,serif",fontSize:"1.2rem",color:"#c9a84c",letterSpacing:".15em",margin:0}}>📞 予約管理</h2>
         <div style={{display:"flex",gap:".5rem",flexWrap:"wrap"}}>
@@ -1464,85 +1672,15 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
 
                 const renderReservationCard = (r) => {
                   const evForCard = findEventByDateAndName(events, calSelectedDate, r.eventName);
-                  const showArtistBadge = evForCard && isMultiArtistEvent(evForCard);
-                  const isCancelled = !!r.cancelled;
-                  return (
-                  <div key={r._id} style={{
-                    ...S.card,
-                    padding:".6rem .85rem",
-                    marginBottom:".35rem",
-                    display:"grid",
-                    gridTemplateColumns:"auto 1fr auto",
-                    gap:".55rem",
-                    alignItems:"start",
-                    opacity: isCancelled ? 0.82 : 1,
-                    background: isCancelled ? "#121318" : undefined,
-                    border: isCancelled ? "1px solid rgba(136,136,140,0.35)" : S.card.border,
-                    borderLeft: isCancelled ? "3px solid rgba(136,136,140,0.55)" : (isArrivedReservation(r)?"3px solid #7ec87e":"3px solid rgba(244,162,97,0.3)"),
-                  }}>
-                    {isCancelled ? (
-                      <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.35)",minWidth:60,textAlign:"center",letterSpacing:".05em"}}>—</div>
-                    ) : getPeopleCount(r.people) <= 1 ? (
-                      <button onClick={()=>toggleArrived(r._id)} style={{
-                        padding:".35rem .55rem",
-                        background:isArrivedReservation(r)?"rgba(126,200,127,0.13)":"transparent",
-                        border:`1px solid ${isArrivedReservation(r)?"#7ec87e":"rgba(244,162,97,0.4)"}`,
-                        borderRadius:4,
-                        color:isArrivedReservation(r)?"#7ec87e":"#f4a261",
-                        cursor:"pointer",fontSize:".68rem",fontFamily:"inherit",
-                        minWidth:60,
-                      }}>
-                        {isArrivedReservation(r) ? "✓ 来店済" : "未来店"}
-                      </button>
-                    ) : (
-                      <div style={{display:"flex",flexDirection:"column",gap:".25rem",minWidth:92}}>
-                        <div style={{fontSize:".6rem",color:"rgba(240,232,208,0.55)",letterSpacing:".02em"}}>
-                          来店 {getArrivedCount(r)}/{getPeopleCount(r.people)}名
-                        </div>
-                        <select
-                          style={{...S.inp,maxWidth:110,padding:".25rem .4rem",fontSize:".75rem"}}
-                          value={getArrivedCount(r)}
-                          onChange={(e)=>patchReservationArrival(r._id, e.target.value)}
-                        >
-                          {Array.from({ length: getPeopleCount(r.people) + 1 }, (_, n) => (
-                            <option key={n} value={n}>{n}名</option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-                    <div onClick={()=>startEdit(r)} style={{cursor:"pointer",minWidth:0,color: isCancelled ? "rgba(240,232,208,0.62)" : undefined}}>
-                      <div style={{display:"flex",alignItems:"center",gap:".5rem",marginBottom:".15rem",flexWrap:"wrap"}}>
-                        <span style={{fontSize:".7rem"}}>{sourceIcon(r.source)}</span>
-                        {isCancelled && <span style={{padding:".12rem .42rem",background:"rgba(136,136,140,0.35)",borderRadius:2,fontSize:".58rem",color:"#d8d8dc",letterSpacing:".08em"}}>キャンセル</span>}
-                        <span style={{fontFamily:"Georgia,serif",fontSize:".92rem"}}>{r.customerName||"（無名）"}</span>
-                        <span style={{padding:".1rem .4rem",background:"rgba(201,168,76,0.13)",borderRadius:2,fontSize:".62rem",color:"#c9a84c"}}>{r.people}名</span>
-                        {showArtistBadge && <span style={{padding:".1rem .4rem",background:"rgba(126,200,227,0.13)",borderRadius:2,fontSize:".62rem",color:"#7ec8e3"}}>🎤 {normalizeTargetArtist(r.targetArtist)}</span>}
-                        {r.seatNumber && <span style={{padding:".1rem .4rem",background:"rgba(126,200,227,0.13)",borderRadius:2,fontSize:".62rem",color:"#7ec8e3"}}>🪑 {r.seatNumber}</span>}
-                      </div>
-                      {isCancelled && (
-                        <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.42)",marginBottom:".2rem",lineHeight:1.45}}>
-                          {fmtCancelledAt(r.cancelledAt) && <span>{fmtCancelledAt(r.cancelledAt)}</span>}
-                          {r.cancelledBy && <span>{fmtCancelledAt(r.cancelledAt) ? " · " : ""}対応: {r.cancelledBy}</span>}
-                          {r.cancelReason && <div style={{marginTop:".12rem",color:"rgba(244,162,97,0.65)"}}>理由・メモ: {r.cancelReason}</div>}
-                        </div>
-                      )}
-                      <div style={{fontSize:".66rem",color:"rgba(240,232,208,0.55)",display:"flex",gap:".7rem",flexWrap:"wrap"}}>
-                        {r.phone && <span>📞 {r.phone}</span>}
-                        {r.note && <span style={{color:"#f4a261"}}>📝 {r.note}</span>}
-                      </div>
-                    </div>
-                    <div style={reservationCardActionsWrap}>
-                      <button type="button" style={{...S.btn("sm"), ...reservationCardActionBtn}} onClick={(e)=>{e.stopPropagation();startEdit(r);}}>編集</button>
-                      {!isCancelled && (
-                        <button type="button" style={{...S.btn("ghost"), ...reservationCardActionBtn, borderColor:"rgba(244,162,97,0.45)", color:"#f4a261"}} onClick={(e)=>{e.stopPropagation();openCancelModal(r._id);}}>キャンセル</button>
-                      )}
-                      {isCancelled && (
-                        <button type="button" style={{...S.btn("sm"), ...reservationCardActionBtn, borderColor:"rgba(126,200,127,0.45)", color:"#7ec87e"}} onClick={(e)=>{e.stopPropagation();handleUncancelReservation(r._id);}}>解除</button>
-                      )}
-                      <button type="button" style={{...S.btn("danger"), ...reservationCardActionBtn}} onClick={(e)=>{e.stopPropagation();handleDelete(r._id);}}>削除</button>
-                    </div>
-                  </div>
-                ); };
+                  const showArtistBadge = !!(evForCard && isMultiArtistEvent(evForCard));
+                  return renderHbReservationCard(r, {
+                    showArtistBadge,
+                    showStaff: false,
+                    showEvent: false,
+                    noteTruncate: false,
+                    compactPad: true,
+                  });
+                };
 
                 return groups.map((g, gi) => {
                   const activeInGroup = g.reservations.filter(isActiveReservation);
@@ -1667,86 +1805,14 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
             </div>
             {dayReservations.map(r => {
               const evList = findEventByDateAndName(events, r.date, r.eventName);
-              const showListArtist = evList && isMultiArtistEvent(evList);
-              const isCancelled = !!r.cancelled;
-              return (
-                <div key={r._id} style={{
-                  ...S.card,
-                  padding:".6rem .9rem",
-                  display:"grid",
-                  gridTemplateColumns:"auto 1fr auto",
-                  gap:".55rem",
-                  alignItems:"start",
-                  opacity: isCancelled ? 0.82 : 1,
-                  background: isCancelled ? "#121318" : undefined,
-                  border: isCancelled ? "1px solid rgba(136,136,140,0.35)" : S.card.border,
-                  borderLeft: isCancelled ? "3px solid rgba(136,136,140,0.55)" : (isArrivedReservation(r)?"3px solid #7ec87e":"3px solid rgba(244,162,97,0.3)"),
-                }}>
-                  {isCancelled ? (
-                    <div style={{fontSize:".65rem",color:"rgba(240,232,208,0.35)",minWidth:60,textAlign:"center"}}>—</div>
-                  ) : getPeopleCount(r.people) <= 1 ? (
-                    <button onClick={()=>toggleArrived(r._id)} style={{
-                      padding:".4rem .55rem",
-                      background:isArrivedReservation(r)?"rgba(126,200,127,0.13)":"transparent",
-                      border:`1px solid ${isArrivedReservation(r)?"#7ec87e":"rgba(244,162,97,0.4)"}`,
-                      borderRadius:4,
-                      color:isArrivedReservation(r)?"#7ec87e":"#f4a261",
-                      cursor:"pointer",fontSize:".7rem",fontFamily:"inherit",
-                      minWidth:60,
-                    }}>
-                      {isArrivedReservation(r) ? "✓ 来店済" : "未来店"}
-                    </button>
-                  ) : (
-                    <div style={{display:"flex",flexDirection:"column",gap:".25rem",minWidth:92}}>
-                      <div style={{fontSize:".6rem",color:"rgba(240,232,208,0.55)",letterSpacing:".02em"}}>
-                        来店 {getArrivedCount(r)}/{getPeopleCount(r.people)}名
-                      </div>
-                      <select
-                        style={{...S.inp,maxWidth:110,padding:".25rem .4rem",fontSize:".75rem"}}
-                        value={getArrivedCount(r)}
-                        onChange={(e)=>patchReservationArrival(r._id, e.target.value)}
-                      >
-                        {Array.from({ length: getPeopleCount(r.people) + 1 }, (_, n) => (
-                          <option key={n} value={n}>{n}名</option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                  <div onClick={()=>startEdit(r)} style={{cursor:"pointer",minWidth:0,color: isCancelled ? "rgba(240,232,208,0.62)" : undefined}}>
-                    <div style={{display:"flex",alignItems:"center",gap:".5rem",marginBottom:".2rem",flexWrap:"wrap"}}>
-                      <span style={{fontSize:".7rem"}}>{sourceIcon(r.source)}</span>
-                      {isCancelled && <span style={{padding:".12rem .42rem",background:"rgba(136,136,140,0.35)",borderRadius:2,fontSize:".58rem",color:"#d8d8dc",letterSpacing:".08em"}}>キャンセル</span>}
-                      <span style={{fontFamily:"Georgia,serif",fontSize:".95rem"}}>{r.customerName||"（無名）"}</span>
-                      <span style={{padding:".1rem .4rem",background:"rgba(201,168,76,0.13)",borderRadius:2,fontSize:".62rem",color:"#c9a84c"}}>{r.people}名</span>
-                      {showListArtist && <span style={{padding:".1rem .4rem",background:"rgba(126,200,227,0.13)",borderRadius:2,fontSize:".62rem",color:"#7ec8e3"}}>🎤 {normalizeTargetArtist(r.targetArtist)}</span>}
-                      {r.seatNumber && <span style={{padding:".1rem .4rem",background:"rgba(126,200,227,0.13)",borderRadius:2,fontSize:".62rem",color:"#7ec8e3"}}>🪑 {r.seatNumber}</span>}
-                      {r.staff && <span style={{padding:".1rem .4rem",background:"rgba(201,168,76,0.08)",borderRadius:2,fontSize:".58rem",color:"rgba(201,168,76,0.7)"}}>担当:{r.staff}</span>}
-                    </div>
-                    {isCancelled && (
-                      <div style={{fontSize:".62rem",color:"rgba(240,232,208,0.42)",marginBottom:".25rem",lineHeight:1.45}}>
-                        {fmtCancelledAt(r.cancelledAt) && <span>{fmtCancelledAt(r.cancelledAt)}</span>}
-                        {r.cancelledBy && <span>{fmtCancelledAt(r.cancelledAt) ? " · " : ""}対応: {r.cancelledBy}</span>}
-                        {r.cancelReason && <div style={{marginTop:".12rem",color:"rgba(244,162,97,0.65)"}}>理由・メモ: {r.cancelReason}</div>}
-                      </div>
-                    )}
-                    <div style={{fontSize:".68rem",color:"rgba(240,232,208,0.55)",display:"flex",gap:".75rem",flexWrap:"wrap"}}>
-                      {r.eventName && <span>🎵 {r.eventName}</span>}
-                      {r.phone && <span>📞 {r.phone}</span>}
-                      {r.note && <span style={{color:"#f4a261"}}>📝 {r.note.length>30?r.note.slice(0,30)+"...":r.note}</span>}
-                    </div>
-                  </div>
-                  <div style={reservationCardActionsWrap}>
-                    <button type="button" style={{...S.btn("sm"), ...reservationCardActionBtn}} onClick={(e)=>{e.stopPropagation();startEdit(r);}}>編集</button>
-                    {!isCancelled && (
-                      <button type="button" style={{...S.btn("ghost"), ...reservationCardActionBtn, borderColor:"rgba(244,162,97,0.45)", color:"#f4a261"}} onClick={(e)=>{e.stopPropagation();openCancelModal(r._id);}}>キャンセル</button>
-                    )}
-                    {isCancelled && (
-                      <button type="button" style={{...S.btn("sm"), ...reservationCardActionBtn, borderColor:"rgba(126,200,127,0.45)", color:"#7ec87e"}} onClick={(e)=>{e.stopPropagation();handleUncancelReservation(r._id);}}>解除</button>
-                    )}
-                    <button type="button" style={{...S.btn("danger"), ...reservationCardActionBtn}} onClick={(e)=>{e.stopPropagation();handleDelete(r._id);}}>削除</button>
-                  </div>
-                </div>
-              );
+              const showListArtist = !!(evList && isMultiArtistEvent(evList));
+              return renderHbReservationCard(r, {
+                showArtistBadge: showListArtist,
+                showStaff: true,
+                showEvent: true,
+                noteTruncate: true,
+                compactPad: false,
+              });
             })}
           </div>
         );
