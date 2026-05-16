@@ -45,7 +45,7 @@ const reservationCardActionBtn = {
   boxSizing: "border-box",
 };
 
-/** 予約カード：PCは3カラムグリッド。~640px は縦読み＋来店操作・ボタンを下段に */
+/** 予約カード：PCは3カラムグリッド。~640px は完全1カラム縦積み */
 const HB_RES_CARD_CSS = `
 .hb-res-card {
   display: grid;
@@ -61,6 +61,13 @@ const HB_RES_CARD_CSS = `
   gap: 0.45rem 0.5rem;
   margin-bottom: 0.12rem;
 }
+.hb-res-card__meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  margin-bottom: 0.1rem;
+}
 .hb-res-card__detail-line {
   display: flex;
   flex-wrap: wrap;
@@ -68,54 +75,85 @@ const HB_RES_CARD_CSS = `
   font-size: 0.68rem;
   color: rgba(240,232,208,0.55);
 }
+.hb-res-card__visit-inline,
+.hb-res-card__arrival-select--mobile {
+  display: none;
+}
 @media (max-width: 639.98px) {
   .hb-res-card {
     display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+  .hb-res-card__arrival--pc {
+    display: none !important;
+  }
+  .hb-res-card__visit-inline {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .hb-res-card__arrival-select--mobile {
+    display: flex;
     flex-wrap: wrap;
-    align-items: flex-start;
-    gap: 0.35rem 0.45rem;
+    align-items: center;
+    gap: 0.45rem 0.6rem;
+    width: 100%;
+    padding: 0.15rem 0 0.1rem;
+    font-size: 0.68rem;
+    color: rgba(240,232,208,0.55);
+  }
+  .hb-res-card__arrival-select--mobile select {
+    max-width: 108px;
+    flex-shrink: 0;
   }
   .hb-res-card__body {
-    order: 1;
-    flex: 1 1 100%;
     width: 100%;
-    padding-bottom: 0.4rem;
-    border-bottom: 1px solid rgba(201,168,76,0.12);
+    min-width: 0;
+    order: 0;
   }
-  .hb-res-card__arrival {
-    order: 2;
-    flex: 0 0 auto;
-    align-self: center;
-  }
-  .hb-res-card__actions {
-    order: 2;
-    flex: 1 1 140px;
-    justify-content: flex-end !important;
-    align-self: center;
+  .hb-res-card__row1 {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 0.55rem;
+    width: 100%;
+    margin-bottom: 0.22rem;
   }
   .hb-res-card__row1 .hb-res-name {
     font-size: 1rem !important;
     font-weight: 650;
-    flex: 1 1 120px;
-    min-width: 0;
-    word-break: break-word;
+    flex: 1 1 auto;
+    min-width: 4.5em;
+    max-width: 100%;
+    white-space: normal;
+    word-break: keep-all;
+    overflow-wrap: normal;
+    line-height: 1.4;
   }
   .hb-res-card__row1 .hb-res-people {
     flex-shrink: 0;
   }
-  .hb-res-card__meta-line {
-    flex-basis: 100%;
-    margin-top: 0.08rem;
+  .hb-res-card__meta-row {
+    width: 100%;
+    margin-bottom: 0.28rem;
+    gap: 0.35rem 0.45rem;
+  }
+  .hb-res-card__meta-row .hb-res-card__meta-line {
     font-size: 0.66rem;
-    color: rgba(240,232,208,0.52);
   }
   .hb-res-card__detail-line {
     flex-direction: column;
-    align-items: flex-start;
-    gap: 0.35rem;
+    align-items: stretch;
+    gap: 0.42rem;
     width: 100%;
-    margin-top: 0.2rem;
-    font-size: 0.68rem;
+    margin-top: 0;
+    font-size: 0.7rem;
+  }
+  .hb-res-card__detail-line > span {
+    width: 100%;
+    line-height: 1.5;
   }
   .hb-res-card__detail-line .hb-res-note {
     width: 100%;
@@ -123,6 +161,14 @@ const HB_RES_CARD_CSS = `
     word-break: break-word;
     line-height: 1.55;
     box-sizing: border-box;
+  }
+  .hb-res-card__actions {
+    width: 100%;
+    justify-content: flex-start !important;
+    align-self: stretch;
+    padding-top: 0.35rem;
+    margin-top: 0.05rem;
+    border-top: 1px solid rgba(201,168,76,0.12);
   }
 }
 `;
@@ -887,29 +933,39 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
       minWidth: 60,
     };
 
+    const renderArrivalToggle = () => (
+      <button type="button" onClick={() => toggleArrived(r._id)} style={toggleBtnStyle}>
+        {isArrivedReservation(r) ? "✓ 来店済" : "未来店"}
+      </button>
+    );
+
+    const renderArrivalSelect = (selectStyle) => (
+      <select
+        style={selectStyle}
+        value={getArrivedCount(r)}
+        onChange={(e) => { e.stopPropagation(); patchReservationArrival(r._id, e.target.value); }}
+      >
+        {Array.from({ length: peopleN + 1 }, (_, n) => (
+          <option key={n} value={n}>{n}名</option>
+        ))}
+      </select>
+    );
+
+    const metaBadgeStyle = { padding: ".1rem .4rem", background: "rgba(126,200,227,0.13)", borderRadius: 2, fontSize: ".62rem", color: "#7ec8e3" };
+
     return (
       <div key={r._id} className="hb-res-card" style={cardBase}>
-        <div className="hb-res-card__arrival" onClick={(e) => e.stopPropagation()}>
+        <div className="hb-res-card__arrival hb-res-card__arrival--pc" onClick={(e) => e.stopPropagation()}>
           {isCancelled ? (
             <div style={{ fontSize: compactPad ? ".62rem" : ".65rem", color: "rgba(240,232,208,0.35)", minWidth: 60, textAlign: "center", letterSpacing: compactPad ? ".05em" : undefined }}>—</div>
           ) : peopleN <= 1 ? (
-            <button type="button" onClick={() => toggleArrived(r._id)} style={toggleBtnStyle}>
-              {isArrivedReservation(r) ? "✓ 来店済" : "未来店"}
-            </button>
+            renderArrivalToggle()
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: ".25rem", minWidth: 92 }}>
               <div style={{ fontSize: ".6rem", color: "rgba(240,232,208,0.55)", letterSpacing: ".02em" }}>
                 来店 {getArrivedCount(r)}/{peopleN}名
               </div>
-              <select
-                style={{ ...S.inp, maxWidth: 110, padding: ".25rem .4rem", fontSize: ".75rem" }}
-                value={getArrivedCount(r)}
-                onChange={(e) => { e.stopPropagation(); patchReservationArrival(r._id, e.target.value); }}
-              >
-                {Array.from({ length: peopleN + 1 }, (_, n) => (
-                  <option key={n} value={n}>{n}名</option>
-                ))}
-              </select>
+              {renderArrivalSelect({ ...S.inp, maxWidth: 110, padding: ".25rem .4rem", fontSize: ".75rem" })}
             </div>
           )}
         </div>
@@ -922,22 +978,37 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
             )}
             <span className="hb-res-name" style={{ fontFamily: "Georgia,serif", fontSize: compactPad ? ".92rem" : ".95rem" }}>{r.customerName || "（無名）"}</span>
             <span className="hb-res-people" style={{ padding: ".1rem .4rem", background: "rgba(201,168,76,0.13)", borderRadius: 2, fontSize: ".62rem", color: "#c9a84c" }}>{r.people}名</span>
-            {showArtistBadge && (
-              <span className="hb-res-card__meta-line" style={{ padding: ".1rem .4rem", background: "rgba(126,200,227,0.13)", borderRadius: 2, fontSize: ".62rem", color: "#7ec8e3" }}>
-                🎤 {normalizeTargetArtist(r.targetArtist)}
-              </span>
-            )}
-            {!!seatStr && (
-              <span className="hb-res-card__meta-line" style={{ padding: ".1rem .4rem", background: "rgba(126,200,227,0.13)", borderRadius: 2, fontSize: ".62rem", color: "#7ec8e3" }}>
-                🪑 {r.seatNumber}
-              </span>
-            )}
-            {showStaff && r.staff && (
-              <span className="hb-res-card__meta-line" style={{ padding: ".1rem .4rem", background: "rgba(201,168,76,0.08)", borderRadius: 2, fontSize: ".58rem", color: "rgba(201,168,76,0.7)" }}>
-                担当:{r.staff}
-              </span>
-            )}
+            <span className="hb-res-card__visit-inline" onClick={(e) => e.stopPropagation()}>
+              {isCancelled ? (
+                <span style={{ fontSize: ".65rem", color: "rgba(240,232,208,0.35)" }}>—</span>
+              ) : peopleN <= 1 ? (
+                renderArrivalToggle()
+              ) : (
+                <span style={{ padding: ".1rem .4rem", borderRadius: 2, fontSize: ".62rem", color: isArrivedReservation(r) ? "#7ec87e" : "#f4a261", border: `1px solid ${isArrivedReservation(r) ? "rgba(126,200,127,0.35)" : "rgba(244,162,97,0.35)"}` }}>
+                  {isArrivedReservation(r) ? "来店あり" : "未来店"} · {getArrivedCount(r)}/{peopleN}名
+                </span>
+              )}
+            </span>
           </div>
+          {(showArtistBadge || !!seatStr || (showStaff && r.staff)) && (
+            <div className="hb-res-card__meta-row">
+              {showArtistBadge && (
+                <span className="hb-res-card__meta-line" style={metaBadgeStyle}>
+                  🎤 {normalizeTargetArtist(r.targetArtist)}
+                </span>
+              )}
+              {!!seatStr && (
+                <span className="hb-res-card__meta-line" style={metaBadgeStyle}>
+                  🪑 {r.seatNumber}
+                </span>
+              )}
+              {showStaff && r.staff && (
+                <span className="hb-res-card__meta-line" style={{ padding: ".1rem .4rem", background: "rgba(201,168,76,0.08)", borderRadius: 2, fontSize: ".58rem", color: "rgba(201,168,76,0.7)" }}>
+                  担当:{r.staff}
+                </span>
+              )}
+            </div>
+          )}
           {isCancelled && (
             <div style={{ fontSize: ".62rem", color: "rgba(240,232,208,0.42)", marginBottom: ".2rem", lineHeight: 1.45 }}>
               {fmtCancelledAt(r.cancelledAt) && <span>{fmtCancelledAt(r.cancelledAt)}</span>}
@@ -950,6 +1021,12 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
             {r.phone && <span>📞 {r.phone}</span>}
             {noteRaw && <span className="hb-res-note" style={{ color: "#f4a261" }}>📝 {noteShown}</span>}
           </div>
+          {!isCancelled && peopleN > 1 && (
+            <div className="hb-res-card__arrival-select--mobile" onClick={(e) => e.stopPropagation()}>
+              <span>来店 {getArrivedCount(r)}/{peopleN}名</span>
+              {renderArrivalSelect({ ...S.inp, padding: ".25rem .4rem", fontSize: ".75rem" })}
+            </div>
+          )}
         </div>
 
         <div className="hb-res-card__actions" onClick={(e) => e.stopPropagation()} style={reservationCardActionsWrap}>
