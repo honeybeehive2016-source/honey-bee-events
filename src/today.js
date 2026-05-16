@@ -16,6 +16,35 @@ function extractCustomerNameFromEvent(name) {
   n = n.replace(/[\s　]+/g, " ").trim();
   return n;
 }
+function normalizeRentalMatchKey(name) {
+  return String(name || "")
+    .replace(/[\s　]+/g, "")
+    .replace(/貸し切り|貸切|様/g, "")
+    .trim()
+    .toLowerCase();
+}
+function rentalMatchKeys(r) {
+  const keys = [];
+  const add = (s) => {
+    const k = normalizeRentalMatchKey(s);
+    if (k) keys.push(k);
+  };
+  add(r.customerCompany);
+  add(r.contactName);
+  add(r.rentalTitle);
+  add([r.customerCompany, r.contactName].filter(Boolean).join(""));
+  return keys;
+}
+function rentalKeysMatch(eventKey, rentalKeys) {
+  if (!eventKey || rentalKeys.length === 0) return false;
+  return rentalKeys.some((rk) => {
+    if (rk === eventKey) return true;
+    if (rk.length >= 2 && eventKey.length >= 2) {
+      return rk.includes(eventKey) || eventKey.includes(rk);
+    }
+    return false;
+  });
+}
 const MAX_HANDOVER_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 function sanitizeHandoverFileName(name) {
@@ -842,16 +871,27 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
     r.desiredDate === selectedDate && ["hold","won","done"].includes(r.status)
   );
 
+  const rentalsForEventLink = rentals.filter(
+    (r) => r.desiredDate === selectedDate && !r._deleted && r.status !== "lost"
+  );
+
   const findRentalIdForEvent = (ev) => {
-    if (!isRentalEventName(ev?.name)) return null;
-    const customer = extractCustomerNameFromEvent(ev.name);
-    if (!customer) return null;
-    const matched = todayRentals.find((r) => {
-      const company = String(r.customerCompany || "").trim();
-      const contact = String(r.contactName || "").trim();
-      return company === customer || contact === customer;
+    const isRentalLike = isRentalEventName(ev?.name) || ev?.genre === "貸切";
+    if (!isRentalLike || rentalsForEventLink.length === 0) return null;
+
+    const customerKey = normalizeRentalMatchKey(extractCustomerNameFromEvent(ev.name));
+    const eventNameKey = normalizeRentalMatchKey(ev.name);
+
+    const matched = rentalsForEventLink.find((r) => {
+      const keys = rentalMatchKeys(r);
+      if (customerKey && rentalKeysMatch(customerKey, keys)) return true;
+      if (eventNameKey && rentalKeysMatch(eventNameKey, keys)) return true;
+      return false;
     });
-    return matched?._id || null;
+    if (matched) return matched._id;
+
+    if (rentalsForEventLink.length === 1) return rentalsForEventLink[0]._id;
+    return null;
   };
 
   // 現在時刻（1分ごとに更新）
@@ -1202,7 +1242,8 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
         </div>
       ) : (
         todayEvents.map((ev, i) => {
-          const linkedRentalId = findRentalIdForEvent(ev);
+          const rentalDetailId = findRentalIdForEvent(ev);
+          const showRentalDetailBtn = Boolean(rentalDetailId && onViewRental);
           return (
           <div key={i} style={{...S.card,padding:"1rem 1.1rem"}}>
             {/* ポスター（上部に大きく表示） */}
@@ -1245,8 +1286,8 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                 ) : null}
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:".3rem"}}>
-                {linkedRentalId && onViewRental ? (
-                  <button type="button" style={S.btn("sm")} onClick={() => onViewRental(linkedRentalId)}>📋 詳細</button>
+                {showRentalDetailBtn ? (
+                  <button type="button" style={S.btn("sm")} onClick={() => onViewRental(rentalDetailId)}>📋 詳細</button>
                 ) : onEditEvent ? (
                   <button type="button" style={S.btn("sm")} onClick={() => onEditEvent(ev._id)}>📝 編集</button>
                 ) : null}
