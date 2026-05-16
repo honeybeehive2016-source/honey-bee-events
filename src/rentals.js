@@ -1032,7 +1032,7 @@ export default function RentalsModule({ apiKey, onRequireApiKey, navigateBack, i
         setForm({ ...emptyRental, ...target, rentalTitle: target.rentalTitle ?? "" });
         setEditingId(target._id);
         setAiReply("");
-        setView("edit");
+        setView("detail");
         if (onConsumeOpenId) onConsumeOpenId();
       }
     }

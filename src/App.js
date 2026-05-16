@@ -1080,8 +1080,8 @@ export default function App() {
     } catch (e) { alert("変換失敗：" + e.message); return false; }
   };
 
-  // 貸切クリックハンドラ：rentalsモジュールへ遷移＋ID指定
-  const handleEditRental = (rentalId) => {
+  // 貸切クリックハンドラ：rentalsモジュールの詳細画面へ遷移＋ID指定
+  const handleViewRental = (rentalId) => {
     setRentalToOpen(rentalId);
     navigateTo("rentals");
   };
@@ -1683,6 +1683,7 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
             const idx = events.findIndex(e => e._id === eventId);
             if (idx >= 0) editEvent(idx);
           }}
+          onViewRental={handleViewRental}
           onGoReservations={(date)=>{
             setReservationInitialDate(date || null);
             navigateTo("reservation");
@@ -1983,7 +1984,7 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
 
           {csvMsg&&<div style={{marginBottom:"1rem",padding:".6rem 1rem",borderRadius:5,background:csvMsg.startsWith("✅")?"rgba(100,200,100,0.1)":"rgba(226,75,74,0.1)",border:`1px solid ${csvMsg.startsWith("✅")?"rgba(100,200,100,0.3)":"rgba(226,75,74,0.3)"}`,fontSize:".8rem",color:csvMsg.startsWith("✅")?"#7ec87e":"#e24b4a"}}>{csvMsg}</div>}
 
-          {listMode==="calendar"&&<CalendarView events={sortedEvents} rentals={rentalsList} onEdit={i=>{const ev=sortedEvents[i];editEvent(events.indexOf(ev));}} onEditRental={handleEditRental}/>}
+          {listMode==="calendar"&&<CalendarView events={sortedEvents} rentals={rentalsList} onEdit={i=>{const ev=sortedEvents[i];editEvent(events.indexOf(ev));}} onEditRental={handleViewRental}/>}
 
           {listMode==="list"&&(
             <>

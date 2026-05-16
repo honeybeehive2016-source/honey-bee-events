@@ -4,7 +4,26 @@ import { collection, doc, setDoc, deleteDoc, onSnapshot, updateDoc } from "fireb
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { getShiftForDate, getRoleColor, getRoleLabel, isManager } from "./shift";
 import { getBusinessDate } from "./businessDate";
+import { RENTAL_STATUSES } from "./rentals";
 
+const isRentalEventName = (name) => /貸切|貸し切り/.test(name || "");
+function extractCustomerNameFromEvent(name) {
+  if (!name) return "";
+  let n = name;
+  n = n.replace(/[\[（(](昼|夜|深夜|朝|午前|午後)[\]）)]/g, "");
+  n = n.replace(/^[\s　]*(昼|夜|深夜|朝|午前|午後)[\s　]+/, "");
+  n = n.replace(/貸し切り|貸切/g, "");
+  n = n.replace(/様/g, "");
+  n = n.replace(/[\s　]+/g, " ").trim();
+  return n;
+}
+function displayTodayRentalTitle(r) {
+  const t = String(r.rentalTitle || "").trim();
+  if (t) return t;
+  const parts = [r.customerCompany, r.contactName].filter((x) => String(x || "").trim());
+  if (parts.length) return parts.join(" ／ ");
+  return "（無題）";
+}
 const MAX_HANDOVER_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 function sanitizeHandoverFileName(name) {
@@ -363,7 +382,7 @@ function MiniCalendar({ selectedDates = [], onToggle, mode = "multi", rangeStart
   );
 }
 
-export default function TodayModule({ events = [], rentals = [], shifts = [], reservations = [], navigateBack, onEditEvent, onGoReservations }) {
+export default function TodayModule({ events = [], rentals = [], shifts = [], reservations = [], navigateBack, onEditEvent, onViewRental, onGoReservations }) {
   const today = getBusinessDate();
   const [selectedDate, setSelectedDate] = useState(today);
   const [dayData, setDayData] = useState({});
@@ -831,6 +850,18 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
     r.desiredDate === selectedDate && ["hold","won","done"].includes(r.status)
   );
 
+  const findRentalIdForEvent = (ev) => {
+    if (!isRentalEventName(ev?.name)) return null;
+    const customer = extractCustomerNameFromEvent(ev.name);
+    if (!customer) return null;
+    const matched = todayRentals.find((r) => {
+      const company = String(r.customerCompany || "").trim();
+      const contact = String(r.contactName || "").trim();
+      return company === customer || contact === customer;
+    });
+    return matched?._id || null;
+  };
+
   // 現在時刻（1分ごとに更新）
   const [now, setNow] = useState(new Date());
   useEffect(() => {
@@ -1171,6 +1202,46 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
         </div>
       )}
 
+      {/* 当日の貸切 */}
+      {todayRentals.length > 0 && (
+        <>
+          <div style={S.secTitle}>🍽 本日の貸切</div>
+          {todayRentals.map((r) => {
+            const statusMeta = RENTAL_STATUSES.find((s) => s.key === r.status);
+            return (
+              <div key={r._id} style={{ ...S.card, padding: "1rem 1.1rem", marginBottom: ".75rem", borderLeft: "3px solid rgba(126,200,227,0.45)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: ".5rem", flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontFamily: "Georgia,serif", fontSize: "1rem", color: "#7ec8e3", marginBottom: ".25rem" }}>
+                      {displayTodayRentalTitle(r)}
+                    </div>
+                    <div style={{ fontSize: ".75rem", color: "rgba(240,232,208,0.6)", lineHeight: 1.7 }}>
+                      {r.desiredTime && <div>🕐 {r.desiredTime}</div>}
+                      {r.people && <div>👥 {r.people}名</div>}
+                      {r.purpose && <div>📝 {r.purpose}</div>}
+                      {r.staff && <div>👤 担当: {r.staff}</div>}
+                    </div>
+                    {statusMeta && (
+                      <span style={{ display: "inline-block", marginTop: ".45rem", padding: ".15rem .5rem", borderRadius: 3, fontSize: ".62rem", letterSpacing: ".06em", background: `${statusMeta.color}22`, color: statusMeta.color, border: `1px solid ${statusMeta.color}55` }}>
+                        {statusMeta.label}
+                      </span>
+                    )}
+                  </div>
+                  {onViewRental && (
+                    <button type="button" style={S.btn("sm")} onClick={() => onViewRental(r._id)}>📋 詳細</button>
+                  )}
+                </div>
+                {r.memo && (
+                  <div style={{ marginTop: ".65rem", padding: ".65rem .75rem", background: "rgba(126,200,227,0.08)", border: "1px solid rgba(126,200,227,0.2)", borderRadius: 5, fontSize: ".78rem", color: "rgba(240,232,208,0.75)", lineHeight: 1.65, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                    {r.memo}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </>
+      )}
+
       {/* 当日のイベント */}
       <div style={S.secTitle}>🎵 本日のイベント</div>
       {todayEvents.length === 0 ? (
@@ -1178,7 +1249,9 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
           イベントの予定はありません
         </div>
       ) : (
-        todayEvents.map((ev, i) => (
+        todayEvents.map((ev, i) => {
+          const linkedRentalId = findRentalIdForEvent(ev);
+          return (
           <div key={i} style={{...S.card,padding:"1rem 1.1rem"}}>
             {/* ポスター（上部に大きく表示） */}
             {ev.poster && (
@@ -1220,7 +1293,11 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                 ) : null}
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:".3rem"}}>
-                {onEditEvent && <button type="button" style={S.btn("sm")} onClick={()=>onEditEvent(ev._id)}>📝 編集</button>}
+                {linkedRentalId && onViewRental ? (
+                  <button type="button" style={S.btn("sm")} onClick={() => onViewRental(linkedRentalId)}>📋 詳細</button>
+                ) : onEditEvent ? (
+                  <button type="button" style={S.btn("sm")} onClick={() => onEditEvent(ev._id)}>📝 編集</button>
+                ) : null}
               </div>
             </div>
             {/* スタッフへの注意事項：目立たせて全文表示 */}
@@ -1271,7 +1348,8 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
               </div>
             )}
           </div>
-        ))
+          );
+        })
       )}
 
       {/* 本日の予約（サマリのみ。詳細は予約管理画面で） */}
