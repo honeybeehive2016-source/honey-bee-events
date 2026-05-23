@@ -928,7 +928,10 @@ export default function KitchenNotesModule() {
           </select>
         </div>
         <div>
-          <label style={{ ...S.lbl, color:"rgba(126,200,127,0.55)" }}>記入者</label>
+          <label style={{ ...S.lbl, color:"rgba(126,200,127,0.55)", display:"flex", alignItems:"baseline", gap:".35rem", flexWrap:"wrap" }}>
+            記入者
+            <span style={{ fontSize:".58rem", fontWeight:400, letterSpacing:".06em", textTransform:"none", color:"rgba(231, 167, 120, 0.82)" }}>※選択必須</span>
+          </label>
           <select style={S.inp} value={newKitchenAuthor} onChange={e => setNewKitchenAuthor(e.target.value)}>
             <option value="">選択してください</option>
             {KITCHEN_STAFF_AUTHORS.map(name => (

@@ -1655,7 +1655,10 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
       </div>
 
       <div style={{marginBottom:".75rem"}}>
-        <label style={S.lbl}>記入者</label>
+        <label style={{ ...S.lbl, display:"flex", alignItems:"baseline", gap:".35rem", flexWrap:"wrap" }}>
+          記入者
+          <span style={{ fontSize:".58rem", fontWeight:400, letterSpacing:".06em", textTransform:"none", color:"rgba(244, 162, 97, 0.78)" }}>※選択必須</span>
+        </label>
         <select style={S.inp} value={newHandoverAuthor} onChange={e => setNewHandoverAuthor(e.target.value)}>
           <option value="">選択してください</option>
           {handoverStaffNames.map(name => (
