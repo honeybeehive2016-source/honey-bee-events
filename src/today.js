@@ -16,6 +16,33 @@ function extractCustomerNameFromEvent(name) {
   n = n.replace(/[\s　]+/g, " ").trim();
   return n;
 }
+
+/** 本日の出勤者一覧の表示順（保存・シフトデータは変更しない） */
+function sortTodayShiftWorkers(entries) {
+  const indexed = entries.map((w, i) => ({ w, i }));
+  const timeToMinutes = (time) => {
+    if (!time) return null;
+    const m = String(time).match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return null;
+    const h = parseInt(m[1], 10);
+    const min = parseInt(m[2], 10);
+    if (Number.isNaN(h) || Number.isNaN(min)) return null;
+    return h * 60 + min;
+  };
+  indexed.sort((a, b) => {
+    const aMgr = isManager(a.w.name);
+    const bMgr = isManager(b.w.name);
+    if (aMgr !== bMgr) return aMgr ? -1 : 1;
+    const ta = timeToMinutes(a.w.time);
+    const tb = timeToMinutes(b.w.time);
+    if (ta === null && tb !== null) return 1;
+    if (ta !== null && tb === null) return -1;
+    if (ta !== null && tb !== null && ta !== tb) return ta - tb;
+    if (a.i !== b.i) return a.i - b.i;
+    return String(a.w.name).localeCompare(String(b.w.name), "ja");
+  });
+  return indexed.map(({ w }) => w);
+}
 function normalizeRentalMatchKey(name) {
   return String(name || "")
     .replace(/[\s　]+/g, "")
@@ -1427,7 +1454,7 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
       {(() => {
         const todayShifts = getShiftForDate(shifts, selectedDate);
         if (todayShifts.length === 0) return null;
-        const workers = todayShifts.filter(s => !s.isPerformer);
+        const workers = sortTodayShiftWorkers(todayShifts.filter(s => !s.isPerformer));
         const performers = todayShifts.filter(s => s.isPerformer);
         return (
           <>
@@ -1439,11 +1466,11 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                 <>
                   {workers.length > 0 && (
                     <div style={{display:"flex",flexDirection:"column",gap:".4rem"}}>
-                      {workers.map((w, i) => {
+                      {workers.map((w) => {
                         const color = getRoleColor(w.role);
                         const isMng = isManager(w.name);
                         return (
-                          <div key={i} style={{display:"flex",alignItems:"center",gap:".55rem",flexWrap:"wrap"}}>
+                          <div key={w.name} style={{display:"flex",alignItems:"center",gap:".55rem",flexWrap:"wrap"}}>
                             <span style={{fontSize:".88rem",color:"#f0e8d0",minWidth:90}}>{w.name}</span>
                             {!isMng && w.time && (
                               <span style={{fontSize:".75rem",color:"rgba(240,232,208,0.7)"}}>{w.time}〜</span>
