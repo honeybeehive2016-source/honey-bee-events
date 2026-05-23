@@ -223,8 +223,517 @@ export function parseShiftCSV(csvText) {
   return { year, month, shiftByDate, staffOrder };
 }
 
+export const SHIFT_ROLE_OPTIONS = [
+  { value: "hall", label: "ホール" },
+  { value: "pa", label: "PA" },
+  { value: "kitchen", label: "厨房" },
+  { value: "mc", label: "司会" },
+  { value: "midnight", label: "深夜" },
+];
+
+export function getShiftDayOverride(shiftOverrides, dateKey) {
+  if (!shiftOverrides || !dateKey) return null;
+  if (Array.isArray(shiftOverrides)) {
+    return shiftOverrides.find((o) => o._id === dateKey || o.date === dateKey) || null;
+  }
+  return shiftOverrides[dateKey] || null;
+}
+
+export function hasShiftDayOverride(shiftOverrides, dateKey) {
+  const ov = getShiftDayOverride(shiftOverrides, dateKey);
+  if (!ov) return false;
+  if (ov.memo && String(ov.memo).trim()) return true;
+  if (Array.isArray(ov.removed) && ov.removed.length > 0) return true;
+  if (Array.isArray(ov.added) && ov.added.length > 0) return true;
+  if (ov.updated && typeof ov.updated === "object" && Object.keys(ov.updated).length > 0) return true;
+  return false;
+}
+
+/** CSVベースの配列に当日修正を適用（表示用） */
+export function applyShiftDayOverride(base, override) {
+  const list = Array.isArray(base) ? base : [];
+  if (!override) return [...list];
+
+  const removed = new Set(
+    (Array.isArray(override.removed) ? override.removed : [])
+      .map((n) => String(n || "").trim())
+      .filter(Boolean)
+  );
+  const updated =
+    override.updated && typeof override.updated === "object" ? override.updated : {};
+  const added = Array.isArray(override.added) ? override.added : [];
+
+  let merged = list
+    .filter((e) => {
+      const name = String(e.name || "").trim();
+      return name && !removed.has(name);
+    })
+    .map((e) => {
+      const name = String(e.name || "").trim();
+      const patch = updated[name];
+      if (!patch || typeof patch !== "object") return { ...e, name };
+      return { ...e, ...patch, name };
+    });
+
+  const indexByName = new Map(merged.map((e, i) => [String(e.name).trim(), i]));
+
+  for (const a of added) {
+    const name = String(a.name || "").trim();
+    if (!name || removed.has(name)) continue;
+    const entry = {
+      name,
+      time: a.time || "",
+      role: a.role || "hall",
+      isPerformer: !!a.isPerformer,
+      raw: a.raw || "",
+    };
+    if (indexByName.has(name)) {
+      const idx = indexByName.get(name);
+      merged[idx] = { ...merged[idx], ...entry, name };
+    } else {
+      merged.push(entry);
+      indexByName.set(name, merged.length - 1);
+    }
+  }
+
+  return merged;
+}
+
+export function resolveShiftForDate(shifts, shiftOverrides, dateKey) {
+  const base = getShiftForDate(shifts, dateKey);
+  const override = getShiftDayOverride(shiftOverrides, dateKey);
+  return applyShiftDayOverride(base, override);
+}
+
+function buildOverrideRowsFromBase(base, existing) {
+  const removed = new Set(
+    (existing?.removed || []).map((n) => String(n || "").trim()).filter(Boolean)
+  );
+  const updated = existing?.updated && typeof existing.updated === "object" ? existing.updated : {};
+  return (base || []).map((e) => ({
+    name: e.name,
+    time: updated[e.name]?.time !== undefined ? updated[e.name].time : e.time || "",
+    role: updated[e.name]?.role !== undefined ? updated[e.name].role : e.role || "hall",
+    isPerformer:
+      updated[e.name]?.isPerformer !== undefined ? !!updated[e.name].isPerformer : !!e.isPerformer,
+    off: removed.has(e.name),
+  }));
+}
+
+function buildOverridePayload(base, rows, added, memo) {
+  const removed = rows.filter((r) => r.off).map((r) => r.name);
+  const updated = {};
+  rows
+    .filter((r) => !r.off)
+    .forEach((r) => {
+      const orig = (base || []).find((b) => b.name === r.name);
+      if (!orig) return;
+      const patch = {};
+      if ((r.time || "") !== (orig.time || "")) patch.time = r.time || "";
+      if (r.role !== orig.role) patch.role = r.role;
+      if (!!r.isPerformer !== !!orig.isPerformer) patch.isPerformer = !!r.isPerformer;
+      if (Object.keys(patch).length > 0) updated[r.name] = patch;
+    });
+  const addedClean = added
+    .map((a) => ({
+      name: String(a.name || "").trim(),
+      time: a.time || "",
+      role: a.role || "hall",
+      isPerformer: !!a.isPerformer,
+    }))
+    .filter((a) => a.name);
+  return {
+    removed,
+    updated,
+    added: addedClean,
+    memo: String(memo || "").trim(),
+  };
+}
+
+function isOverridePayloadEmpty(payload) {
+  if (payload.memo) return false;
+  if (payload.removed.length > 0) return false;
+  if (payload.added.length > 0) return false;
+  if (Object.keys(payload.updated).length > 0) return false;
+  return true;
+}
+
+function ShiftDayOverridePanel({ dateKey, shifts, shiftOverrides, staffOrder, onClose }) {
+  const base = getShiftForDate(shifts, dateKey);
+  const existing = getShiftDayOverride(shiftOverrides, dateKey);
+  const [memo, setMemo] = useState(() => existing?.memo || "");
+  const [rows, setRows] = useState(() => buildOverrideRowsFromBase(base, existing));
+  const [added, setAdded] = useState(() =>
+    (existing?.added || []).map((a, i) => ({ ...a, _key: `added-${i}-${a.name}` }))
+  );
+  const [newName, setNewName] = useState("");
+  const [newTime, setNewTime] = useState("");
+  const [newRole, setNewRole] = useState("hall");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const ov = getShiftDayOverride(shiftOverrides, dateKey);
+    const b = getShiftForDate(shifts, dateKey);
+    setMemo(ov?.memo || "");
+    setRows(buildOverrideRowsFromBase(b, ov));
+    setAdded((ov?.added || []).map((a, i) => ({ ...a, _key: `added-${i}-${a.name}` })));
+    setNewName("");
+    setNewTime("");
+    setNewRole("hall");
+  }, [dateKey, shifts, shiftOverrides]);
+
+  const nameOptions = (() => {
+    const seen = new Set();
+    const out = [];
+    for (const n of staffOrder || []) {
+      if (n && !seen.has(n)) {
+        seen.add(n);
+        out.push(n);
+      }
+    }
+    for (const r of rows) {
+      if (r.name && !seen.has(r.name)) {
+        seen.add(r.name);
+        out.push(r.name);
+      }
+    }
+    return out;
+  })();
+
+  const handleSave = async () => {
+    const payload = buildOverridePayload(base, rows, added, memo);
+    setSaving(true);
+    try {
+      if (isOverridePayloadEmpty(payload)) {
+        if (existing) {
+          await deleteDoc(doc(db, "shiftDayOverrides", dateKey));
+        }
+      } else {
+        await setDoc(doc(db, "shiftDayOverrides", dateKey), {
+          date: dateKey,
+          monthId: dateKey.slice(0, 7),
+          memo: payload.memo,
+          removed: payload.removed,
+          updated: payload.updated,
+          added: payload.added,
+          updatedAt: Date.now(),
+        });
+      }
+      onClose?.();
+    } catch (e) {
+      alert("保存に失敗しました: " + (e.message || String(e)));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRevert = async () => {
+    if (!existing) return;
+    if (!window.confirm("この日の当日修正をすべて取り消し、CSVの元シフトに戻しますか？")) return;
+    setSaving(true);
+    try {
+      await deleteDoc(doc(db, "shiftDayOverrides", dateKey));
+      onClose?.();
+    } catch (e) {
+      alert("取り消しに失敗しました: " + (e.message || String(e)));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAddStaff = () => {
+    const name = newName.trim();
+    if (!name) {
+      alert("名前を入力してください");
+      return;
+    }
+    if (rows.some((r) => r.name === name && !r.off) || added.some((a) => a.name === name)) {
+      alert("同じ名前のスタッフが既にいます");
+      return;
+    }
+    setAdded((prev) => [
+      ...prev,
+      { _key: `new-${Date.now()}`, name, time: newTime.trim(), role: newRole, isPerformer: false },
+    ]);
+    setNewName("");
+    setNewTime("");
+    setNewRole("hall");
+  };
+
+  const resolvedPreview = resolveShiftForDate(shifts, shiftOverrides, dateKey);
+
+  return (
+    <div
+      style={{
+        marginTop: "1rem",
+        padding: "1rem 1.1rem",
+        background: "#0a0a0a",
+        border: "1px solid rgba(244, 162, 97, 0.35)",
+        borderRadius: 6,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: ".65rem",
+          flexWrap: "wrap",
+          gap: ".4rem",
+        }}
+      >
+        <div style={{ fontSize: ".68rem", color: "rgba(244, 162, 97, 0.9)", letterSpacing: ".12em", fontWeight: 600 }}>
+          ✏️ 当日修正
+          {hasShiftDayOverride(shiftOverrides, dateKey) ? (
+            <span
+              style={{
+                marginLeft: ".45rem",
+                fontSize: ".58rem",
+                color: "rgba(244, 162, 97, 0.75)",
+                fontWeight: 400,
+              }}
+            >
+              （修正あり）
+            </span>
+          ) : null}
+        </div>
+        {hasShiftDayOverride(shiftOverrides, dateKey) ? (
+          <button
+            type="button"
+            style={{ ...S.btn("danger"), padding: ".2rem .55rem", fontSize: ".58rem" }}
+            onClick={handleRevert}
+            disabled={saving}
+          >
+            元のCSVに戻す
+          </button>
+        ) : null}
+      </div>
+
+      {resolvedPreview.length > 0 ? (
+        <div style={{ marginBottom: ".75rem" }}>
+          <div style={{ fontSize: ".6rem", color: "rgba(240,232,208,0.45)", marginBottom: ".35rem" }}>
+            反映後のシフト（{resolvedPreview.length}名）
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: ".35rem" }}>
+            {resolvedPreview.map((e) => {
+              const color = getRoleColor(e.role);
+              return (
+                <span
+                  key={e.name}
+                  style={{
+                    padding: ".15rem .45rem",
+                    borderRadius: 3,
+                    fontSize: ".62rem",
+                    background: e.isPerformer ? "rgba(181,140,209,0.13)" : color + "22",
+                    color: e.isPerformer ? "#b58cd1" : "#f0e8d0",
+                    border: `1px solid ${e.isPerformer ? "#b58cd1" : color}44`,
+                  }}
+                >
+                  {e.name}
+                  {!e.isPerformer && !isManager(e.name) && e.time ? ` ${e.time}` : ""}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      {rows.length === 0 && base.length === 0 ? (
+        <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.4)", marginBottom: ".65rem" }}>
+          この日のCSVシフトは未登録です。下から急遽出勤を追加できます。
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: ".45rem", marginBottom: ".75rem" }}>
+          <div style={{ fontSize: ".6rem", color: "rgba(240,232,208,0.45)", letterSpacing: ".08em" }}>CSV登録スタッフ</div>
+          {rows.map((r) => (
+            <div
+              key={r.name}
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                alignItems: "center",
+                gap: ".4rem",
+                padding: ".45rem .55rem",
+                background: r.off ? "rgba(226,75,74,0.08)" : "rgba(255,255,255,0.03)",
+                border: `1px solid ${r.off ? "rgba(226,75,74,0.25)" : "rgba(201,168,76,0.12)"}`,
+                borderRadius: 4,
+                opacity: r.off ? 0.55 : 1,
+              }}
+            >
+              <span style={{ fontSize: ".78rem", color: "#f0e8d0", minWidth: 88 }}>{r.name}</span>
+              {!r.off && !isManager(r.name) && !r.isPerformer ? (
+                <input
+                  style={{ ...S.inp, width: 72, padding: ".35rem .45rem", fontSize: ".75rem" }}
+                  value={r.time}
+                  onChange={(e) =>
+                    setRows((prev) => prev.map((x) => (x.name === r.name ? { ...x, time: e.target.value } : x)))
+                  }
+                  placeholder="17:00"
+                />
+              ) : null}
+              {!r.off && !r.isPerformer ? (
+                <select
+                  style={{ ...S.inp, width: "auto", minWidth: 88, padding: ".35rem .45rem", fontSize: ".75rem" }}
+                  value={r.role}
+                  onChange={(e) =>
+                    setRows((prev) => prev.map((x) => (x.name === r.name ? { ...x, role: e.target.value } : x)))
+                  }
+                >
+                  {SHIFT_ROLE_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
+              {r.isPerformer ? (
+                <span style={{ fontSize: ".62rem", color: "#b58cd1" }}>出演</span>
+              ) : null}
+              <button
+                type="button"
+                style={{
+                  ...S.btn(r.off ? "ghost" : "danger"),
+                  padding: ".25rem .55rem",
+                  fontSize: ".58rem",
+                  marginLeft: "auto",
+                }}
+                onClick={() =>
+                  setRows((prev) => prev.map((x) => (x.name === r.name ? { ...x, off: !x.off } : x)))
+                }
+              >
+                {r.off ? "休み解除" : "休み"}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {added.length > 0 ? (
+        <div style={{ marginBottom: ".75rem" }}>
+          <div style={{ fontSize: ".6rem", color: "rgba(240,232,208,0.45)", marginBottom: ".35rem" }}>急遽追加</div>
+          {added.map((a) => (
+            <div
+              key={a._key}
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                alignItems: "center",
+                gap: ".4rem",
+                padding: ".45rem .55rem",
+                marginBottom: ".35rem",
+                background: "rgba(126, 200, 127, 0.06)",
+                border: "1px solid rgba(126, 200, 127, 0.22)",
+                borderRadius: 4,
+              }}
+            >
+              <span style={{ fontSize: ".78rem", color: "#7ec8b8" }}>{a.name}</span>
+              <input
+                style={{ ...S.inp, width: 72, padding: ".35rem .45rem", fontSize: ".75rem" }}
+                value={a.time || ""}
+                onChange={(e) =>
+                  setAdded((prev) =>
+                    prev.map((x) => (x._key === a._key ? { ...x, time: e.target.value } : x))
+                  )
+                }
+                placeholder="17:00"
+              />
+              <select
+                style={{ ...S.inp, width: "auto", minWidth: 88, padding: ".35rem .45rem", fontSize: ".75rem" }}
+                value={a.role || "hall"}
+                onChange={(e) =>
+                  setAdded((prev) =>
+                    prev.map((x) => (x._key === a._key ? { ...x, role: e.target.value } : x))
+                  )
+                }
+              >
+                {SHIFT_ROLE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                style={{ ...S.btn("danger"), padding: ".2rem .5rem", fontSize: ".58rem", marginLeft: "auto" }}
+                onClick={() => setAdded((prev) => prev.filter((x) => x._key !== a._key))}
+              >
+                削除
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <div
+        style={{
+          padding: ".55rem .65rem",
+          marginBottom: ".75rem",
+          background: "rgba(255,255,255,0.02)",
+          border: "1px solid rgba(201,168,76,0.12)",
+          borderRadius: 4,
+        }}
+      >
+        <div style={{ fontSize: ".6rem", color: "rgba(240,232,208,0.45)", marginBottom: ".35rem" }}>急遽出勤を追加</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: ".4rem", alignItems: "center" }}>
+          <input
+            list={`shift-add-names-${dateKey}`}
+            style={{ ...S.inp, flex: "1 1 120px", minWidth: 100, padding: ".35rem .5rem", fontSize: ".78rem" }}
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="名前"
+          />
+          <datalist id={`shift-add-names-${dateKey}`}>
+            {nameOptions.map((n) => (
+              <option key={n} value={n} />
+            ))}
+          </datalist>
+          <input
+            style={{ ...S.inp, width: 72, padding: ".35rem .45rem", fontSize: ".75rem" }}
+            value={newTime}
+            onChange={(e) => setNewTime(e.target.value)}
+            placeholder="17:00"
+          />
+          <select
+            style={{ ...S.inp, width: "auto", minWidth: 88, padding: ".35rem .45rem", fontSize: ".75rem" }}
+            value={newRole}
+            onChange={(e) => setNewRole(e.target.value)}
+          >
+            {SHIFT_ROLE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          <button type="button" style={{ ...S.btn("ghost"), padding: ".3rem .65rem", fontSize: ".62rem" }} onClick={handleAddStaff}>
+            追加
+          </button>
+        </div>
+      </div>
+
+      <div style={{ marginBottom: ".75rem" }}>
+        <label style={S.lbl}>メモ（任意）</label>
+        <textarea
+          style={{ ...S.inp, resize: "vertical", minHeight: 48, lineHeight: 1.5, fontSize: ".78rem" }}
+          value={memo}
+          onChange={(e) => setMemo(e.target.value)}
+          placeholder="例：〇〇急病のため交代"
+        />
+      </div>
+
+      <div style={{ display: "flex", gap: ".4rem", flexWrap: "wrap" }}>
+        <button type="button" style={{ ...S.btn("gold"), padding: ".4rem .9rem" }} onClick={handleSave} disabled={saving}>
+          {saving ? "保存中…" : "当日修正を保存"}
+        </button>
+        <button type="button" style={{ ...S.btn("ghost"), padding: ".4rem .75rem" }} onClick={onClose} disabled={saving}>
+          閉じる
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ===== シフトモジュール =====
-export default function ShiftModule({ navigateBack }) {
+export default function ShiftModule({ navigateBack, shiftOverrides = [] }) {
   const [shifts, setShifts] = useState([]);
   const [csvMsg, setCsvMsg] = useState("");
   const [viewMode, setViewMode] = useState("calendar"); // calendar | list
@@ -300,20 +809,27 @@ export default function ShiftModule({ navigateBack }) {
   const renderMonthList = () => {
     if (!currentShift) return null;
     const sd = currentShift.shiftByDate || {};
-    const dates = Object.keys(sd).sort();
+    const overrideDates = (shiftOverrides || [])
+      .map((o) => o._id || o.date)
+      .filter((d) => d && String(d).startsWith(currentShift._id + "-"));
+    const dates = [...new Set([...Object.keys(sd), ...overrideDates])].sort();
     return (
       <div>
         {dates.map(date => {
-          const entries = sd[date] || [];
+          const entries = resolveShiftForDate(shifts, shiftOverrides, date);
+          const hasOv = hasShiftDayOverride(shiftOverrides, date);
           const dt = new Date(date + "T00:00:00");
           const dow = DAYS_JP[dt.getDay()];
           const dowColor = dt.getDay() === 0 ? "#e24b4a" : dt.getDay() === 6 ? "#7ec8e3" : "#f0e8d0";
           return (
             <div key={date} style={{...S.card,padding:".75rem 1rem"}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:".4rem",flexWrap:"wrap",gap:".5rem"}}>
-                <div style={{display:"flex",alignItems:"center",gap:".5rem"}}>
+                <div style={{display:"flex",alignItems:"center",gap:".5rem",flexWrap:"wrap"}}>
                   <span style={{fontFamily:"Georgia,serif",fontSize:".95rem",color:"#c9a84c"}}>{dt.getMonth()+1}/{dt.getDate()}</span>
                   <span style={{fontSize:".7rem",color:dowColor}}>（{dow}）</span>
+                  {hasOv ? (
+                    <span style={{fontSize:".58rem",color:"rgba(244,162,97,0.85)",letterSpacing:".06em"}}>当日修正あり</span>
+                  ) : null}
                 </div>
                 <span style={{fontSize:".62rem",color:"rgba(240,232,208,0.5)"}}>{entries.length}名</span>
               </div>
@@ -380,26 +896,30 @@ export default function ShiftModule({ navigateBack }) {
           {cells.map((day, idx) => {
             if (!day) return <div key={"e"+idx}/>;
             const dateKey = `${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
-            const entries = sd[dateKey] || [];
+            const entries = resolveShiftForDate(shifts, shiftOverrides, dateKey);
+            const hasOv = hasShiftDayOverride(shiftOverrides, dateKey);
             const workers = entries.filter(e => !e.isPerformer);
             const performers = entries.filter(e => e.isPerformer);
             const isToday = dateKey === todayStr;
             const dow = (firstDay + day - 1) % 7;
             const isExpanded = expandedDate === dateKey;
+            const canExpand = entries.length > 0 || hasOv || (sd[dateKey] || []).length > 0;
             return (
               <div key={idx}
-                onClick={()=>setExpandedDate(isExpanded ? "" : dateKey)}
+                onClick={()=>canExpand && setExpandedDate(isExpanded ? "" : dateKey)}
                 className="hb-cal-cell"
                 style={{
-                  background:isToday?"rgba(201,168,76,0.12)":"#111",
-                  border:isToday?"1px solid rgba(201,168,76,0.5)":"1px solid rgba(255,255,255,0.04)",
+                  background:isToday?"rgba(201,168,76,0.12)":hasOv?"rgba(244,162,97,0.06)":"#111",
+                  border:isToday?"1px solid rgba(201,168,76,0.5)":hasOv?"1px solid rgba(244,162,97,0.35)":"1px solid rgba(255,255,255,0.04)",
                   borderRadius:4,padding:".3rem .25rem",minHeight:64,minWidth:0,
-                  overflow:"hidden",cursor:entries.length>0?"pointer":"default",
+                  overflow:"hidden",cursor:canExpand?"pointer":"default",
                   position:"relative",
                 }}>
                 <div className="hb-cal-day-num" style={{fontSize:".72rem",fontWeight:500,marginBottom:".15rem",color:isToday?"#c9a84c":dow===0?"#e24b4a":dow===6?"#7ec8e3":"rgba(240,232,208,0.55)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <span>{day}</span>
-                  {entries.length > 0 && <span style={{fontSize:".55rem",color:"rgba(240,232,208,0.4)",fontWeight:400}}>{entries.length}名</span>}
+                  <span style={{fontSize:".55rem",color:hasOv?"rgba(244,162,97,0.75)":"rgba(240,232,208,0.4)",fontWeight:400}}>
+                    {hasOv && entries.length === 0 ? "修" : entries.length > 0 ? `${entries.length}名` : ""}
+                  </span>
                 </div>
                 {/* 全員の名前を表示 */}
                 {workers.map((w,i)=>{
@@ -439,47 +959,63 @@ export default function ShiftModule({ navigateBack }) {
         </div>
 
         {/* 展開された詳細 */}
-        {expandedDate && sd[expandedDate] && sd[expandedDate].length > 0 && (
+        {expandedDate && (
           <div style={{marginTop:"1rem",padding:"1rem 1.1rem",background:"#0d0d0d",border:"1px solid rgba(201,168,76,0.27)",borderRadius:6}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:".5rem"}}>
-              <div style={{fontFamily:"Georgia,serif",fontSize:".95rem",color:"#c9a84c"}}>
-                {(() => {
-                  const dt = new Date(expandedDate+"T00:00:00");
-                  return `${dt.getMonth()+1}/${dt.getDate()}（${DAYS_JP[dt.getDay()]}）`;
-                })()}
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:".5rem",flexWrap:"wrap",gap:".4rem"}}>
+              <div style={{display:"flex",alignItems:"center",gap:".5rem",flexWrap:"wrap"}}>
+                <div style={{fontFamily:"Georgia,serif",fontSize:".95rem",color:"#c9a84c"}}>
+                  {(() => {
+                    const dt = new Date(expandedDate+"T00:00:00");
+                    return `${dt.getMonth()+1}/${dt.getDate()}（${DAYS_JP[dt.getDay()]}）`;
+                  })()}
+                </div>
+                {hasShiftDayOverride(shiftOverrides, expandedDate) ? (
+                  <span style={{fontSize:".58rem",color:"rgba(244,162,97,0.85)",letterSpacing:".06em"}}>当日修正あり</span>
+                ) : null}
               </div>
-              <button onClick={()=>setExpandedDate("")} style={{...S.btn("sm"),padding:".2rem .6rem",fontSize:".58rem"}}>閉じる</button>
+              <button type="button" onClick={()=>setExpandedDate("")} style={{...S.btn("sm"),padding:".2rem .6rem",fontSize:".58rem"}}>閉じる</button>
             </div>
-            <div style={{display:"flex",flexWrap:"wrap",gap:".4rem"}}>
-              {sd[expandedDate].map((e,i)=>{
-                const isMng = isManager(e.name);
-                const color = getRoleColor(e.role);
-                return (
-                  <div key={i} style={{
-                    padding:".25rem .5rem",
-                    background: e.isPerformer ? "rgba(181,140,209,0.13)" : color+"22",
-                    border: `1px solid ${e.isPerformer ? "#b58cd1" : color}55`,
-                    borderRadius: 3,
-                    fontSize: ".75rem",
-                    color: e.isPerformer ? "#b58cd1" : "#f0e8d0",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: ".3rem",
-                  }}>
-                    <span>{e.name}</span>
-                    {!e.isPerformer && !isMng && e.time && <span style={{color:"rgba(240,232,208,0.6)",fontSize:".65rem"}}>{e.time}〜</span>}
-                    {!e.isPerformer && (
-                      <span style={{padding:".05rem .3rem",borderRadius:2,background:color+"33",color:color,fontSize:".58rem",fontWeight:600}}>
-                        {getRoleLabel(e.role)}
-                      </span>
-                    )}
-                    {e.isPerformer && (
-                      <span style={{padding:".05rem .3rem",borderRadius:2,background:"#b58cd133",color:"#b58cd1",fontSize:".58rem",fontWeight:600}}>出演</span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+            {resolveShiftForDate(shifts, shiftOverrides, expandedDate).length > 0 ? (
+              <div style={{display:"flex",flexWrap:"wrap",gap:".4rem",marginBottom:".5rem"}}>
+                {resolveShiftForDate(shifts, shiftOverrides, expandedDate).map((e)=>{
+                  const isMng = isManager(e.name);
+                  const color = getRoleColor(e.role);
+                  return (
+                    <div key={e.name} style={{
+                      padding:".25rem .5rem",
+                      background: e.isPerformer ? "rgba(181,140,209,0.13)" : color+"22",
+                      border: `1px solid ${e.isPerformer ? "#b58cd1" : color}55`,
+                      borderRadius: 3,
+                      fontSize: ".75rem",
+                      color: e.isPerformer ? "#b58cd1" : "#f0e8d0",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: ".3rem",
+                    }}>
+                      <span>{e.name}</span>
+                      {!e.isPerformer && !isMng && e.time && <span style={{color:"rgba(240,232,208,0.6)",fontSize:".65rem"}}>{e.time}〜</span>}
+                      {!e.isPerformer && (
+                        <span style={{padding:".05rem .3rem",borderRadius:2,background:color+"33",color:color,fontSize:".58rem",fontWeight:600}}>
+                          {getRoleLabel(e.role)}
+                        </span>
+                      )}
+                      {e.isPerformer && (
+                        <span style={{padding:".05rem .3rem",borderRadius:2,background:"#b58cd133",color:"#b58cd1",fontSize:".58rem",fontWeight:600}}>出演</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{fontSize:".72rem",color:"rgba(240,232,208,0.4)",marginBottom:".5rem"}}>この日のシフトは未登録です</div>
+            )}
+            <ShiftDayOverridePanel
+              dateKey={expandedDate}
+              shifts={shifts}
+              shiftOverrides={shiftOverrides}
+              staffOrder={currentShift?.staffOrder || []}
+              onClose={() => setExpandedDate("")}
+            />
           </div>
         )}
       </div>

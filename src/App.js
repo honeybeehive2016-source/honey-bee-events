@@ -871,6 +871,7 @@ export default function App() {
   const [trashEvents, setTrashEvents] = useState([]);
   const [showEventTrash, setShowEventTrash] = useState(false);
   const [shiftsList, setShiftsList] = useState([]);
+  const [shiftOverridesList, setShiftOverridesList] = useState([]);
   const [reservationsList, setReservationsList] = useState([]);
   const [reservationInitialDate, setReservationInitialDate] = useState(null);
 
@@ -963,12 +964,17 @@ export default function App() {
       snap.forEach(d => list.push({ ...d.data(), _id: d.id }));
       setShiftsList(list);
     }, (err) => { console.error("shifts sync error:", err); });
+    const unsubShiftOv = onSnapshot(collection(db, "shiftDayOverrides"), (snap) => {
+      const list = [];
+      snap.forEach(d => list.push({ ...d.data(), _id: d.id }));
+      setShiftOverridesList(list);
+    }, (err) => { console.error("shiftDayOverrides sync error:", err); });
     const unsubRes = onSnapshot(collection(db, "reservations"), (snap) => {
       const list = [];
       snap.forEach(d => list.push({ ...d.data(), _id: d.id }));
       setReservationsList(list.filter(r => !r._deleted && !r.cancelled));
     }, (err) => { console.error("reservations sync error:", err); });
-    return () => { unsubE(); unsubT(); unsubR(); unsubS(); unsubRes(); };
+    return () => { unsubE(); unsubT(); unsubR(); unsubS(); unsubShiftOv(); unsubRes(); };
   }, []);
 
   // 既存イベントから貸切を一括取り込み
@@ -1677,6 +1683,7 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
           events={events}
           rentals={rentalsList}
           shifts={shiftsList}
+          shiftOverrides={shiftOverridesList}
           reservations={reservationsList}
           navigateBack={navigateBack}
           onEditEvent={(eventId)=>{
@@ -1696,7 +1703,7 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
       )}
 
       {view==="shift"&&(
-        <ShiftModule navigateBack={navigateBack}/>
+        <ShiftModule navigateBack={navigateBack} shiftOverrides={shiftOverridesList}/>
       )}
 
       {view==="procurement"&&(

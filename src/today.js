@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { db, storage } from "./firebase";
 import { collection, doc, setDoc, deleteDoc, onSnapshot, updateDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
-import { getShiftForDate, getRoleColor, getRoleLabel, isManager, getOrderedStaffNames } from "./shift";
+import { resolveShiftForDate, getRoleColor, getRoleLabel, isManager, getOrderedStaffNames } from "./shift";
 import { getBusinessDate } from "./businessDate";
 
 const isRentalEventName = (name) => /貸切|貸し切り/.test(name || "");
@@ -430,7 +430,7 @@ function MiniCalendar({ selectedDates = [], onToggle, mode = "multi", rangeStart
   );
 }
 
-export default function TodayModule({ events = [], rentals = [], shifts = [], reservations = [], navigateBack, onEditEvent, onViewRental, onGoReservations }) {
+export default function TodayModule({ events = [], rentals = [], shifts = [], shiftOverrides = [], reservations = [], navigateBack, onEditEvent, onViewRental, onGoReservations }) {
   const today = getBusinessDate();
   const [selectedDate, setSelectedDate] = useState(today);
   const [dayData, setDayData] = useState({});
@@ -1452,7 +1452,7 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
 
       {/* 本日の出勤者 */}
       {(() => {
-        const todayShifts = getShiftForDate(shifts, selectedDate);
+        const todayShifts = resolveShiftForDate(shifts, shiftOverrides, selectedDate);
         if (todayShifts.length === 0) return null;
         const workers = sortTodayShiftWorkers(todayShifts.filter(s => !s.isPerformer));
         const performers = todayShifts.filter(s => s.isPerformer);
