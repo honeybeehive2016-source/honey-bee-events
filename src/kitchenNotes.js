@@ -52,6 +52,15 @@ export const KITCHEN_NOTE_CATEGORIES = [
   { key: "notice", label: "連絡・注意事項" },
 ];
 
+/** 厨房共有の記入者（プルダウン選択肢） */
+export const KITCHEN_STAFF_AUTHORS = [
+  "林真理子",
+  "古屋健吾",
+  "吉村あかり",
+  "渡辺佑樹",
+  "内田綾香",
+];
+
 export function kitchenCategoryLabel(key) {
   return KITCHEN_NOTE_CATEGORIES.find(c => c.key === key)?.label || key;
 }
@@ -330,6 +339,11 @@ export default function KitchenNotesModule() {
   };
 
   const saveKitchenEntry = async (type, text, fileList) => {
+    const author = (newKitchenAuthor || "").trim();
+    if (!author || !KITCHEN_STAFF_AUTHORS.includes(author)) {
+      alert("記入者を選択してください");
+      return;
+    }
     const targetDates = computeTargetDates();
     if (targetDates === null) return;
     if (targetDates.length === 0) {
@@ -344,7 +358,7 @@ export default function KitchenNotesModule() {
       sourceDate: selectedDate,
       targetDates,
       category: newKitchenCategory,
-      author: (newKitchenAuthor || "").trim(),
+      author,
       createdAt: now,
       updatedAt: now,
     };
@@ -911,7 +925,12 @@ export default function KitchenNotesModule() {
         </div>
         <div>
           <label style={{ ...S.lbl, color:"rgba(126,200,127,0.55)" }}>記入者</label>
-          <input style={S.inp} value={newKitchenAuthor} onChange={e => setNewKitchenAuthor(e.target.value)} placeholder="名前" />
+          <select style={S.inp} value={newKitchenAuthor} onChange={e => setNewKitchenAuthor(e.target.value)}>
+            <option value="">選択してください</option>
+            {KITCHEN_STAFF_AUTHORS.map(name => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
         </div>
       </div>
 
