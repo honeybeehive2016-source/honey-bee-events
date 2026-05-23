@@ -746,18 +746,12 @@ function classifyStaffDayColumnWeight(headerText, colIndex) {
   return "normal";
 }
 
-/** 画面幅に収めるための列幅（合計100%）。Apps Script の px 幅より優先 */
-function computeStaffDayFitColumnPercents(headerCells) {
-  const n = headerCells.length;
-  if (n === 0) return [];
-  const weights = headerCells.map((cell, i) => {
-    const k = classifyStaffDayColumnWeight(cell, i);
-    if (k === "wide") return 3.4;
-    if (k === "narrow") return 0.52;
-    return 1.1;
-  });
-  const sum = weights.reduce((a, b) => a + b, 0);
-  return weights.map((w) => (w / sum) * 100);
+function staffDayColClassName(headerCells, colIndex) {
+  const k = classifyStaffDayColumnWeight(headerCells[colIndex], colIndex);
+  if (colIndex === 0) return "hb-staffday-col hb-staffday-col--first";
+  if (k === "wide") return "hb-staffday-col hb-staffday-col--wide";
+  if (k === "narrow") return "hb-staffday-col hb-staffday-col--narrow";
+  return "hb-staffday-col hb-staffday-col--normal";
 }
 
 /** Apps Script の values（string[][]）を列可変のまま表示。1行目＝ヘッダー */
@@ -773,19 +767,15 @@ function StaffDaySpreadsheetTable({ rows }) {
   const headerCells = padRow(rows[0]);
   const bodyRows = rows.slice(1).map(padRow);
   const nbsp = "\u00a0";
-  const colPercents = computeStaffDayFitColumnPercents(headerCells);
   return (
     <div className="hb-staffday-table-wrap">
-      <table className="hb-staffday-table hb-staffday-table--fit">
-        <colgroup>
-          {colPercents.map((pct, j) => (
-            <col key={j} style={{ width: `${pct}%` }} />
-          ))}
-        </colgroup>
+      <table className="hb-staffday-table">
         <thead>
           <tr>
             {headerCells.map((cell, j) => (
-              <th key={j}>{cell === "" ? nbsp : cell}</th>
+              <th key={j} className={staffDayColClassName(headerCells, j)}>
+                {cell === "" ? nbsp : cell}
+              </th>
             ))}
           </tr>
         </thead>
@@ -793,7 +783,9 @@ function StaffDaySpreadsheetTable({ rows }) {
           {bodyRows.map((row, i) => (
             <tr key={i}>
               {row.map((cell, j) => (
-                <td key={j}>{cell === "" ? nbsp : cell}</td>
+                <td key={j} className={staffDayColClassName(headerCells, j)}>
+                  {cell === "" ? nbsp : cell}
+                </td>
               ))}
             </tr>
           ))}
@@ -879,6 +871,16 @@ export default function App() {
   const [staffDayLoading, setStaffDayLoading] = useState(false);
   const [staffDayError, setStaffDayError] = useState(null);
   const [staffDayIframeOpen, setStaffDayIframeOpen] = useState(false);
+  const [staffDayTableOpen, setStaffDayTableOpen] = useState(false);
+  const [staffDayMobile, setStaffDayMobile] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 768px)");
+    const apply = () => setStaffDayMobile(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
 
   const loadStaffDay = useCallback(async () => {
     setStaffDayLoading(true);
@@ -1713,47 +1715,82 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
       {view==="staffDay"&&(
         <>
         <style>{`
+          .hb-staffday-mobile-guide {
+            display: none;
+            margin-bottom: 0.65rem;
+            padding: 0.7rem 0.85rem;
+            font-size: 0.78rem;
+            line-height: 1.55;
+            color: rgba(240, 232, 208, 0.82);
+            background: rgba(244, 162, 97, 0.08);
+            border: 1px solid rgba(244, 162, 97, 0.32);
+            border-radius: 6px;
+          }
+          .hb-staffday-mobile-guide strong {
+            color: #f4a261;
+            font-weight: 600;
+          }
+          .hb-staffday-sheet-link--primary {
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.35rem;
+            flex-shrink: 0;
+          }
           .hb-staffday-table-wrap {
             width: 100%;
-            overflow-x: auto;
-            overflow-y: auto;
+            overflow: auto;
             -webkit-overflow-scrolling: touch;
-            max-height: calc(100vh - 160px);
+            max-height: calc(100vh - 200px);
             border-radius: 6px;
             border: 1px solid rgba(201,168,76,0.22);
             background: #0a0a0a;
-            margin-bottom: 0.4rem;
+            margin-bottom: 0.5rem;
           }
           @supports (height: 100dvh) {
             .hb-staffday-table-wrap {
-              max-height: calc(100dvh - 168px);
+              max-height: calc(100dvh - 210px);
             }
           }
           .hb-staffday-table {
             border-collapse: separate;
             border-spacing: 0;
-            font-size: 0.67rem;
+            table-layout: auto;
+            width: max-content;
+            min-width: 100%;
+            font-size: 0.78rem;
             color: #f0e8d0;
             box-sizing: border-box;
-          }
-          .hb-staffday-table.hb-staffday-table--fit {
-            table-layout: fixed;
-            width: 100%;
-            max-width: 100%;
-            min-width: 0;
           }
           .hb-staffday-table th,
           .hb-staffday-table td {
             border-right: 1px solid rgba(201,168,76,0.14);
             border-bottom: 1px solid rgba(201,168,76,0.14);
-            padding: 0.2rem 0.26rem;
+            padding: 0.42rem 0.55rem;
             vertical-align: top;
+            box-sizing: border-box;
+            line-height: 1.45;
+          }
+          .hb-staffday-col--narrow {
+            min-width: 2.85rem;
+            white-space: nowrap;
+          }
+          .hb-staffday-col--normal {
+            min-width: 4.75rem;
+            white-space: nowrap;
+          }
+          .hb-staffday-col--wide {
+            min-width: 9rem;
+            max-width: 20rem;
             white-space: pre-wrap;
             word-break: break-word;
-            overflow-wrap: anywhere;
-            min-width: 0;
-            min-height: 1.25em;
-            box-sizing: border-box;
+          }
+          .hb-staffday-col--first {
+            min-width: 5.5rem;
+            max-width: 11rem;
+            white-space: pre-wrap;
+            word-break: break-word;
           }
           .hb-staffday-table th:last-child,
           .hb-staffday-table td:last-child {
@@ -1775,22 +1812,25 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
           .hb-staffday-table tbody tr:nth-child(even) td {
             background: rgba(255,255,255,0.055);
           }
-          .hb-staffday-table tbody td:first-child,
-          .hb-staffday-table thead th:first-child {
+          .hb-staffday-col--first {
             position: sticky;
             left: 0;
             z-index: 1;
             box-shadow: 3px 0 6px rgba(0,0,0,0.45);
           }
-          .hb-staffday-table thead th:first-child {
+          .hb-staffday-table thead th.hb-staffday-col--first {
             z-index: 3;
             background: linear-gradient(180deg, rgba(82,64,26,0.99) 0%, rgba(48,40,20,0.995) 100%);
           }
-          .hb-staffday-table tbody tr:nth-child(odd) td:first-child {
+          .hb-staffday-table tbody tr:nth-child(odd) td.hb-staffday-col--first {
             background: #141413;
           }
-          .hb-staffday-table tbody tr:nth-child(even) td:first-child {
+          .hb-staffday-table tbody tr:nth-child(even) td.hb-staffday-col--first {
             background: #191918;
+          }
+          .hb-staffday-toggle-table {
+            width: 100%;
+            margin-bottom: 0.5rem;
           }
           .hb-staffday-iframe {
             width: 100%;
@@ -1802,6 +1842,48 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
           @supports (height: 100dvh) {
             .hb-staffday-iframe {
               height: min(380px, 38dvh);
+            }
+          }
+          @media (max-width: 768px) {
+            .hb-staffday-mobile-guide {
+              display: block;
+            }
+            .hb-staffday-sheet-link--primary {
+              width: 100%;
+              min-height: 48px;
+              padding: 0.65rem 1rem !important;
+              font-size: 0.82rem !important;
+              letter-spacing: 0.05em !important;
+            }
+            .hb-staffday-table-wrap {
+              max-height: min(70vh, 520px);
+            }
+            .hb-staffday-table {
+              font-size: 0.76rem;
+            }
+            .hb-staffday-table th,
+            .hb-staffday-table td {
+              padding: 0.38rem 0.5rem;
+            }
+            .hb-staffday-footer-note--desktop {
+              display: none;
+            }
+          }
+          @media (min-width: 769px) {
+            .hb-staffday-toggle-table {
+              display: none;
+            }
+            .hb-staffday-footer-note--mobile {
+              display: none;
+            }
+            .hb-staffday-sheet-link--primary {
+              width: auto !important;
+              min-height: 38px !important;
+              padding: 0.4rem 0.85rem !important;
+              font-size: 0.68rem !important;
+              background: transparent !important;
+              color: #c9a84c !important;
+              border: 1px solid rgba(201, 168, 76, 0.27) !important;
             }
           }
         `}</style>
@@ -1834,22 +1916,18 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
             }}>
               🎤 STAFF DAY
             </h2>
-            <div style={{ display:"flex", flexWrap:"wrap", gap:"0.35rem", alignItems:"center" }}>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:"0.35rem", alignItems:"center", width: staffDayMobile ? "100%" : "auto" }}>
               <a
                 href={STAFF_DAY_SHEET_URL}
                 target="_blank"
                 rel="noopener noreferrer"
+                className="hb-staffday-sheet-link--primary"
                 style={{
-                  ...S.btn("ghost"),
-                  padding:"0.38rem 0.75rem",
-                  fontSize:"0.66rem",
+                  ...S.btn("gold"),
+                  padding:"0.45rem 0.9rem",
+                  fontSize:"0.72rem",
                   letterSpacing:"0.06em",
-                  textDecoration:"none",
-                  display:"inline-flex",
-                  alignItems:"center",
-                  gap:"0.25rem",
-                  minHeight:38,
-                  flexShrink:0,
+                  minHeight:40,
                 }}
               >
                 Googleスプレッドシートで編集 <span aria-hidden="true">↗</span>
@@ -1870,6 +1948,11 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
                 {staffDayLoading ? "読み込み中…" : "🔄 再読み込み"}
               </button>
             </div>
+          </div>
+
+          <div className="hb-staffday-mobile-guide" role="note">
+            <strong>スマホでは Google スプレッドシートで開くのがおすすめです。</strong>
+            横に長い表を画面幅に押し込むと文字が小さくなり読みづらくなります。上のボタンから元の表を開いて確認・編集してください。必要なときだけ下の「表をアプリ内で表示」から閲覧できます（横スクロール）。
           </div>
 
           {staffDayLoading && (
@@ -1903,7 +1986,40 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
           )}
 
           {!staffDayLoading && staffDayRows && staffDayRows.length > 0 && (
-            <StaffDaySpreadsheetTable rows={staffDayRows} />
+            <>
+              {staffDayMobile && !staffDayTableOpen ? (
+                <button
+                  type="button"
+                  className="hb-staffday-toggle-table"
+                  onClick={() => setStaffDayTableOpen(true)}
+                  style={{
+                    ...S.btn("ghost"),
+                    padding:"0.55rem 0.85rem",
+                    fontSize:"0.78rem",
+                    letterSpacing:"0.05em",
+                    justifyContent:"center",
+                  }}
+                >
+                  表をアプリ内で表示（横スクロール）
+                </button>
+              ) : null}
+              {(!staffDayMobile || staffDayTableOpen) ? (
+                <>
+                  {staffDayMobile ? (
+                    <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:"0.35rem" }}>
+                      <button
+                        type="button"
+                        onClick={() => setStaffDayTableOpen(false)}
+                        style={{ ...S.btn("sm"), padding:"0.28rem 0.6rem", fontSize:"0.65rem" }}
+                      >
+                        表を閉じる
+                      </button>
+                    </div>
+                  ) : null}
+                  <StaffDaySpreadsheetTable rows={staffDayRows} />
+                </>
+              ) : null}
+            </>
           )}
 
           <div style={{ marginTop:"0.35rem" }}>
@@ -1939,14 +2055,29 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
             )}
           </div>
 
-          <p style={{
-            margin:"0.45rem 0 0",
-            fontSize:"0.6rem",
-            color:"rgba(240,232,208,0.45)",
-            lineHeight:1.45,
-            textAlign:"center",
-          }}>
-            横に長い表はスクロールできます。編集は Google スプレッドシート側で行ってください。
+          <p
+            className="hb-staffday-footer-note--desktop"
+            style={{
+              margin:"0.45rem 0 0",
+              fontSize:"0.68rem",
+              color:"rgba(240,232,208,0.5)",
+              lineHeight:1.5,
+              textAlign:"center",
+            }}
+          >
+            表は横にスクロールして全体を確認できます。編集は Google スプレッドシート側で行ってください。
+          </p>
+          <p
+            className="hb-staffday-footer-note--mobile"
+            style={{
+              margin:"0.45rem 0 0",
+              fontSize:"0.68rem",
+              color:"rgba(240,232,208,0.5)",
+              lineHeight:1.5,
+              textAlign:"center",
+            }}
+          >
+            編集・本格的な確認は Google スプレッドシートをご利用ください。
           </p>
         </div>
         </>
