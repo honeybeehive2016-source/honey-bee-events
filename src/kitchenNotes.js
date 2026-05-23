@@ -342,13 +342,13 @@ export default function KitchenNotesModule() {
     const author = (newKitchenAuthor || "").trim();
     if (!author || !KITCHEN_STAFF_AUTHORS.includes(author)) {
       alert("記入者を選択してください");
-      return;
+      return false;
     }
     const targetDates = computeTargetDates();
-    if (targetDates === null) return;
+    if (targetDates === null) return false;
     if (targetDates.length === 0) {
       alert("送り先の日付を指定してください");
-      return;
+      return false;
     }
     const id = `kn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
     const now = Date.now();
@@ -378,8 +378,10 @@ export default function KitchenNotesModule() {
         }
       }
       await setDoc(doc(db, "kitchenNotes", id), base);
+      return true;
     } catch (e) {
       alert("保存に失敗しました: " + (e.message || String(e)));
+      return false;
     } finally {
       if (mayUpload) {
         setKitchenSubmitting(false);
@@ -389,7 +391,8 @@ export default function KitchenNotesModule() {
 
   const addKitchenNoteFree = async () => {
     if (!newKitchenNote.trim()) return;
-    await saveKitchenEntry("note", newKitchenNote, notePhotoInputRef.current?.files);
+    const ok = await saveKitchenEntry("note", newKitchenNote, notePhotoInputRef.current?.files);
+    if (!ok) return;
     setNewKitchenNote("");
     setPendingNotePhotoCount(0);
     if (notePhotoInputRef.current) notePhotoInputRef.current.value = "";
@@ -397,7 +400,8 @@ export default function KitchenNotesModule() {
 
   const addKitchenItemCheck = async () => {
     if (!newKitchenItem.trim()) return;
-    await saveKitchenEntry("item", newKitchenItem, itemPhotoInputRef.current?.files);
+    const ok = await saveKitchenEntry("item", newKitchenItem, itemPhotoInputRef.current?.files);
+    if (!ok) return;
     setNewKitchenItem("");
     setPendingItemPhotoCount(0);
     if (itemPhotoInputRef.current) itemPhotoInputRef.current.value = "";

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { db, storage } from "./firebase";
 import { collection, doc, setDoc, deleteDoc, onSnapshot, updateDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
-import { getShiftForDate, getRoleColor, getRoleLabel, isManager } from "./shift";
+import { getShiftForDate, getRoleColor, getRoleLabel, isManager, getOrderedStaffNames } from "./shift";
 import { getBusinessDate } from "./businessDate";
 
 const isRentalEventName = (name) => /貸切|貸し切り/.test(name || "");
@@ -413,6 +413,7 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
   const [expandedSection, setExpandedSection] = useState("");
   const [newHandoverItem, setNewHandoverItem] = useState("");
   const [newHandoverNote, setNewHandoverNote] = useState("");
+  const [newHandoverAuthor, setNewHandoverAuthor] = useState("");
   const [showHistory, setShowHistory] = useState(false);
   const [handoverMode, setHandoverMode] = useState("nextday"); // nextday | single | multi | range
   const [handoverDate, setHandoverDate] = useState("");
@@ -592,12 +593,25 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
     return `最終更新：${new Date(t).toLocaleString("ja-JP")}`;
   };
 
+  const handoverStaffNames = getOrderedStaffNames(shifts);
+
+  const validateHandoverAuthor = () => {
+    const author = (newHandoverAuthor || "").trim();
+    if (!author || !handoverStaffNames.includes(author)) {
+      alert("記入者を選択してください");
+      return null;
+    }
+    return author;
+  };
+
   // 申し送り：個別項目追加（モードに応じて対象日を設定）
   const addHandoverItem = async () => {
     const text = newHandoverItem.trim();
     const files = handoverItemFileRef.current?.files;
     const fileArr = files ? Array.from(files) : [];
     if (!text && fileArr.length === 0) return;
+    const author = validateHandoverAuthor();
+    if (!author) return;
     const targetDates = computeTargetDates();
     if (targetDates === null) return;
     if (targetDates.length === 0) {
@@ -624,10 +638,16 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
       done: false,
       sourceDate: selectedDate,
       targetDates,
+      author,
       createdAt: Date.now(),
     };
     if (attachments.length > 0) payload.attachments = attachments;
-    await setDoc(doc(db, "handovers", id), payload);
+    try {
+      await setDoc(doc(db, "handovers", id), payload);
+    } catch (e) {
+      alert("保存に失敗しました: " + (e.message || String(e)));
+      return;
+    }
     setNewHandoverItem("");
     setPendingItemFileCount(0);
     if (handoverItemFileRef.current) handoverItemFileRef.current.value = "";
@@ -639,6 +659,8 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
     const files = handoverNoteFileRef.current?.files;
     const fileArr = files ? Array.from(files) : [];
     if (!text && fileArr.length === 0) return;
+    const author = validateHandoverAuthor();
+    if (!author) return;
     const targetDates = computeTargetDates();
     if (targetDates === null) return;
     if (targetDates.length === 0) {
@@ -664,10 +686,16 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
       text,
       sourceDate: selectedDate,
       targetDates,
+      author,
       createdAt: Date.now(),
     };
     if (attachments.length > 0) payload.attachments = attachments;
-    await setDoc(doc(db, "handovers", id), payload);
+    try {
+      await setDoc(doc(db, "handovers", id), payload);
+    } catch (e) {
+      alert("保存に失敗しました: " + (e.message || String(e)));
+      return;
+    }
     setNewHandoverNote("");
     setPendingNoteFileCount(0);
     if (handoverNoteFileRef.current) handoverNoteFileRef.current.value = "";
@@ -1085,6 +1113,9 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                   )}
                   {h.type === "note" && <span style={{color:"#f4a261",marginTop:1,flexShrink:0,fontSize:".72rem",lineHeight:1.2}}>•</span>}
                   <div style={{flex:1,minWidth:0}}>
+                  {h.author ? (
+                    <span style={{fontSize:".6rem",color:"rgba(240,232,208,0.45)",display:"block",marginBottom:".12rem"}}>👤 {h.author}</span>
+                  ) : null}
                   {isEditing ? (
                     <div style={{marginBottom:".28rem"}}>
                       <textarea
@@ -1623,6 +1654,16 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
         )}
       </div>
 
+      <div style={{marginBottom:".75rem"}}>
+        <label style={S.lbl}>記入者</label>
+        <select style={S.inp} value={newHandoverAuthor} onChange={e => setNewHandoverAuthor(e.target.value)}>
+          <option value="">選択してください</option>
+          {handoverStaffNames.map(name => (
+            <option key={name} value={name}>{name}</option>
+          ))}
+        </select>
+      </div>
+
       {/* 自由記述欄 */}
       <div style={{marginBottom:".5rem"}}>
         <div style={{display:"flex",gap:".4rem",marginBottom:".35rem"}}>
@@ -1710,6 +1751,9 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                 {h.type === "item" ? "☑" : "📝"}
               </span>
               <div style={{flex:1,minWidth:0}}>
+                {h.author ? (
+                  <span style={{fontSize:".6rem",color:"rgba(240,232,208,0.45)",display:"block",marginBottom:".12rem"}}>👤 {h.author}</span>
+                ) : null}
                 {isEditing ? (
                   <div style={{marginBottom:".28rem"}}>
                     <textarea
@@ -1881,6 +1925,9 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], re
                       <div style={{fontSize:".75rem",color:h.done?"rgba(126,200,127,0.5)":"rgba(240,232,208,0.7)",textDecoration:h.done&&h.type==="item"?"line-through":"none"}}>
                         {h.type === "item" ? (h.done?"✓":"☐") : "📝"}{" "}
                         {h.text || ((Array.isArray(h.attachments) && h.attachments.length > 0) ? "（ファイル添付）" : "")}
+                        {h.author ? (
+                          <span style={{fontSize:".58rem",color:"rgba(240,232,208,0.4)",marginLeft:".35rem"}}>👤 {h.author}</span>
+                        ) : null}
                         <span style={{fontSize:".58rem",color:"rgba(240,232,208,0.35)",marginLeft:".5rem"}}>→ {(h.targetDates||[]).length}日</span>
                         {getHandoverUpdatedLabel(h) && <span style={{fontSize:".58rem",color:"rgba(240,232,208,0.35)",marginLeft:".5rem"}}>{getHandoverUpdatedLabel(h)}</span>}
                       </div>
