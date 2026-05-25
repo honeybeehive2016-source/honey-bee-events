@@ -239,6 +239,12 @@ function generateTexts(d){
   return{hp,ig,fb,gf,cp,wixDetail,wixSchedule,wixPickup,seoTitle,seoDesc,altText,reserveBtn,flyer};
 }
 
+const HONEY_BEE_EXTERNAL_LINKS = [
+  { href: "https://www.ofunahoneybee.net/", label: "公式HP", icon: "🌐" },
+  { href: "https://www.instagram.com/ofunahoneybee/", label: "Instagram", icon: "📷" },
+  { href: "https://www.facebook.com/ofunahoneybee/", label: "Facebook", icon: "f" },
+];
+
 const OUTPUT_TABS=[{key:"hp",label:"HP用"},{key:"ig",label:"Instagram"},{key:"fb",label:"Facebook"},{key:"gf",label:"フォーム"},{key:"cp",label:"告知コピー"},{key:"wix",label:"🌐 Wix"},{key:"flyer",label:"🎨 フライヤー"},{key:"tt",label:"⏱ TT"}];
 const WIX_SECTIONS=[{key:"wixDetail",label:"イベント詳細ページ本文"},{key:"wixSchedule",label:"月間スケジュール用"},{key:"wixPickup",label:"トップページ ピックアップ"},{key:"seoTitle",label:"SEOタイトル",note:v=>`${v.length}文字（推奨：60文字以内）`},{key:"seoDesc",label:"SEOディスクリプション",note:v=>`${v.length}文字（推奨：160文字以内）`},{key:"altText",label:"画像 alt テキスト"},{key:"reserveBtn",label:"予約ボタン文言"}];
 
@@ -1526,6 +1532,48 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
             grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
           }
         }
+        .hb-home-external-links {
+          display: flex;
+          flex-wrap: wrap;
+          justify-content: center;
+          align-items: center;
+          gap: 0.5rem;
+          margin-bottom: 1.75rem;
+        }
+        .hb-home-external-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 0.35rem;
+          padding: 0.48rem 0.9rem;
+          min-height: 40px;
+          font-family: inherit;
+          font-size: 0.72rem;
+          font-weight: 500;
+          letter-spacing: 0.06em;
+          text-decoration: none;
+          border-radius: 5px;
+          border: 1px solid rgba(201, 168, 76, 0.35);
+          background: #0d0d0d;
+          color: #c9a84c;
+          cursor: pointer;
+          transition: background 0.15s, border-color 0.15s, color 0.15s;
+          flex-shrink: 0;
+        }
+        .hb-home-external-btn:hover {
+          background: rgba(201, 168, 76, 0.12);
+          border-color: rgba(201, 168, 76, 0.55);
+          color: #e8d5a0;
+        }
+        .hb-home-external-btn-icon {
+          font-size: 0.85rem;
+          line-height: 1;
+          opacity: 0.95;
+        }
+        .hb-home-external-btn-arrow {
+          font-size: 0.65rem;
+          opacity: 0.75;
+        }
         @media (max-width: 900px) {
           .hb-form-2col { grid-template-columns: 1fr !important; gap: 0 !important; }
         }
@@ -1628,6 +1676,21 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
             <div style={{fontFamily:"Georgia,serif",fontSize:"1rem",color:"#c9a84c",letterSpacing:".25em",marginBottom:".4rem"}}>OPERATION CENTER</div>
             <div style={{fontSize:".75rem",color:"rgba(240,232,208,0.4)",letterSpacing:".15em"}}>業務ポータル — 各モジュールへアクセス</div>
           </div>
+          <nav className="hb-home-external-links" aria-label="HONEY BEE 外部リンク">
+            {HONEY_BEE_EXTERNAL_LINKS.map((link) => (
+              <a
+                key={link.href}
+                href={link.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hb-home-external-btn"
+              >
+                <span className="hb-home-external-btn-icon" aria-hidden="true">{link.icon}</span>
+                <span>{link.label}</span>
+                <span className="hb-home-external-btn-arrow" aria-hidden="true">↗</span>
+              </a>
+            ))}
+          </nav>
           <div style={{ display: "grid", gap: "1.25rem" }} className="hb-module-grid hb-home-module-grid">
             {[
               {key:"today", icon:"📅", title:"本日の営業", desc:"イベント情報 / チェックリスト / 申し送り", ready:true},
