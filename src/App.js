@@ -1593,6 +1593,33 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
           .hb-tab { font-size: 0.74rem !important; padding: 0.36rem 0.55rem !important; letter-spacing: 0.05em !important; }
           input, textarea, select { font-size: 16px !important; }
           .hb-module-grid { grid-template-columns: 1fr !important; }
+          .hb-home-view {
+            padding-top: 1.35rem !important;
+            padding-bottom: 1.15rem !important;
+          }
+          .hb-home-hero {
+            margin-bottom: 1.15rem !important;
+          }
+          .hb-home-logo {
+            margin-bottom: 0.7rem !important;
+          }
+          .hb-home-external-links {
+            gap: 0.32rem;
+            margin-bottom: 0.85rem;
+          }
+          .hb-home-external-btn {
+            padding: 0.28rem 0.58rem;
+            min-height: 34px;
+            font-size: 0.64rem;
+            gap: 0.22rem;
+            border-radius: 4px;
+          }
+          .hb-home-external-btn-icon {
+            font-size: 0.72rem;
+          }
+          .hb-home-external-btn-arrow {
+            font-size: 0.55rem;
+          }
         }
       `}</style>
 
@@ -1670,9 +1697,9 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
 
       {/* ===== TOP: HONEY BEE OPERATION ===== */}
       {view==="home"&&(
-        <div style={{padding:"2.5rem 2rem",maxWidth:1100,margin:"0 auto"}} className="hb-view">
-          <div style={{textAlign:"center",marginBottom:"2.5rem"}}>
-            <img src={process.env.PUBLIC_URL + "/honeybee_logo.png"} alt="HONEY BEE" style={{maxWidth:"min(420px,80%)",width:"auto",height:"auto",display:"block",margin:"0 auto 1.25rem"}}/>
+        <div style={{padding:"2.5rem 2rem",maxWidth:1100,margin:"0 auto"}} className="hb-view hb-home-view">
+          <div className="hb-home-hero" style={{textAlign:"center",marginBottom:"2.5rem"}}>
+            <img className="hb-home-logo" src={process.env.PUBLIC_URL + "/honeybee_logo.png"} alt="HONEY BEE" style={{maxWidth:"min(420px,80%)",width:"auto",height:"auto",display:"block",margin:"0 auto 1.25rem"}}/>
             <div style={{fontFamily:"Georgia,serif",fontSize:"1rem",color:"#c9a84c",letterSpacing:".25em",marginBottom:".4rem"}}>OPERATION CENTER</div>
             <div style={{fontSize:".75rem",color:"rgba(240,232,208,0.4)",letterSpacing:".15em"}}>業務ポータル — 各モジュールへアクセス</div>
           </div>
