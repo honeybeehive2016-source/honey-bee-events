@@ -282,6 +282,95 @@ function fmtCancelledAt(ts) {
   }
 }
 
+function escapeCsvCell(value) {
+  const s = value == null ? "" : String(value);
+  if (/[",\r\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function getExportArrivalStatus(r) {
+  const people = getPeopleCount(r?.people);
+  const arrived = getArrivedCount(r);
+  if (arrived <= 0) return "未来店";
+  if (arrived < people) return "部分来店";
+  return "来店";
+}
+
+const RESERVATION_CSV_EXPORT_HEADERS = [
+  "予約ID",
+  "日付",
+  "イベント名",
+  "お名前",
+  "人数",
+  "電話",
+  "メール",
+  "席番号",
+  "来店人数",
+  "来店状況",
+  "来店日時",
+  "キャンセル",
+  "キャンセル日時",
+  "キャンセル対応者",
+  "キャンセル理由",
+  "メモ",
+  "予約経路",
+  "経路詳細",
+  "受付担当",
+  "ご予約アーティスト",
+  "登録日時",
+  "最終保存",
+  "取込日時",
+];
+
+function reservationToCsvCells(r) {
+  return [
+    r._id || "",
+    r.date || "",
+    r.eventName || "",
+    r.customerName || "",
+    getPeopleCount(r.people),
+    r.phone || "",
+    r.email || "",
+    r.seatNumber || "",
+    getArrivedCount(r),
+    getExportArrivalStatus(r),
+    r.arrivedAt || "",
+    r.cancelled ? "はい" : "いいえ",
+    fmtCancelledAt(r.cancelledAt),
+    r.cancelledBy || "",
+    r.cancelReason || "",
+    r.note || "",
+    sourceLabel(r.source),
+    r.sourceDetail || "",
+    r.staff || "",
+    r.targetArtist || "",
+    fmtCancelledAt(r.createdAt),
+    r.savedAt || "",
+    r.importedAt || "",
+  ];
+}
+
+function buildReservationsExportCsv(reservationList) {
+  const lines = [RESERVATION_CSV_EXPORT_HEADERS.map(escapeCsvCell).join(",")];
+  for (const r of reservationList) {
+    lines.push(reservationToCsvCells(r).map(escapeCsvCell).join(","));
+  }
+  return "\uFEFF" + lines.join("\r\n");
+}
+
+function downloadReservationCsv(csvContent, filename) {
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 const SEAT_LAYOUT_LOCK_MESSAGE =
   "席指定済みの予約があります。レイアウト変更時は、指定済み席番号が新しいレイアウトと一致するか確認してください。";
 
@@ -394,6 +483,12 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   const [cancelModalId, setCancelModalId] = useState(null);
   const [cancelForm, setCancelForm] = useState({ cancelledBy: "", cancelReason: "" });
   const [showImport, setShowImport] = useState(false);
+  const [showExport, setShowExport] = useState(false);
+  const [exportMode, setExportMode] = useState("all");
+  const [exportFrom, setExportFrom] = useState("");
+  const [exportTo, setExportTo] = useState("");
+  const [exportIncludeCancelled, setExportIncludeCancelled] = useState(true);
+  const [exportIncludeTrash, setExportIncludeTrash] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
   // 列マッピング手動選択画面用
@@ -499,6 +594,41 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   }, [initialDate]);
 
   const trashReservations = allReservations.filter(r => r._deleted);
+
+  const handleExportDownload = () => {
+    if (exportMode === "range") {
+      if (!exportFrom || !exportTo) {
+        alert("開始日と終了日を指定してください");
+        return;
+      }
+      if (exportTo < exportFrom) {
+        alert("終了日は開始日以降にしてください");
+        return;
+      }
+    }
+    let list = [...allReservations];
+    if (!exportIncludeTrash) list = list.filter((r) => !r._deleted);
+    if (!exportIncludeCancelled) list = list.filter((r) => !r.cancelled);
+    if (exportMode === "range") {
+      list = list.filter((r) => r.date >= exportFrom && r.date <= exportTo);
+    }
+    list.sort((a, b) => {
+      const dateCmp = (a.date || "").localeCompare(b.date || "");
+      if (dateCmp !== 0) return dateCmp;
+      return (a.createdAt || 0) - (b.createdAt || 0);
+    });
+    if (list.length === 0) {
+      alert("条件に一致する予約がありません");
+      return;
+    }
+    const csv = buildReservationsExportCsv(list);
+    const filename =
+      exportMode === "range"
+        ? `reservations_${exportFrom}_${exportTo}.csv`
+        : `reservations_${todayLocal}.csv`;
+    downloadReservationCsv(csv, filename);
+    setShowExport(false);
+  };
 
   // ===== CSVインポート（Googleフォーム書き出し対応） =====
   // CSVの1行を簡易的にパース（クォート対応）
@@ -1514,6 +1644,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
             <button style={{...S.btn("sm"),padding:".4rem .8rem"}} onClick={onGoSeatLayout}>🪑 席レイアウト</button>
           )}
           <button style={{...S.btn("sm"),padding:".4rem .8rem"}} onClick={handleLinkCheck}>📊 紐付き確認</button>
+          <button style={{...S.btn("sm"),padding:".4rem .8rem"}} onClick={()=>setShowExport(true)}>📤 CSV出力</button>
           <button style={{...S.btn("sm"),padding:".4rem .8rem"}} onClick={()=>setShowImport(true)}>📥 CSVインポート</button>
           <button style={{...S.btn("sm"),padding:".4rem .8rem"}} onClick={()=>setShowTrash(true)}>🗑 ゴミ箱{trashReservations.length>0?` (${trashReservations.length})`:""}</button>
           <button style={S.btn("gold")} onClick={startNew}>＋ 電話予約を追加</button>
@@ -1908,6 +2039,66 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
           }}>コピー</button>
         </div>
       </div>
+
+      {/* CSV出力モーダル */}
+      {showExport && (
+        <div
+          style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", background: "rgba(0,0,0,0.85)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}
+          onClick={() => setShowExport(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: "#0d0d0d", border: "1px solid rgba(201,168,76,0.27)", borderRadius: 8, padding: "1.25rem 1.5rem", maxWidth: 480, width: "100%" }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem" }}>
+              <div style={{ fontFamily: "Georgia,serif", fontSize: "1rem", color: "#c9a84c", letterSpacing: ".15em" }}>📤 CSV出力</div>
+              <button type="button" style={S.btn("sm")} onClick={() => setShowExport(false)}>閉じる</button>
+            </div>
+            <p style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.55)", lineHeight: 1.55, margin: "0 0 1rem" }}>
+              読み込み済みの予約データをCSVでダウンロードします（Firestoreには書き込みません）。
+            </p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: ".4rem", marginBottom: ".75rem" }}>
+              <button
+                type="button"
+                onClick={() => setExportMode("all")}
+                style={{ padding: ".35rem .75rem", borderRadius: 3, border: `1px solid ${exportMode === "all" ? "#c9a84c" : "rgba(201,168,76,0.2)"}`, background: exportMode === "all" ? "#c9a84c" : "transparent", color: exportMode === "all" ? "#0a0a0a" : "rgba(201,168,76,0.7)", fontSize: ".68rem", cursor: "pointer", fontFamily: "inherit" }}
+              >
+                全期間
+              </button>
+              <button
+                type="button"
+                onClick={() => setExportMode("range")}
+                style={{ padding: ".35rem .75rem", borderRadius: 3, border: `1px solid ${exportMode === "range" ? "#c9a84c" : "rgba(201,168,76,0.2)"}`, background: exportMode === "range" ? "#c9a84c" : "transparent", color: exportMode === "range" ? "#0a0a0a" : "rgba(201,168,76,0.7)", fontSize: ".68rem", cursor: "pointer", fontFamily: "inherit" }}
+              >
+                日付範囲
+              </button>
+            </div>
+            {exportMode === "range" && (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: ".5rem", marginBottom: ".75rem" }}>
+                <div>
+                  <label style={S.lbl}>開始日</label>
+                  <input type="date" style={S.inp} value={exportFrom} onChange={(e) => setExportFrom(e.target.value)} />
+                </div>
+                <div>
+                  <label style={S.lbl}>終了日</label>
+                  <input type="date" style={S.inp} value={exportTo} onChange={(e) => setExportTo(e.target.value)} />
+                </div>
+              </div>
+            )}
+            <label style={{ display: "flex", alignItems: "center", gap: ".45rem", fontSize: ".78rem", color: "rgba(240,232,208,0.8)", marginBottom: ".45rem", cursor: "pointer" }}>
+              <input type="checkbox" checked={exportIncludeCancelled} onChange={(e) => setExportIncludeCancelled(e.target.checked)} style={{ accentColor: "#c9a84c", width: 16, height: 16 }} />
+              キャンセル済みを含める
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: ".45rem", fontSize: ".78rem", color: "rgba(240,232,208,0.8)", marginBottom: "1rem", cursor: "pointer" }}>
+              <input type="checkbox" checked={exportIncludeTrash} onChange={(e) => setExportIncludeTrash(e.target.checked)} style={{ accentColor: "#c9a84c", width: 16, height: 16 }} />
+              ゴミ箱の予約も含める
+            </label>
+            <button type="button" style={{ ...S.btn("gold"), width: "100%" }} onClick={handleExportDownload}>
+              ダウンロード
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* CSVインポートモーダル */}
       {showImport && (
