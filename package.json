@@ -17,6 +17,7 @@
     "start": "react-scripts start",
     "build": "react-scripts build",
     "generate-pwa-icons": "node tools/generate-pwa-icons.cjs",
+    "obsidian-log": "node tools/update-obsidian-changelog.cjs",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },
