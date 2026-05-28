@@ -9,6 +9,7 @@ import ShiftModule from "./shift";
 import ProcurementModule from "./procurement";
 import ReservationModule, { CustomerReservationForm } from "./reservation";
 import SeatLayoutModule from "./seatLayout";
+import SalesModule from "./sales";
 import { BOOKING_STATUS_OPTIONS, effectiveBookingStatus } from "./eventBooking";
 import { getBusinessDate } from "./businessDate";
 
@@ -1629,7 +1630,7 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
             <button onClick={navigateBack} style={{background:"transparent",border:"1px solid rgba(201,168,76,0.27)",borderRadius:4,color:"#c9a84c",padding:".35rem .7rem",fontSize:".75rem",cursor:"pointer",fontFamily:"inherit",letterSpacing:".05em"}} title="戻る">← 戻る</button>
           )}
           <div style={S.logo} className="hb-logo" onClick={goHome} role="button" title="トップへ">
-            HONEY BEE <small style={S.logoSm}>{view==="home"?"Operation":view.startsWith("events")?"Event Manager":view==="rentals"?"Rentals":view==="settlement"?"Settlement":view==="today"?"Today":view==="kitchen"?"Kitchen":view==="shift"?"Shifts":view==="procurement"?"Procurement":view==="reservation"?"Reservations":view==="seat_layout"?"Seats":""}</small>
+            HONEY BEE <small style={S.logoSm}>{view==="home"?"Operation":view.startsWith("events")?"Event Manager":view==="rentals"?"Rentals":view==="settlement"?"Settlement":view==="sales"?"Sales":view==="today"?"Today":view==="kitchen"?"Kitchen":view==="shift"?"Shifts":view==="procurement"?"Procurement":view==="reservation"?"Reservations":view==="seat_layout"?"Seats":""}</small>
           </div>
         </div>
         <div style={{display:"flex",gap:".4rem",alignItems:"center"}}>
@@ -1664,6 +1665,7 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
               {key:"events_list", label:"🎵 イベント管理", views:["events_list","events_form"]},
               {key:"rentals", label:"🍽 貸切", views:["rentals"]},
               {key:"settlement", label:"💴 アーティスト精算", views:["settlement"]},
+              {key:"sales", label:"📈 売上管理", views:["sales"]},
               {key:"shift", label:"👥 シフト", views:["shift"]},
               {key:"procurement", label:"📦 発注管理", views:["procurement"]},
             ].map(item => {
@@ -1726,6 +1728,7 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
               {key:"events_list", icon:"🎵", title:"イベント管理", desc:"カレンダー / CSV同期 / 投稿文・SEO自動生成", ready:true},
               {key:"rentals", icon:"🍽", title:"貸切管理", desc:"問い合わせから成約までの一元管理 / 返信文AI", ready:true},
               {key:"settlement", icon:"💰", title:"アーティスト精算", desc:"歩合・固定額計算 / 精算メモ自動生成", ready:true},
+              {key:"sales", icon:"📈", title:"売上管理", desc:"日次決算シートを読み取り表示（読み取り専用）", ready:true},
               {key:"shift", icon:"👥", title:"シフト管理", desc:"勤務表CSVから取り込み / 月別表示", ready:true},
               {key:"procurement", icon:"📦", title:"発注管理", desc:"発注先リンク・予定日・ステータス・メモ（認証情報は保存しません）", ready:true},
               {key:"staffDay", icon:"🎤", title:"STAFF DAY", desc:"スタッフ企画イベントの管理", ready:true},
@@ -1765,6 +1768,13 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
 
       {view==="settlement"&&(
         <SettlementModule
+          events={events}
+          navigateBack={navigateBack}
+        />
+      )}
+
+      {view==="sales"&&(
+        <SalesModule
           events={events}
           navigateBack={navigateBack}
         />
