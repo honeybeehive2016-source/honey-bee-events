@@ -35,12 +35,6 @@ function pct1(v) {
   if (v == null || Number.isNaN(Number(v))) return "—";
   return Number(v).toFixed(1) + "%";
 }
-function yenCompact(v) {
-  if (v == null || Number.isNaN(Number(v))) return "—";
-  const n = Number(v);
-  if (Math.abs(n) >= 1000) return "¥" + Math.round(n / 1000) + "k";
-  return "¥" + n.toLocaleString("ja-JP");
-}
 function achievementTone(rate, hasTarget = true) {
   if (!hasTarget) {
     return {
@@ -178,36 +172,12 @@ export default function SalesModule({ events = [], navigateBack }) {
       .filter((r) => r.businessDate === currentBusinessDate)
       .reduce((s, r) => s + Number(r?.metrics?.targetSales || 0), 0);
 
-    const last7 = [...actualRows]
-      .sort((a, b) => (b.businessDate || "").localeCompare(a.businessDate || ""))
-      .slice(0, 7)
-      .reverse();
-    const maxSales = last7.reduce((m, r) => Math.max(m, Number(r?.metrics?.totalSales || 0)), 0);
-    const graphBars = last7.map((r) => {
-      const sales = Number(r?.metrics?.totalSales || 0);
-      const target = Number(r?.metrics?.targetSales || 0);
-      const hasTarget = target > 0;
-      const rate = hasTarget ? (sales / target) * 100 : null;
-      const tone = achievementTone(rate, hasTarget);
-      const h = maxSales > 0 ? Math.max(10, Math.round((sales / maxSales) * 100)) : 10;
-      return {
-        key: `${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}`,
-        date: r.businessDate,
-        sales,
-        target,
-        rate,
-        tone,
-        heightPct: h,
-      };
-    });
-
     return {
       salesSum,
       targetSum,
       achievementRate,
       remaining,
       todayTargetSum,
-      graphBars,
     };
   }, [rows, targetMonth, currentBusinessDate]);
 
@@ -271,29 +241,6 @@ export default function SalesModule({ events = [], navigateBack }) {
                 }}
               />
             </div>
-          </div>
-
-          <div>
-            <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.8)", marginBottom: ".35rem" }}>直近7営業日</div>
-            {staffProgress.graphBars.length === 0 ? (
-              <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.45)" }}>実績データがまだありません</div>
-            ) : (
-              <div style={{ display: "flex", alignItems: "flex-end", gap: ".35rem", height: 108 }}>
-                {staffProgress.graphBars.map((b) => (
-                  <div
-                    key={b.key}
-                    style={{ flex: 1, minWidth: 0, textAlign: "center" }}
-                    title={`${b.date} / 売上 ${yen(b.sales)} / 達成率 ${pct(b.rate)}`}
-                  >
-                    <div style={{ fontSize: ".55rem", color: "rgba(240,232,208,0.55)", marginBottom: ".12rem", lineHeight: 1 }}>
-                      {yenCompact(b.sales)}
-                    </div>
-                    <div style={{ height: `${b.heightPct}%`, minHeight: 10, borderRadius: "4px 4px 0 0", background: b.tone.bar }} />
-                    <div style={{ marginTop: ".2rem", fontSize: ".58rem", color: "rgba(240,232,208,0.55)" }}>{(b.date || "").slice(5)}</div>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         </div>
       )}
