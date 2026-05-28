@@ -335,11 +335,10 @@ export default function SalesModule({ events = [], navigateBack }) {
     };
 
     const costProfitBars = [
-      { key: "profit", label: "営業利益", value: operatingProfitSum, tone: "linear-gradient(90deg, rgba(126,200,126,0.92), rgba(126,200,126,0.58))" },
-      { key: "labor", label: "人件費", value: laborCostSum, tone: "linear-gradient(90deg, rgba(201,168,76,0.9), rgba(201,168,76,0.5))" },
-      { key: "purchase", label: "仕入れ", value: purchaseTotalSum, tone: "linear-gradient(90deg, rgba(205,134,74,0.9), rgba(205,134,74,0.52))" },
-      { key: "expense", label: "経費", value: expenseSum, tone: "linear-gradient(90deg, rgba(155,84,94,0.9), rgba(155,84,94,0.52))" },
-      { key: "band", label: "バンドギャラ", value: bandGuaranteeSum, tone: "linear-gradient(90deg, rgba(137,104,171,0.9), rgba(137,104,171,0.5))" },
+      { key: "profit", label: "営業利益", value: operatingProfitSum, tone: "linear-gradient(90deg, rgba(126,200,126,0.92), rgba(126,200,126,0.58))", note: "" },
+      { key: "labor", label: "人件費", value: laborCostSum, tone: "linear-gradient(90deg, rgba(201,168,76,0.9), rgba(201,168,76,0.5))", note: "翌月反映" },
+      { key: "purchase", label: "仕入れ", value: purchaseTotalSum, tone: "linear-gradient(90deg, rgba(205,134,74,0.9), rgba(205,134,74,0.52))", note: "月末売掛反映あり" },
+      { key: "expense", label: "経費", value: expenseSum, tone: "linear-gradient(90deg, rgba(155,84,94,0.9), rgba(155,84,94,0.52))", note: "暫定" },
     ];
     const costProfitMax = costProfitBars.reduce((m, r) => Math.max(m, Number(r.value || 0)), 0);
 
@@ -358,6 +357,7 @@ export default function SalesModule({ events = [], navigateBack }) {
         : "利益トップ日：データなし",
       `売上構成：ドリンク ${pct(salesComposition.drinkRate)} / フード ${pct(salesComposition.foodRate)} / その他 ${pct(salesComposition.otherRate)}`,
       `コスト傾向：人件費 ${pct(calcRate(laborCostSum, totalSalesSum))} / 仕入れ ${pct(calcRate(purchaseTotalSum, totalSalesSum))}`,
+      `参考：バンドギャラ ${yen(bandGuaranteeSum)}（経費には含めていません）`,
     ];
 
     return {
@@ -633,7 +633,10 @@ export default function SalesModule({ events = [], navigateBack }) {
           </div>
 
           <div style={{ ...S.card }}>
-            <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>コスト・利益比較</div>
+            <div style={{ ...S.secTitle, marginBottom: ".35rem" }}>コスト・利益比較（暫定）</div>
+            <div style={{ fontSize: ".68rem", color: "rgba(240,232,208,0.62)", marginBottom: ".5rem", lineHeight: 1.5 }}>
+              ※人件費は翌月まとめて反映されます。仕入・経費は月末に売掛分が加算されるため、月中は暫定値です。
+            </div>
             <div style={{ display:"grid", gap:".4rem" }}>
               {monthlyAnalysis.costProfitBars.map((b) => {
                 const w = monthlyAnalysis.costProfitMax > 0
@@ -641,7 +644,14 @@ export default function SalesModule({ events = [], navigateBack }) {
                   : 4;
                 return (
                   <div key={b.key} style={{ display:"grid", gridTemplateColumns:"110px 1fr auto", alignItems:"center", gap:".45rem" }}>
-                    <div style={{ fontSize:".74rem", color:"rgba(240,232,208,0.74)" }}>{b.label}</div>
+                    <div style={{ fontSize:".74rem", color:"rgba(240,232,208,0.74)" }}>
+                      {b.label}
+                      {b.note ? (
+                        <span style={{ marginLeft: ".28rem", fontSize: ".6rem", color: "rgba(240,232,208,0.52)" }}>
+                          {b.note}
+                        </span>
+                      ) : null}
+                    </div>
                     <div style={{ height:10, borderRadius:999, background:"rgba(240,232,208,0.1)", border:"1px solid rgba(201,168,76,0.18)", overflow:"hidden" }}>
                       <div style={{ height:"100%", width:`${w}%`, background:b.tone }} />
                     </div>
@@ -649,6 +659,14 @@ export default function SalesModule({ events = [], navigateBack }) {
                   </div>
                 );
               })}
+            </div>
+            <div style={{ marginTop: ".55rem", paddingTop: ".5rem", borderTop: "1px dashed rgba(201,168,76,0.2)" }}>
+              <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.78)" }}>
+                参考：バンドギャラ <strong>{yen(monthlyAnalysis.bandGuaranteeSum)}</strong>
+              </div>
+              <div style={{ fontSize: ".64rem", color: "rgba(240,232,208,0.54)", marginTop: ".12rem" }}>
+                ※経費には含めていません
+              </div>
             </div>
           </div>
 
