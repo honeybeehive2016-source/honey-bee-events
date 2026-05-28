@@ -104,6 +104,12 @@ function eventNamesForDate(events, businessDate) {
   const list = (events || []).filter((e) => e.date === businessDate);
   return list.map((e) => e.name).filter(Boolean);
 }
+function calcRate(numer, denom) {
+  const n = Number(numer || 0);
+  const d = Number(denom || 0);
+  if (!(d > 0)) return null;
+  return (n / d) * 100;
+}
 function normText(s) {
   return String(s || "").trim().toLowerCase();
 }
@@ -125,6 +131,13 @@ function resolveEventNameForStaff(record, matchedEventNames) {
   }
   return sheetName || "";
 }
+function resolveEventNameForAdmin(record, matchedEventNames) {
+  const names = Array.isArray(matchedEventNames) ? matchedEventNames.filter(Boolean) : [];
+  const isDup = !!record?.flags?.isDuplicateBusinessDate;
+  if (isDup) return String(record?.sheetEventName || "").trim() || names[0] || "";
+  if (names.length > 0) return names.join(" / ");
+  return String(record?.sheetEventName || "").trim();
+}
 
 export default function SalesModule({ events = [], navigateBack }) {
   const [targetMonth, setTargetMonth] = useState(normalizeMonth(""));
@@ -132,6 +145,7 @@ export default function SalesModule({ events = [], navigateBack }) {
   const [error, setError] = useState("");
   const [records, setRecords] = useState([]);
   const [roleMode, setRoleMode] = useState("staff"); // staff | admin
+  const [adminTab, setAdminTab] = useState("daily"); // daily | analysis
   const [updatedAt, setUpdatedAt] = useState("");
   const currentBusinessDate = getCurrentBusinessDateForSales();
 
@@ -203,6 +217,98 @@ export default function SalesModule({ events = [], navigateBack }) {
   }, [rows, targetMonth, currentBusinessDate]);
 
   const monthTone = achievementTone(staffProgress.achievementRate, staffProgress.targetSum > 0);
+  const monthlyAnalysis = useMemo(() => {
+    const monthRows = rows.filter((r) => (r.businessDate || "").startsWith(targetMonth));
+    const actualRows = monthRows.filter(
+      (r) => (r.businessDate || "") < currentBusinessDate && r?.metrics?.totalSales != null
+    );
+    const futureRows = monthRows.filter((r) => (r.businessDate || "") >= currentBusinessDate);
+
+    const totalSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.totalSales || 0), 0);
+    const targetSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.targetSales || 0), 0);
+    const achievementRate = calcRate(totalSalesSum, targetSalesSum);
+    const actualDayCount = actualRows.length;
+    const futureDayCount = futureRows.length;
+    const avgDailySales = actualDayCount > 0 ? totalSalesSum / actualDayCount : null;
+    const operatingProfitSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.operatingProfit || 0), 0);
+    const operatingProfitRate = calcRate(operatingProfitSum, totalSalesSum);
+    const validTargetRows = actualRows.filter((r) => Number(r?.metrics?.targetSales || 0) > 0);
+    const underTargetRows = validTargetRows.filter((r) => {
+      const rate = calcRate(r?.metrics?.totalSales, r?.metrics?.targetSales);
+      return rate != null && rate < 100;
+    });
+
+    const salesRankingTop5 = [...actualRows]
+      .sort((a, b) => Number(b?.metrics?.totalSales || 0) - Number(a?.metrics?.totalSales || 0))
+      .slice(0, 5)
+      .map((r) => {
+        const totalSales = Number(r?.metrics?.totalSales || 0);
+        const targetSales = Number(r?.metrics?.targetSales || 0);
+        return {
+          key: `${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}_sales`,
+          businessDate: r.businessDate,
+          eventName: resolveEventNameForAdmin(r, r.resolvedEventNames),
+          totalSales,
+          targetSales,
+          achievementRate: calcRate(totalSales, targetSales),
+        };
+      });
+
+    const underTargetWorst5 = [...underTargetRows]
+      .sort((a, b) => {
+        const ar = calcRate(a?.metrics?.totalSales, a?.metrics?.targetSales) ?? 9999;
+        const br = calcRate(b?.metrics?.totalSales, b?.metrics?.targetSales) ?? 9999;
+        return ar - br;
+      })
+      .slice(0, 5)
+      .map((r) => {
+        const totalSales = Number(r?.metrics?.totalSales || 0);
+        const targetSales = Number(r?.metrics?.targetSales || 0);
+        return {
+          key: `${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}_under`,
+          businessDate: r.businessDate,
+          eventName: resolveEventNameForAdmin(r, r.resolvedEventNames),
+          achievementRate: calcRate(totalSales, targetSales),
+          shortfall: Math.max(0, targetSales - totalSales),
+        };
+      });
+
+    const profitRankingTop5 = [...actualRows]
+      .sort((a, b) => Number(b?.metrics?.operatingProfit || 0) - Number(a?.metrics?.operatingProfit || 0))
+      .slice(0, 5)
+      .map((r) => {
+        const operatingProfit = Number(r?.metrics?.operatingProfit || 0);
+        const totalSales = Number(r?.metrics?.totalSales || 0);
+        return {
+          key: `${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}_profit`,
+          businessDate: r.businessDate,
+          eventName: resolveEventNameForAdmin(r, r.resolvedEventNames),
+          operatingProfit,
+          profitRate: calcRate(operatingProfit, totalSales),
+        };
+      });
+
+    return {
+      targetMonth,
+      currentBusinessDate,
+      monthRows,
+      actualRows,
+      futureRows,
+      actualDayCount,
+      futureDayCount,
+      totalSalesSum,
+      targetSalesSum,
+      achievementRate,
+      avgDailySales,
+      operatingProfitSum,
+      operatingProfitRate,
+      validTargetRows,
+      underTargetRows,
+      salesRankingTop5,
+      underTargetWorst5,
+      profitRankingTop5,
+    };
+  }, [rows, targetMonth, currentBusinessDate]);
   const staffTodayRows = useMemo(
     () => rows.filter((r) => r.businessDate === currentBusinessDate),
     [rows, currentBusinessDate]
@@ -244,6 +350,17 @@ export default function SalesModule({ events = [], navigateBack }) {
       {updatedAt && (
         <div style={{ fontSize:".68rem", color:"rgba(240,232,208,0.55)", marginBottom:".7rem" }}>
           更新時刻: {updatedAt}
+        </div>
+      )}
+
+      {roleMode === "admin" && (
+        <div style={{ display:"flex", gap:".4rem", marginBottom:".75rem", flexWrap:"wrap" }}>
+          <button type="button" style={S.btn(adminTab === "daily" ? "gold" : "ghost")} onClick={() => setAdminTab("daily")}>
+            日別一覧
+          </button>
+          <button type="button" style={S.btn(adminTab === "analysis" ? "gold" : "ghost")} onClick={() => setAdminTab("analysis")}>
+            月次分析
+          </button>
         </div>
       )}
 
@@ -366,7 +483,66 @@ export default function SalesModule({ events = [], navigateBack }) {
         </div>
       )}
 
-      {!loading && !error && rows.length > 0 && roleMode === "admin" && (
+      {!loading && !error && rows.length > 0 && roleMode === "admin" && adminTab === "analysis" && (
+        <div style={{ display:"grid", gap:".75rem", marginBottom:".75rem" }}>
+          <div style={{ ...S.card }}>
+            <div style={{ ...S.secTitle, marginBottom: ".55rem" }}>月次サマリー</div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:".45rem .8rem", fontSize:".78rem" }}>
+              <div>月間売上合計: <strong>{yen(monthlyAnalysis.totalSalesSum)}</strong></div>
+              <div>月間目標合計: <strong>{yen(monthlyAnalysis.targetSalesSum)}</strong></div>
+              <div>月間達成率: <strong>{pct(monthlyAnalysis.achievementRate)}</strong></div>
+              <div>実績日数: <strong>{num(monthlyAnalysis.actualDayCount)}</strong></div>
+              <div>本日/予定件数: <strong>{num(monthlyAnalysis.futureDayCount)}</strong></div>
+              <div>1日平均売上: <strong>{yen(monthlyAnalysis.avgDailySales)}</strong></div>
+              <div>営業利益合計: <strong>{yen(monthlyAnalysis.operatingProfitSum)}</strong></div>
+              <div>営業利益率: <strong>{pct(monthlyAnalysis.operatingProfitRate)}</strong></div>
+            </div>
+          </div>
+
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))", gap:".65rem" }}>
+            <div style={{ ...S.card }}>
+              <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>売上TOP5</div>
+              {monthlyAnalysis.salesRankingTop5.length === 0 ? (
+                <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.45)" }}>データなし</div>
+              ) : monthlyAnalysis.salesRankingTop5.map((r, i) => (
+                <div key={r.key} style={{ padding: ".3rem 0", borderBottom: "1px solid rgba(201,168,76,0.14)" }}>
+                  <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)" }}>{i + 1}. {r.businessDate}</div>
+                  <div style={{ fontSize: ".78rem", color: "#f0e8d0" }}>{r.eventName || "イベント未登録"}</div>
+                  <div style={{ fontSize: ".78rem" }}><strong>{yen(r.totalSales)}</strong>{r.achievementRate != null ? <span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.55)", fontSize: ".68rem" }}>達成率 {pct(r.achievementRate)}</span> : null}</div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ ...S.card }}>
+              <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>目標未達ワースト5</div>
+              {monthlyAnalysis.underTargetWorst5.length === 0 ? (
+                <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.45)" }}>未達データなし</div>
+              ) : monthlyAnalysis.underTargetWorst5.map((r, i) => (
+                <div key={r.key} style={{ padding: ".3rem 0", borderBottom: "1px solid rgba(201,168,76,0.14)" }}>
+                  <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)" }}>{i + 1}. {r.businessDate}</div>
+                  <div style={{ fontSize: ".78rem", color: "#f0e8d0" }}>{r.eventName || "イベント未登録"}</div>
+                  <div style={{ fontSize: ".78rem" }}>達成率 <strong>{pct(r.achievementRate)}</strong> / 不足 <strong>{yen(r.shortfall)}</strong></div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ ...S.card }}>
+              <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>営業利益TOP5</div>
+              {monthlyAnalysis.profitRankingTop5.length === 0 ? (
+                <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.45)" }}>データなし</div>
+              ) : monthlyAnalysis.profitRankingTop5.map((r, i) => (
+                <div key={r.key} style={{ padding: ".3rem 0", borderBottom: "1px solid rgba(201,168,76,0.14)" }}>
+                  <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)" }}>{i + 1}. {r.businessDate}</div>
+                  <div style={{ fontSize: ".78rem", color: "#f0e8d0" }}>{r.eventName || "イベント未登録"}</div>
+                  <div style={{ fontSize: ".78rem" }}><strong>{yen(r.operatingProfit)}</strong><span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.55)", fontSize: ".68rem" }}>利益率 {pct(r.profitRate)}</span></div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!loading && !error && rows.length > 0 && roleMode === "admin" && adminTab === "daily" && (
         <div style={{ display:"grid", gap:".65rem" }}>
           {rows.map((r) => {
             const m = r.metrics || {};
