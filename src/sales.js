@@ -187,11 +187,6 @@ export default function SalesModule({ events = [], navigateBack }) {
                     <div>
                       <span style={{ color:"rgba(201,168,76,0.7)" }}>イベント名: </span>
                       <span style={{ color:"#f0e8d0" }}>{isFuture || isToday ? plannedPrimaryName : primaryName}</span>
-                      {isDup && hasEvents && (
-                        <div style={{ fontSize:".66rem", color:"rgba(240,232,208,0.5)" }}>
-                          イベント管理候補: {r.resolvedEventNames.join(" / ")}
-                        </div>
-                      )}
                     </div>
                   ) : (
                     <div>
