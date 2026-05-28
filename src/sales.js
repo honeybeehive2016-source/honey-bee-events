@@ -328,18 +328,20 @@ export default function SalesModule({ events = [], navigateBack }) {
         };
       });
 
-    const profitRankingTop5 = [...actualRows]
-      .sort((a, b) => Number(b?.metrics?.operatingProfit || 0) - Number(a?.metrics?.operatingProfit || 0))
+    const foodDrinkRankingTop5 = actualRows
+      .filter((r) => r?.metrics?.foodDrinkSales != null)
+      .sort((a, b) => Number(b?.metrics?.foodDrinkSales || 0) - Number(a?.metrics?.foodDrinkSales || 0))
       .slice(0, 5)
       .map((r) => {
-        const operatingProfit = Number(r?.metrics?.operatingProfit || 0);
+        const foodDrinkSales = Number(r?.metrics?.foodDrinkSales || 0);
         const totalSales = Number(r?.metrics?.totalSales || 0);
         return {
-          key: `${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}_profit`,
+          key: `${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}_fooddrink`,
           businessDate: r.businessDate,
           eventName: resolveEventNameForAdmin(r, r.resolvedEventNames),
-          operatingProfit,
-          profitRate: calcRate(operatingProfit, totalSales),
+          foodDrinkSales,
+          foodDrinkUnitPrice: r?.metrics?.foodDrinkUnitPrice != null ? Number(r.metrics.foodDrinkUnitPrice) : null,
+          foodDrinkRate: calcRate(foodDrinkSales, totalSales),
         };
       });
 
@@ -391,19 +393,18 @@ export default function SalesModule({ events = [], navigateBack }) {
 
     const topSalesDay = salesRankingTop5[0];
     const biggestShortfallDay = underTargetWorst5[0];
-    const topProfitDay = profitRankingTop5[0];
+    const topFoodDrinkDay = foodDrinkRankingTop5[0];
     const monthlyHighlights = [
+      topFoodDrinkDay
+        ? `飲食売上トップ日：${(topFoodDrinkDay.businessDate || "").slice(5).replace("-", "/")} ${topFoodDrinkDay.eventName} ${yen(topFoodDrinkDay.foodDrinkSales)}`
+        : "飲食売上トップ日：データなし",
       topSalesDay
         ? `売上トップ日：${(topSalesDay.businessDate || "").slice(5).replace("-", "/")} ${topSalesDay.eventName} ${yen(topSalesDay.totalSales)}`
         : "売上トップ日：データなし",
       biggestShortfallDay
         ? `最大未達日：${(biggestShortfallDay.businessDate || "").slice(5).replace("-", "/")} ${biggestShortfallDay.eventName} 不足 ${yen(biggestShortfallDay.shortfall)}`
         : "最大未達日：未達データなし",
-      topProfitDay
-        ? `利益トップ日：${(topProfitDay.businessDate || "").slice(5).replace("-", "/")} ${topProfitDay.eventName} ${yen(topProfitDay.operatingProfit)}`
-        : "利益トップ日：データなし",
       `売上構成：ドリンク ${pct(salesComposition.drinkRate)} / フード ${pct(salesComposition.foodRate)} / その他 ${pct(salesComposition.otherRate)}`,
-      `コスト傾向：人件費 ${pct(calcRate(laborCostSum, totalSalesSum))} / 仕入れ ${pct(calcRate(purchaseTotalSum, totalSalesSum))}`,
       `参考：バンドギャラ ${yen(bandGuaranteeSum)}（経費には含めていません）`,
     ];
 
@@ -438,7 +439,7 @@ export default function SalesModule({ events = [], navigateBack }) {
       underTargetRows,
       salesRankingTop5,
       underTargetWorst5,
-      profitRankingTop5,
+      foodDrinkRankingTop5,
     };
   }, [rows, targetMonth, currentBusinessDate]);
   const staffTodayRows = useMemo(
@@ -646,21 +647,23 @@ export default function SalesModule({ events = [], navigateBack }) {
               <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.45)" }}>データなし</div>
             ) : (
               <div style={{ overflowX: "auto", paddingBottom: ".1rem" }}>
-                <div style={{ display:"flex", alignItems:"flex-end", gap:".38rem", height:200, minWidth:"100%" }}>
+                <div style={{ display:"flex", alignItems:"flex-end", gap:".38rem", height:220, minWidth:"100%" }}>
                   {monthlyAnalysis.dailyTrendRows.map((r) => {
                     const h = monthlyAnalysis.trendMaxSales > 0
-                      ? Math.max(6, Math.round((Number(r.totalSales || 0) / monthlyAnalysis.trendMaxSales) * 100))
-                      : 6;
+                      ? Math.max(2, Math.round((Number(r.totalSales || 0) / monthlyAnalysis.trendMaxSales) * 100))
+                      : 2;
                     return (
                       <div
                         key={r.key}
-                        style={{ flex: "0 0 28px", minWidth: 28, textAlign:"center", display:"flex", flexDirection:"column", justifyContent:"flex-end" }}
+                        style={{ flex: "0 0 28px", minWidth: 28, textAlign:"center", display:"flex", flexDirection:"column", height:"100%" }}
                         title={`${r.businessDate} / ${r.eventName} / 売上 ${yen(r.totalSales)} / 目標 ${yen(r.targetSales)} / 達成率 ${pct(r.achievementRate)}`}
                       >
                         <div style={{ fontSize:".52rem", color:"rgba(240,232,208,0.68)", marginBottom:".18rem", whiteSpace:"nowrap" }}>
                           {compactYen(r.totalSales)}
                         </div>
-                        <div style={{ height:`${h}%`, minHeight:10, borderRadius:"4px 4px 0 0", background:r.tone, boxShadow:"inset 0 0 0 1px rgba(255,255,255,0.08)" }} />
+                        <div style={{ flex:1, height:170, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
+                          <div style={{ width:"100%", height:`${h}%`, minHeight:6, borderRadius:"4px 4px 0 0", background:r.tone, boxShadow:"inset 0 0 0 1px rgba(255,255,255,0.08)" }} />
+                        </div>
                         <div style={{ marginTop:".22rem", fontSize:".58rem", color:"rgba(240,232,208,0.6)", whiteSpace:"nowrap" }}>{(r.businessDate || "").slice(5)}</div>
                       </div>
                     );
@@ -750,14 +753,22 @@ export default function SalesModule({ events = [], navigateBack }) {
             </div>
 
             <div style={{ ...S.card }}>
-              <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>営業利益TOP5</div>
-              {monthlyAnalysis.profitRankingTop5.length === 0 ? (
+              <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>飲食売上TOP5</div>
+              {monthlyAnalysis.foodDrinkRankingTop5.length === 0 ? (
                 <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.45)" }}>データなし</div>
-              ) : monthlyAnalysis.profitRankingTop5.map((r, i) => (
+              ) : monthlyAnalysis.foodDrinkRankingTop5.map((r, i) => (
                 <div key={r.key} style={{ padding: ".3rem 0", borderBottom: "1px solid rgba(201,168,76,0.14)" }}>
                   <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)" }}>{i + 1}. {r.businessDate}</div>
                   <div style={{ fontSize: ".78rem", color: "#f0e8d0" }}>{r.eventName || "イベント未登録"}</div>
-                  <div style={{ fontSize: ".78rem" }}><strong>{yen(r.operatingProfit)}</strong><span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.55)", fontSize: ".68rem" }}>利益率 {pct(r.profitRate)}</span></div>
+                  <div style={{ fontSize: ".78rem" }}>
+                    <strong>{yen(r.foodDrinkSales)}</strong>
+                    <span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.55)", fontSize: ".68rem" }}>
+                      飲食比率 {pct(r.foodDrinkRate)}
+                    </span>
+                    <span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.55)", fontSize: ".68rem" }}>
+                      飲食単価 {num(r.foodDrinkUnitPrice)}
+                    </span>
+                  </div>
                 </div>
               ))}
             </div>
