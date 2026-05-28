@@ -228,14 +228,14 @@ export default function SalesModule({ events = [], navigateBack }) {
 
       {roleMode === "staff" && !loading && !error && (
         <>
-        <div style={{ ...S.card, marginBottom: ".75rem", border: "1px solid rgba(201,168,76,0.24)", padding: "1.15rem 1.2rem" }}>
+        <div style={{ ...S.card, marginBottom: ".75rem", border: "2px solid rgba(201,168,76,0.34)", background: "linear-gradient(180deg, rgba(46,36,20,0.42), rgba(17,17,17,0.95))", padding: "1.2rem 1.25rem" }}>
           <div style={{ ...S.secTitle, marginBottom: ".55rem" }}>今月の進捗</div>
 
           <div style={{ display:"flex", alignItems:"baseline", gap:".55rem", flexWrap:"wrap", marginBottom:".28rem" }}>
-            <div style={{ fontFamily:"Georgia,serif", fontSize:"2rem", lineHeight:1, color:"#f0e8d0", letterSpacing:".02em" }}>
+            <div style={{ fontFamily:"Georgia,serif", fontSize:"2.35rem", lineHeight:1, color:"#f0e8d0", letterSpacing:".02em" }}>
               {pct(staffProgress.achievementRate)}
             </div>
-            <span style={{ fontSize: ".7rem", padding: ".12rem .5rem", borderRadius: 999, background: monthTone.chipBg, border: "1px solid " + monthTone.chipBd, color: monthTone.chipTx }}>
+            <span style={{ fontSize: ".74rem", fontWeight: 600, padding: ".16rem .58rem", borderRadius: 999, background: monthTone.chipBg, border: "1px solid " + monthTone.chipBd, color: monthTone.chipTx }}>
               {monthTone.label}
             </span>
           </div>
@@ -250,7 +250,7 @@ export default function SalesModule({ events = [], navigateBack }) {
             <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.8)", marginBottom: ".3rem" }}>
               目標達成までの進捗 {pct1(staffProgress.achievementRate)}
             </div>
-            <div style={{ position: "relative", width: "100%", height: 10, borderRadius: 999, background: "rgba(201,168,76,0.15)", overflow: "hidden" }}>
+            <div style={{ position: "relative", width: "100%", height: 14, borderRadius: 999, background: "rgba(201,168,76,0.15)", overflow: "hidden" }}>
               <div
                 style={{
                   height: "100%",
@@ -262,13 +262,13 @@ export default function SalesModule({ events = [], navigateBack }) {
             </div>
           </div>
 
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))", gap:".45rem .8rem", fontSize:".74rem", color:"rgba(240,232,208,0.72)", borderTop:"1px dashed rgba(201,168,76,0.2)", paddingTop:".55rem" }}>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:".45rem .8rem", fontSize:".74rem", color:"rgba(240,232,208,0.72)", borderTop:"1px dashed rgba(201,168,76,0.24)", paddingTop:".58rem" }}>
             <div>今月売上: <strong style={{ color:"#f0e8d0" }}>{yen(staffProgress.salesSum)}</strong></div>
             <div>今月目標: <strong style={{ color:"#f0e8d0" }}>{yen(staffProgress.targetSum)}</strong></div>
             <div>本日目標: <strong style={{ color:"#f0e8d0" }}>{yen(staffProgress.todayTargetSum)}</strong></div>
           </div>
         </div>
-        <div style={{ ...S.card, marginBottom: ".75rem" }}>
+        <div style={{ ...S.card, marginBottom: ".75rem", padding: "1rem 1.1rem" }}>
           <div style={{ ...S.secTitle, marginBottom: ".55rem" }}>本日の営業</div>
           {staffTodayRows.length === 0 ? (
             <div style={{ fontSize: ".76rem", color: "rgba(240,232,208,0.45)" }}>本日の売上予定はありません。</div>
@@ -281,42 +281,46 @@ export default function SalesModule({ events = [], navigateBack }) {
                 const label = m.targetSales == null ? "未確定" : "本日";
                 const name = r.sheetEventName || (hasEvents ? r.resolvedEventNames[0] : "");
                 return (
-                  <div key={`today_${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}`} style={{ border:"1px solid rgba(201,168,76,0.16)", borderRadius:6, padding:".55rem .7rem" }}>
+                  <div key={`today_${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}`} style={{ padding: ".1rem 0 .45rem", borderBottom: "1px solid rgba(201,168,76,0.16)" }}>
                     <div style={{ display:"flex", gap:".45rem", alignItems:"center", flexWrap:"wrap", marginBottom:".25rem" }}>
                       <span style={{ color:"#c9a84c", fontSize:".8rem" }}>{r.businessDate}</span>
                       <span style={{ color:"rgba(240,232,208,0.65)", fontSize:".72rem" }}>{r.weekday || "—"}</span>
                       <span style={{ fontSize:".58rem", padding:".08rem .42rem", borderRadius:3, border:"1px solid rgba(126,200,126,0.4)", color:"#7ec87e" }}>{label}</span>
                       {isDup && <span style={{ fontSize:".58rem", padding:".08rem .42rem", borderRadius:3, border:"1px solid rgba(244,162,97,0.35)", color:"#f4a261" }}>同日複数</span>}
                     </div>
-                    <div style={{ fontSize:".78rem", marginBottom:".2rem" }}>イベント名: <strong>{name || "イベント未登録"}</strong></div>
-                    <div style={{ fontSize:".78rem" }}>目標: <strong>{yen(m.targetSales)}</strong></div>
+                    <div style={{ fontSize:".88rem", marginBottom:".2rem", lineHeight: 1.4 }}>イベント名: <strong>{name || "イベント未登録"}</strong></div>
+                    <div style={{ fontSize:".8rem" }}>本日目標: <strong>{yen(m.targetSales)}</strong></div>
                   </div>
                 );
               })}
             </div>
           )}
         </div>
-        <div style={{ ...S.card, marginBottom: ".75rem" }}>
+        <div style={{ ...S.card, marginBottom: ".75rem", padding: "1rem 1.1rem" }}>
           <div style={{ ...S.secTitle, marginBottom: ".55rem" }}>近日予定</div>
           {staffUpcomingRows.length === 0 ? (
             <div style={{ fontSize: ".76rem", color: "rgba(240,232,208,0.45)" }}>近日予定はありません。</div>
           ) : (
-            <div style={{ display: "grid", gap: ".55rem" }}>
+            <div style={{ display: "grid", gap: ".1rem" }}>
               {staffUpcomingRows.map((r) => {
                 const m = r.metrics || {};
                 const hasEvents = r.resolvedEventNames.length > 0;
                 const isDup = !!r.flags?.isDuplicateBusinessDate;
                 const name = r.sheetEventName || (hasEvents ? r.resolvedEventNames[0] : "");
                 return (
-                  <div key={`upcoming_${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}`} style={{ border:"1px solid rgba(201,168,76,0.16)", borderRadius:6, padding:".55rem .7rem" }}>
-                    <div style={{ display:"flex", gap:".45rem", alignItems:"center", flexWrap:"wrap", marginBottom:".25rem" }}>
-                      <span style={{ color:"#c9a84c", fontSize:".8rem" }}>{r.businessDate}</span>
-                      <span style={{ color:"rgba(240,232,208,0.65)", fontSize:".72rem" }}>{r.weekday || "—"}</span>
-                      <span style={{ fontSize:".58rem", padding:".08rem .42rem", borderRadius:3, border:"1px solid rgba(201,168,76,0.35)", color:"#c9a84c" }}>予定</span>
-                      {isDup && <span style={{ fontSize:".58rem", padding:".08rem .42rem", borderRadius:3, border:"1px solid rgba(244,162,97,0.35)", color:"#f4a261" }}>同日複数</span>}
+                  <div key={`upcoming_${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}`} style={{ padding: ".5rem 0", borderBottom: "1px solid rgba(201,168,76,0.14)" }}>
+                    <div style={{ display:"grid", gridTemplateColumns:"140px 1fr auto", gap:".55rem", alignItems:"center" }}>
+                      <div style={{ display:"flex", gap:".4rem", alignItems:"center", flexWrap:"wrap" }}>
+                        <span style={{ color:"#c9a84c", fontSize:".8rem" }}>{r.businessDate}</span>
+                        <span style={{ color:"rgba(240,232,208,0.65)", fontSize:".72rem" }}>{r.weekday || "—"}</span>
+                      </div>
+                      <div style={{ fontSize:".8rem", lineHeight:1.4, color:"#f0e8d0" }}>{name || "イベント未登録"}</div>
+                      <div style={{ textAlign:"right", whiteSpace:"nowrap" }}>
+                        <span style={{ fontSize:".74rem", color:"rgba(240,232,208,0.85)", marginRight:".45rem" }}>{yen(m.targetSales)}</span>
+                        <span style={{ fontSize:".58rem", padding:".08rem .42rem", borderRadius:3, border:"1px solid rgba(201,168,76,0.35)", color:"#c9a84c" }}>予定</span>
+                        {isDup && <span style={{ marginLeft: ".28rem", fontSize:".56rem", padding:".06rem .35rem", borderRadius:3, border:"1px solid rgba(244,162,97,0.35)", color:"#f4a261" }}>同日複数</span>}
+                      </div>
                     </div>
-                    <div style={{ fontSize:".78rem", marginBottom:".2rem" }}>イベント名: <strong>{name || "イベント未登録"}</strong></div>
-                    <div style={{ fontSize:".78rem" }}>目標: <strong>{yen(m.targetSales)}</strong></div>
                   </div>
                 );
               })}
