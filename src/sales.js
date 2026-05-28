@@ -226,6 +226,24 @@ function monthLabelFromTarget_(targetMonth) {
   const m = Number(String(targetMonth || "").slice(5, 7));
   return Number.isFinite(m) && m > 0 ? `${m}月` : targetMonth;
 }
+function monthlyMetricNumber_(summary, key) {
+  if (!summary || summary[key] == null) return null;
+  const n = Number(summary[key]);
+  return Number.isFinite(n) ? n : null;
+}
+function sumRecordsMetric_(rows, key) {
+  return (rows || []).reduce((s, r) => s + Number(r?.metrics?.[key] || 0), 0);
+}
+function pickMonthlyCostMetric_(summary, actualRows, key) {
+  const fromSummary = monthlyMetricNumber_(summary, key);
+  if (fromSummary !== null) return fromSummary;
+  return sumRecordsMetric_(actualRows, key);
+}
+function hasMonthlyCostSummary_(summary) {
+  if (!summary) return false;
+  const keys = ["purchaseTotal", "drinkPurchase", "foodPurchase", "expense", "laborCost", "bandGuarantee", "operatingProfit"];
+  return keys.some((k) => monthlyMetricNumber_(summary, k) !== null);
+}
 function emptyMonthAggregate_(targetMonth, status, fetchError) {
   return {
     targetMonth,
@@ -244,12 +262,15 @@ function emptyMonthAggregate_(targetMonth, status, fetchError) {
     futureDayCount: 0,
     laborCostSum: 0,
     purchaseTotalSum: 0,
+    drinkPurchaseSum: 0,
+    foodPurchaseSum: 0,
     expenseSum: 0,
     bandGuaranteeSum: 0,
+    hasMonthlyCostSummary: false,
     shortfall: 0,
   };
 }
-function aggregateMonthFromRecords_(records, targetMonth, currentBusinessDate) {
+function aggregateMonthFromRecords_(records, targetMonth, currentBusinessDate, monthlySummary) {
   const monthRows = (records || []).filter((r) => (r.businessDate || "").startsWith(targetMonth));
   const actualRows = monthRows.filter(
     (r) => (r.businessDate || "") < currentBusinessDate && r?.metrics?.totalSales != null
@@ -260,11 +281,13 @@ function aggregateMonthFromRecords_(records, targetMonth, currentBusinessDate) {
   const foodDrinkSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.foodDrinkSales || 0), 0);
   const drinkSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.drinkSales || 0), 0);
   const foodSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.foodSales || 0), 0);
-  const operatingProfitSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.operatingProfit || 0), 0);
-  const laborCostSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.laborCost || 0), 0);
-  const purchaseTotalSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.purchaseTotal || 0), 0);
-  const expenseSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.expense || 0), 0);
-  const bandGuaranteeSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.bandGuarantee || 0), 0);
+  const operatingProfitSum = pickMonthlyCostMetric_(monthlySummary, actualRows, "operatingProfit");
+  const laborCostSum = pickMonthlyCostMetric_(monthlySummary, actualRows, "laborCost");
+  const purchaseTotalSum = pickMonthlyCostMetric_(monthlySummary, actualRows, "purchaseTotal");
+  const drinkPurchaseSum = pickMonthlyCostMetric_(monthlySummary, actualRows, "drinkPurchase");
+  const foodPurchaseSum = pickMonthlyCostMetric_(monthlySummary, actualRows, "foodPurchase");
+  const expenseSum = pickMonthlyCostMetric_(monthlySummary, actualRows, "expense");
+  const bandGuaranteeSum = pickMonthlyCostMetric_(monthlySummary, actualRows, "bandGuarantee");
   let status = "未入力";
   if (actualRows.length > 0) status = "集計済み";
   else if (futureRows.length > 0) status = "予定あり";
@@ -285,8 +308,11 @@ function aggregateMonthFromRecords_(records, targetMonth, currentBusinessDate) {
     futureDayCount: futureRows.length,
     laborCostSum,
     purchaseTotalSum,
+    drinkPurchaseSum,
+    foodPurchaseSum,
     expenseSum,
     bandGuaranteeSum,
+    hasMonthlyCostSummary: hasMonthlyCostSummary_(monthlySummary),
     shortfall: Math.max(0, targetSalesSum - totalSalesSum),
   };
 }
@@ -644,6 +670,7 @@ export default function SalesModule({ events = [], navigateBack }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [records, setRecords] = useState([]);
+  const [monthlySummary, setMonthlySummary] = useState(null);
   const [roleMode, setRoleMode] = useState(() => readSalesRoleMode()); // staff | admin
   const [adminTab, setAdminTab] = useState(() => readSalesAdminTab()); // daily | analysis | yearly
   const [targetYear, setTargetYear] = useState(2026);
@@ -674,9 +701,11 @@ export default function SalesModule({ events = [], navigateBack }) {
       }
       if (!json || !Array.isArray(json.records)) throw new Error("JSON形式が不正です");
       setRecords(json.records);
+      setMonthlySummary(json?.monthlySummary || null);
       setUpdatedAt(json?.meta?.generatedAt || "");
     } catch (e) {
       setRecords([]);
+      setMonthlySummary(null);
       setUpdatedAt("");
       setError(e?.message || "取得に失敗しました");
     } finally {
@@ -711,9 +740,15 @@ export default function SalesModule({ events = [], navigateBack }) {
         months.map(async (month) => {
           try {
             const json = await fetchSalesMonth_(month);
-            return { month, ok: true, records: json.records || [], error: null };
+            return {
+              month,
+              ok: true,
+              records: json.records || [],
+              monthlySummary: json?.monthlySummary || null,
+              error: null,
+            };
           } catch (e) {
-            return { month, ok: false, records: [], error: e?.message || "取得失敗" };
+            return { month, ok: false, records: [], monthlySummary: null, error: e?.message || "取得失敗" };
           }
         })
       );
@@ -779,7 +814,7 @@ export default function SalesModule({ events = [], navigateBack }) {
     const actualDayCount = actualRows.length;
     const futureDayCount = futureRows.length;
     const avgDailySales = actualDayCount > 0 ? totalSalesSum / actualDayCount : null;
-    const operatingProfitSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.operatingProfit || 0), 0);
+    const operatingProfitSum = pickMonthlyCostMetric_(monthlySummary, actualRows, "operatingProfit");
     const operatingProfitRate = calcRate(operatingProfitSum, totalSalesSum);
     const drinkSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.drinkSales || 0), 0);
     const foodSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.foodSales || 0), 0);
@@ -798,10 +833,13 @@ export default function SalesModule({ events = [], navigateBack }) {
       0,
       totalSalesSum - drinkSalesSum - foodSalesSum - bandFoodDrinkSalesSum - venueFeeSum - rentalSalesSum
     );
-    const laborCostSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.laborCost || 0), 0);
-    const purchaseTotalSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.purchaseTotal || 0), 0);
-    const expenseSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.expense || 0), 0);
-    const bandGuaranteeSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.bandGuarantee || 0), 0);
+    const laborCostSum = pickMonthlyCostMetric_(monthlySummary, actualRows, "laborCost");
+    const purchaseTotalSum = pickMonthlyCostMetric_(monthlySummary, actualRows, "purchaseTotal");
+    const drinkPurchaseSum = pickMonthlyCostMetric_(monthlySummary, actualRows, "drinkPurchase");
+    const foodPurchaseSum = pickMonthlyCostMetric_(monthlySummary, actualRows, "foodPurchase");
+    const expenseSum = pickMonthlyCostMetric_(monthlySummary, actualRows, "expense");
+    const bandGuaranteeSum = pickMonthlyCostMetric_(monthlySummary, actualRows, "bandGuarantee");
+    const hasMonthlyCostSummary = hasMonthlyCostSummary_(monthlySummary);
     const validTargetRows = actualRows.filter((r) => Number(r?.metrics?.targetSales || 0) > 0);
     const underTargetRows = validTargetRows.filter((r) => {
       const rate = calcRate(r?.metrics?.totalSales, r?.metrics?.targetSales);
@@ -1020,6 +1058,9 @@ export default function SalesModule({ events = [], navigateBack }) {
       purchaseTotalSum,
       expenseSum,
       bandGuaranteeSum,
+      drinkPurchaseSum,
+      foodPurchaseSum,
+      hasMonthlyCostSummary,
       dailyTrendRows,
       trendMaxSales,
       salesComposition,
@@ -1034,7 +1075,7 @@ export default function SalesModule({ events = [], navigateBack }) {
       drinkRankingTop10,
       foodRankingTop10,
     };
-  }, [rows, events, targetMonth, currentBusinessDate]);
+  }, [rows, events, targetMonth, currentBusinessDate, monthlySummary]);
   useEffect(() => {
     if (!monthlyAnalysis.dailyTrendRows.length) {
       setSelectedTrendRowKey("");
@@ -1055,7 +1096,7 @@ export default function SalesModule({ events = [], navigateBack }) {
       if (!item.ok) {
         return emptyMonthAggregate_(item.month, "取得失敗", item.error);
       }
-      return aggregateMonthFromRecords_(item.records, item.month, currentBusinessDate);
+      return aggregateMonthFromRecords_(item.records, item.month, currentBusinessDate, item.monthlySummary);
     });
     const okMonths = monthRows.filter((m) => m.status !== "取得失敗");
     const aggregatedMonths = monthRows.filter((m) => m.status === "集計済み");
@@ -1374,6 +1415,11 @@ export default function SalesModule({ events = [], navigateBack }) {
             <div style={analysisSecTitle("costProfit", ".35rem")}>コスト・利益比較（暫定）</div>
             <div style={{ fontSize: ".68rem", color: "rgba(240,232,208,0.62)", marginBottom: ".5rem", lineHeight: 1.5 }}>
               ※人件費は翌月まとめて反映されます。仕入・経費は月末に売掛分が加算されるため、月中は暫定値です。
+              {monthlyAnalysis.hasMonthlyCostSummary ? (
+                <span style={{ display: "block", marginTop: ".2rem", color: "rgba(201,168,76,0.78)" }}>
+                  ※月合計欄の値を反映しています（月確定に近い数字です）。
+                </span>
+              ) : null}
             </div>
             <div style={{ display:"grid", gap:".4rem" }}>
               {monthlyAnalysis.costProfitBars.map((b) => {
@@ -1555,6 +1601,9 @@ export default function SalesModule({ events = [], navigateBack }) {
                       <div>フード仕入れ: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.foodPurchase)}</strong></div>
                       <div>経費: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.expense)}</strong></div>
                       <div>人件費: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.laborCost)}</strong></div>
+                    </div>
+                    <div style={{ fontSize: ".62rem", color: "rgba(240,232,208,0.52)", marginTop: ".28rem", lineHeight: 1.45 }}>
+                      ※仕入・経費・人件費は月末/翌月反映分を含まない場合があります。
                     </div>
                   </div>
 
@@ -1773,6 +1822,11 @@ export default function SalesModule({ events = [], navigateBack }) {
                 <div style={analysisSecTitle("costProfit", ".35rem")}>年間コスト状況（暫定）</div>
                 <div style={{ fontSize: ".68rem", color: "rgba(240,232,208,0.62)", marginBottom: ".5rem", lineHeight: 1.5 }}>
                   ※人件費は翌月まとめて反映されます。仕入・経費は月末に売掛分が加算されるため、月中は暫定値です。
+                  {yearlyAnalysis.monthRows.some((m) => m.hasMonthlyCostSummary) ? (
+                    <span style={{ display: "block", marginTop: ".2rem", color: "rgba(201,168,76,0.78)" }}>
+                      ※月合計欄の値を反映している月があります（月確定に近い数字です）。
+                    </span>
+                  ) : null}
                 </div>
                 <div style={{ display: "grid", gap: ".4rem", marginBottom: ".65rem" }}>
                   {yearlyAnalysis.yearlyCostBars.map((b) => {
