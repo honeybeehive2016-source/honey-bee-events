@@ -2645,7 +2645,7 @@ export default function SalesModule({ events = [], navigateBack }) {
 
           <div style={{ marginBottom: ".72rem", fontSize: ".92rem", color: "rgba(240,232,208,0.95)", fontWeight: 600 }}>
             {staffProgress.remaining > 0
-              ? `あと ${dy(staffProgress.remaining)} で目標達成`
+              ? `目標まで ${dy(staffProgress.remaining)}`
               : `月間目標達成 +${dy(Math.abs(staffProgress.remaining))}`}
           </div>
 
@@ -2763,7 +2763,7 @@ export default function SalesModule({ events = [], navigateBack }) {
                 <>
                   <AnalysisStackedRow
                     narrow
-                    label={monthlyAnalysis.fullMonthTargetSalesSum > 0 && monthlyAnalysis.totalSalesSum >= monthlyAnalysis.fullMonthTargetSalesSum ? "月間目標達成" : "あといくら"}
+                    label={monthlyAnalysis.fullMonthTargetSalesSum > 0 && monthlyAnalysis.totalSalesSum >= monthlyAnalysis.fullMonthTargetSalesSum ? "月間目標達成" : "目標まで"}
                     value={
                       monthlyAnalysis.fullMonthTargetSalesSum > 0 && monthlyAnalysis.totalSalesSum >= monthlyAnalysis.fullMonthTargetSalesSum
                         ? `+${dy(Math.abs(monthlyAnalysis.totalSalesSum - monthlyAnalysis.fullMonthTargetSalesSum))}`
@@ -2789,7 +2789,7 @@ export default function SalesModule({ events = [], navigateBack }) {
                   <div style={{ fontSize: ".94rem", color: "rgba(240,232,208,0.95)", fontWeight: 700 }}>
                     {monthlyAnalysis.fullMonthTargetSalesSum > 0 && monthlyAnalysis.totalSalesSum >= monthlyAnalysis.fullMonthTargetSalesSum
                       ? `月間目標達成 +${dy(Math.abs(monthlyAnalysis.totalSalesSum - monthlyAnalysis.fullMonthTargetSalesSum))}`
-                      : `あと ${dy(Math.max(0, monthlyAnalysis.fullMonthTargetSalesSum - monthlyAnalysis.totalSalesSum))}`}
+                      : `目標まで ${dy(Math.max(0, monthlyAnalysis.fullMonthTargetSalesSum - monthlyAnalysis.totalSalesSum))}`}
                   </div>
                   <div style={{ fontSize: ".88rem" }}>
                     月間進捗率 <strong style={ANALYSIS_METRIC_MID}>{pct(monthlyAnalysis.monthlyProgressRate)}</strong>
