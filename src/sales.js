@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 
 const SALES_API_URL = "/api/sales";
+const SALES_MONTH_OPTIONS_2026 = Array.from({ length: 12 }, (_, i) => {
+  const mm = String(i + 1).padStart(2, "0");
+  return { value: `2026-${mm}`, label: `2026年${mm}月` };
+});
 
 const S = {
   card: { background:"#111", border:"1px solid rgba(201,168,76,0.14)", borderRadius:6, padding:"1rem 1.1rem" },
@@ -114,7 +118,15 @@ export default function SalesModule({ events = [], navigateBack }) {
         <div style={{ display:"flex", gap:".45rem", flexWrap:"wrap", alignItems:"center" }}>
           <button type="button" style={S.btn(roleMode === "staff" ? "gold" : "ghost")} onClick={() => setRoleMode("staff")}>STAFF表示</button>
           <button type="button" style={S.btn(roleMode === "admin" ? "gold" : "ghost")} onClick={() => setRoleMode("admin")}>社長・店長表示</button>
-          <input type="month" style={S.inp} value={targetMonth} onChange={(e) => setTargetMonth(normalizeMonth(e.target.value))} />
+          <select
+            style={S.inp}
+            value={targetMonth}
+            onChange={(e) => setTargetMonth(normalizeMonth(e.target.value))}
+          >
+            {SALES_MONTH_OPTIONS_2026.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
           <button type="button" style={S.btn("sm")} onClick={() => loadSales(targetMonth)} disabled={loading}>{loading ? "読込中..." : "🔄 再読込"}</button>
           {navigateBack && <button type="button" style={S.btn("sm")} onClick={navigateBack}>← 戻る</button>}
         </div>
