@@ -35,8 +35,11 @@ function normalizeMonth(value) {
   return `${d.getFullYear()}-${m}`;
 }
 
-function todayYmd() {
+function getCurrentBusinessDateForSales() {
   const d = new Date();
+  if (d.getHours() < 7) {
+    d.setDate(d.getDate() - 1);
+  }
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
@@ -55,7 +58,7 @@ export default function SalesModule({ events = [], navigateBack }) {
   const [records, setRecords] = useState([]);
   const [roleMode, setRoleMode] = useState("staff"); // staff | admin
   const [updatedAt, setUpdatedAt] = useState("");
-  const today = todayYmd();
+  const currentBusinessDate = getCurrentBusinessDateForSales();
 
   const loadSales = async (monthArg) => {
     const month = normalizeMonth(monthArg || targetMonth);
@@ -147,18 +150,25 @@ export default function SalesModule({ events = [], navigateBack }) {
             const m = r.metrics || {};
             const hasEvents = r.resolvedEventNames.length > 0;
             const isDup = !!r.flags?.isDuplicateBusinessDate;
-            const isFuture = !!r.businessDate && r.businessDate > today;
+            const isFuture = !!r.businessDate && r.businessDate > currentBusinessDate;
+            const isToday = !!r.businessDate && r.businessDate === currentBusinessDate;
             const primaryName = isDup
               ? (r.sheetEventName || (hasEvents ? r.resolvedEventNames[0] : ""))
               : (hasEvents ? r.resolvedEventNames.join(" / ") : (r.sheetEventName || ""));
-            const futurePrimaryName = r.sheetEventName || (hasEvents ? r.resolvedEventNames[0] : "");
+            const plannedPrimaryName = r.sheetEventName || (hasEvents ? r.resolvedEventNames[0] : "");
             const futureBadge = m.targetSales == null ? "売上未入力" : "予定";
+            const todayBadge = m.targetSales == null ? "未確定" : "本日";
             return (
               <div key={`${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}`} style={S.card}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:".75rem", flexWrap:"wrap", marginBottom:".5rem" }}>
                   <div style={{ display:"flex", alignItems:"baseline", gap:".6rem", flexWrap:"wrap" }}>
                     <span style={{ fontFamily:"Georgia,serif", color:"#c9a84c", fontSize:".95rem" }}>{r.businessDate || "—"}</span>
                     <span style={{ fontSize:".75rem", color:"rgba(240,232,208,0.68)" }}>{r.weekday || "—"}</span>
+                    {isToday && (
+                      <span style={{ fontSize:".58rem", padding:".08rem .42rem", borderRadius:3, border:"1px solid rgba(126,200,126,0.4)", color:"#7ec87e" }}>
+                        {todayBadge}
+                      </span>
+                    )}
                     {isFuture && (
                       <span style={{ fontSize:".58rem", padding:".08rem .42rem", borderRadius:3, border:"1px solid rgba(201,168,76,0.35)", color:"#c9a84c" }}>
                         {futureBadge}
@@ -173,10 +183,10 @@ export default function SalesModule({ events = [], navigateBack }) {
                 </div>
 
                 <div style={{ marginBottom:".55rem", fontSize:".78rem", lineHeight:1.5 }}>
-                  {(isFuture ? futurePrimaryName : primaryName) ? (
+                  {(isFuture || isToday ? plannedPrimaryName : primaryName) ? (
                     <div>
                       <span style={{ color:"rgba(201,168,76,0.7)" }}>イベント名: </span>
-                      <span style={{ color:"#f0e8d0" }}>{isFuture ? futurePrimaryName : primaryName}</span>
+                      <span style={{ color:"#f0e8d0" }}>{isFuture || isToday ? plannedPrimaryName : primaryName}</span>
                       {isDup && hasEvents && (
                         <div style={{ fontSize:".66rem", color:"rgba(240,232,208,0.5)" }}>
                           イベント管理候補: {r.resolvedEventNames.join(" / ")}
@@ -191,7 +201,7 @@ export default function SalesModule({ events = [], navigateBack }) {
                   )}
                 </div>
 
-                {isFuture ? (
+                {(isFuture || isToday) ? (
                   <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))", gap:".35rem .8rem", fontSize:".78rem" }}>
                     <div>目標: <strong>{yen(m.targetSales)}</strong></div>
                   </div>
