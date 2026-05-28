@@ -35,6 +35,14 @@ function normalizeMonth(value) {
   return `${d.getFullYear()}-${m}`;
 }
 
+function todayYmd() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function eventNamesForDate(events, businessDate) {
   const list = (events || []).filter((e) => e.date === businessDate);
   return list.map((e) => e.name).filter(Boolean);
@@ -47,6 +55,7 @@ export default function SalesModule({ events = [], navigateBack }) {
   const [records, setRecords] = useState([]);
   const [roleMode, setRoleMode] = useState("staff"); // staff | admin
   const [updatedAt, setUpdatedAt] = useState("");
+  const today = todayYmd();
 
   const loadSales = async (monthArg) => {
     const month = normalizeMonth(monthArg || targetMonth);
@@ -138,31 +147,36 @@ export default function SalesModule({ events = [], navigateBack }) {
             const m = r.metrics || {};
             const hasEvents = r.resolvedEventNames.length > 0;
             const isDup = !!r.flags?.isDuplicateBusinessDate;
+            const isFuture = !!r.businessDate && r.businessDate > today;
             const primaryName = isDup
               ? (r.sheetEventName || (hasEvents ? r.resolvedEventNames[0] : ""))
               : (hasEvents ? r.resolvedEventNames.join(" / ") : (r.sheetEventName || ""));
+            const futurePrimaryName = r.sheetEventName || (hasEvents ? r.resolvedEventNames[0] : "");
+            const futureBadge = m.targetSales == null ? "売上未入力" : "予定";
             return (
               <div key={`${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}`} style={S.card}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:".75rem", flexWrap:"wrap", marginBottom:".5rem" }}>
                   <div style={{ display:"flex", alignItems:"baseline", gap:".6rem", flexWrap:"wrap" }}>
                     <span style={{ fontFamily:"Georgia,serif", color:"#c9a84c", fontSize:".95rem" }}>{r.businessDate || "—"}</span>
                     <span style={{ fontSize:".75rem", color:"rgba(240,232,208,0.68)" }}>{r.weekday || "—"}</span>
+                    {isFuture && (
+                      <span style={{ fontSize:".58rem", padding:".08rem .42rem", borderRadius:3, border:"1px solid rgba(201,168,76,0.35)", color:"#c9a84c" }}>
+                        {futureBadge}
+                      </span>
+                    )}
                     {isDup && (
                       <span style={{ fontSize:".58rem", padding:".08rem .42rem", borderRadius:3, border:"1px solid rgba(244,162,97,0.35)", color:"#f4a261" }}>
                         同日複数
                       </span>
                     )}
                   </div>
-                  <div style={{ fontSize:".6rem", color:"rgba(240,232,208,0.45)" }}>
-                    {r.sourceBlock} / col:{r.sourceColumn} / day:{r.sourceDay}
-                  </div>
                 </div>
 
                 <div style={{ marginBottom:".55rem", fontSize:".78rem", lineHeight:1.5 }}>
-                  {primaryName ? (
+                  {(isFuture ? futurePrimaryName : primaryName) ? (
                     <div>
                       <span style={{ color:"rgba(201,168,76,0.7)" }}>イベント名: </span>
-                      <span style={{ color:"#f0e8d0" }}>{primaryName}</span>
+                      <span style={{ color:"#f0e8d0" }}>{isFuture ? futurePrimaryName : primaryName}</span>
                       {isDup && hasEvents && (
                         <div style={{ fontSize:".66rem", color:"rgba(240,232,208,0.5)" }}>
                           イベント管理候補: {r.resolvedEventNames.join(" / ")}
@@ -177,34 +191,42 @@ export default function SalesModule({ events = [], navigateBack }) {
                   )}
                 </div>
 
-                <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))", gap:".35rem .8rem", fontSize:".78rem" }}>
-                  <div>売上合計: <strong>{yen(m.totalSales)}</strong></div>
-                  <div>飲食代: <strong>{yen(m.foodDrinkSales)}</strong></div>
-                  <div>ドリンク売上: <strong>{yen(m.drinkSales)}</strong></div>
-                  <div>フード売上: <strong>{yen(m.foodSales)}</strong></div>
-                  <div>目標: <strong>{yen(m.targetSales)}</strong></div>
-                  <div>目標達成率: <strong>{pct(m.targetAchievementRate)}</strong></div>
-                  <div>客単価: <strong>{num(m.customerUnitPrice)}</strong></div>
-                  <div>飲食単価: <strong>{num(m.foodDrinkUnitPrice)}</strong></div>
-                </div>
-
-                {roleMode === "admin" && (
-                  <div style={{ marginTop:".65rem", paddingTop:".55rem", borderTop:"1px dashed rgba(201,168,76,0.2)", fontSize:".72rem", color:"rgba(240,232,208,0.75)", display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))", gap:".28rem .7rem" }}>
-                    <div>キャッシュ: {yen(m.cash)}</div>
-                    <div>累積現金: {yen(m.cumulativeCash)}</div>
-                    <div>クレジット: {yen(m.creditCardSales)}</div>
-                    <div>PayPay: {yen(m.paypaySales)}</div>
-                    <div>売掛金合計: {yen(m.receivableTotal)}</div>
-                    <div>営業利益: {yen(m.operatingProfit)}</div>
-                    <div>人件費: {yen(m.laborCost)}</div>
-                    <div>社員数: {num(m.employeeCount)}</div>
-                    <div>アルバイト人数: {num(m.partTimeCount)}</div>
-                    <div>仕入れ合計: {yen(m.purchaseTotal)}</div>
-                    <div>ドリンク仕入れ: {yen(m.drinkPurchase)}</div>
-                    <div>フード仕入れ: {yen(m.foodPurchase)}</div>
-                    <div>経費: {yen(m.expense)}</div>
-                    <div>バンドギャランティ: {yen(m.bandGuarantee)}</div>
+                {isFuture ? (
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))", gap:".35rem .8rem", fontSize:".78rem" }}>
+                    <div>目標: <strong>{yen(m.targetSales)}</strong></div>
                   </div>
+                ) : (
+                  <>
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))", gap:".35rem .8rem", fontSize:".78rem" }}>
+                      <div>売上合計: <strong>{yen(m.totalSales)}</strong></div>
+                      <div>飲食代: <strong>{yen(m.foodDrinkSales)}</strong></div>
+                      <div>ドリンク売上: <strong>{yen(m.drinkSales)}</strong></div>
+                      <div>フード売上: <strong>{yen(m.foodSales)}</strong></div>
+                      <div>目標: <strong>{yen(m.targetSales)}</strong></div>
+                      <div>目標達成率: <strong>{pct(m.targetAchievementRate)}</strong></div>
+                      <div>客単価: <strong>{num(m.customerUnitPrice)}</strong></div>
+                      <div>飲食単価: <strong>{num(m.foodDrinkUnitPrice)}</strong></div>
+                    </div>
+
+                    {roleMode === "admin" && (
+                      <div style={{ marginTop:".65rem", paddingTop:".55rem", borderTop:"1px dashed rgba(201,168,76,0.2)", fontSize:".72rem", color:"rgba(240,232,208,0.75)", display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))", gap:".28rem .7rem" }}>
+                        <div>キャッシュ: {yen(m.cash)}</div>
+                        <div>累積現金: {yen(m.cumulativeCash)}</div>
+                        <div>クレジット: {yen(m.creditCardSales)}</div>
+                        <div>PayPay: {yen(m.paypaySales)}</div>
+                        <div>売掛金合計: {yen(m.receivableTotal)}</div>
+                        <div>営業利益: {yen(m.operatingProfit)}</div>
+                        <div>人件費: {yen(m.laborCost)}</div>
+                        <div>社員数: {num(m.employeeCount)}</div>
+                        <div>アルバイト人数: {num(m.partTimeCount)}</div>
+                        <div>仕入れ合計: {yen(m.purchaseTotal)}</div>
+                        <div>ドリンク仕入れ: {yen(m.drinkPurchase)}</div>
+                        <div>フード仕入れ: {yen(m.foodPurchase)}</div>
+                        <div>経費: {yen(m.expense)}</div>
+                        <div>バンドギャランティ: {yen(m.bandGuarantee)}</div>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             );
