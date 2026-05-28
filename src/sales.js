@@ -46,27 +46,53 @@ const ANALYSIS_NOTE = {
   color: "rgba(240,232,208,0.42)",
   lineHeight: 1.48,
 };
+const SALES_NUMBER_FONT_FAMILY =
+  'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+const SALES_NUMBER_TABULAR = {
+  fontVariantNumeric: "tabular-nums",
+  fontFeatureSettings: '"tnum"',
+};
 const ANALYSIS_METRIC_HERO = {
   fontFamily: "Georgia,serif",
   fontSize: "2.45rem",
   lineHeight: 1,
   color: "#f8efd8",
   textShadow: "0 0 28px rgba(201,168,76,0.22), 0 2px 4px rgba(0,0,0,0.35)",
+  ...SALES_NUMBER_TABULAR,
 };
-const ANALYSIS_METRIC_STRONG = { fontSize: "1.05rem", fontWeight: 600, color: "#f3ead2" };
-const ANALYSIS_METRIC_MID = { fontSize: ".92rem", fontWeight: 600, color: "#f0e8d0" };
-const ANALYSIS_METRIC_SUB = { fontSize: ".84rem", fontWeight: 500, color: "rgba(240,232,208,0.82)" };
-
+const ANALYSIS_METRIC_STRONG = {
+  fontSize: "1.05rem",
+  fontWeight: 600,
+  color: "#f3ead2",
+  fontFamily: SALES_NUMBER_FONT_FAMILY,
+  ...SALES_NUMBER_TABULAR,
+};
+const ANALYSIS_METRIC_MID = {
+  fontSize: ".92rem",
+  fontWeight: 600,
+  color: "#f0e8d0",
+  fontFamily: SALES_NUMBER_FONT_FAMILY,
+  ...SALES_NUMBER_TABULAR,
+};
+const ANALYSIS_METRIC_SUB = {
+  fontSize: ".84rem",
+  fontWeight: 500,
+  color: "rgba(240,232,208,0.82)",
+  fontFamily: SALES_NUMBER_FONT_FAMILY,
+  ...SALES_NUMBER_TABULAR,
+};
 const MOBILE_CARD_NUMBER_STYLE = {
-  fontFamily: '"Consolas", "Roboto Mono", "Courier New", monospace',
+  fontFamily: SALES_NUMBER_FONT_FAMILY,
   fontSize: "1.05rem",
   fontWeight: 600,
   lineHeight: 1.45,
   color: "rgba(245,240,208,0.94)",
   wordBreak: "break-word",
+  ...SALES_NUMBER_TABULAR,
 };
 const MOBILE_CARD_MUTED_NUMBER_STYLE = {
   ...MOBILE_CARD_NUMBER_STYLE,
+  fontWeight: 500,
   color: "rgba(245,240,208,0.6)",
 };
 const MOBILE_CARD_LABEL_STYLE = {
@@ -81,8 +107,22 @@ const MOBILE_CARD_MONTH_TITLE_STYLE = {
   color: "#c9a84c",
   lineHeight: 1.3,
 };
-const MOBILE_METRIC_STRONG = { fontSize: "1.2rem", fontWeight: 600, color: "#f3ead2", wordBreak: "break-word" };
-const MOBILE_METRIC_MID = { fontSize: "1.08rem", fontWeight: 600, color: "#f0e8d0", wordBreak: "break-word" };
+const MOBILE_METRIC_STRONG = {
+  fontSize: "1.2rem",
+  fontWeight: 600,
+  color: "#f3ead2",
+  wordBreak: "break-word",
+  fontFamily: SALES_NUMBER_FONT_FAMILY,
+  ...SALES_NUMBER_TABULAR,
+};
+const MOBILE_METRIC_MID = {
+  fontSize: "1.08rem",
+  fontWeight: 600,
+  color: "#f0e8d0",
+  wordBreak: "break-word",
+  fontFamily: SALES_NUMBER_FONT_FAMILY,
+  ...SALES_NUMBER_TABULAR,
+};
 
 const ANALYSIS_CARD = {
   summary: {
@@ -332,7 +372,7 @@ function MobileFieldRow({ label, value, valueStyle, narrow }) {
   return (
     <div style={{ padding: ".3rem 0", minWidth: 0, maxWidth: "100%", boxSizing: "border-box" }}>
       <div style={MOBILE_CARD_LABEL_STYLE}>{label}</div>
-      <div style={{ ...MOBILE_CARD_NUMBER_STYLE, fontFamily: "inherit", ...valueStyle }}>{value}</div>
+      <div style={{ ...MOBILE_CARD_NUMBER_STYLE, ...valueStyle }}>{value}</div>
     </div>
   );
 }
@@ -372,7 +412,7 @@ function SalesCompositionBreakdown({ items, narrow }) {
               />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ color: "rgba(240,232,208,0.72)", marginBottom: ".1rem" }}>{item.label}</div>
-                <div style={{ ...MOBILE_CARD_NUMBER_STYLE, fontFamily: "inherit" }}>
+                <div style={MOBILE_CARD_NUMBER_STYLE}>
                   {item.amount}{" "}
                   <span style={{ fontWeight: 500, color: "rgba(240,232,208,0.55)", fontSize: ".92rem" }}>({item.rate})</span>
                 </div>
@@ -1065,7 +1105,7 @@ function YearlyRankList({ title, variant, items, valueLabel, formatValue }) {
           <div key={r.targetMonth} style={{ padding: ".28rem 0", borderBottom: `1px solid ${analysisRowBorder(variant)}` }}>
             <div style={{ fontSize: ".68rem", color: "rgba(240,232,208,0.5)" }}>{i + 1}. {r.monthLabel}</div>
             <div style={{ fontSize: ".76rem", color: "rgba(240,232,208,0.78)" }}>
-              <strong style={{ fontSize: ".84rem", fontWeight: 600, color: "rgba(240,232,208,0.88)" }}>{formatValue(r)}</strong>
+              <strong style={{ fontSize: ".84rem", fontWeight: 600, color: "rgba(240,232,208,0.88)", fontFamily: SALES_NUMBER_FONT_FAMILY, ...SALES_NUMBER_TABULAR }}>{formatValue(r)}</strong>
               <span style={{ marginLeft: ".35rem", fontSize: ".62rem", color: "rgba(240,232,208,0.48)" }}>{valueLabel}</span>
             </div>
           </div>
@@ -1362,13 +1402,12 @@ function buildPurchaseCostRates_(
     foodCostRate,
   };
 }
-const YEARLY_TABLE_NUMBER_FONT = '"Consolas", "Roboto Mono", "Courier New", monospace';
 const TABLE_NUMBER_STYLE = {
   textAlign: "right",
-  fontFamily: YEARLY_TABLE_NUMBER_FONT,
-  fontVariantNumeric: "tabular-nums",
+  fontFamily: SALES_NUMBER_FONT_FAMILY,
+  ...SALES_NUMBER_TABULAR,
   fontSize: ".9rem",
-  fontWeight: 500,
+  fontWeight: 600,
   lineHeight: 1.45,
   whiteSpace: "nowrap",
   letterSpacing: 0,
@@ -1387,7 +1426,7 @@ const YEARLY_TABLE_STYLE = {
   width: "100%",
   tableLayout: "fixed",
   borderCollapse: "collapse",
-  fontVariantNumeric: "tabular-nums",
+  ...SALES_NUMBER_TABULAR,
 };
 const YEARLY_TABLE_WRAP = {
   width: "100%",
@@ -1514,7 +1553,15 @@ function CostProfitBarRow({ bar, maxValue, isChild, taxMode, narrow }) {
     </div>
   );
   const amountBlock = (
-    <div style={{ fontSize: narrow ? ".92rem" : isChild ? ".7rem" : ".74rem", fontWeight: narrow ? 600 : 400, color: isChild ? "rgba(240,232,208,0.82)" : "#f0e8d0" }}>
+    <div
+      style={{
+        fontSize: narrow ? ".92rem" : isChild ? ".7rem" : ".74rem",
+        fontWeight: narrow ? 600 : 600,
+        fontFamily: SALES_NUMBER_FONT_FAMILY,
+        ...SALES_NUMBER_TABULAR,
+        color: isChild ? "rgba(240,232,208,0.82)" : "#f0e8d0",
+      }}
+    >
       {amountText}
     </div>
   );
@@ -3112,7 +3159,7 @@ export default function SalesModule({ events = [], navigateBack }) {
                   <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)" }}>{i + 1}. {r.businessDate}</div>
                   <div style={{ fontSize: ".78rem", color: "#f0e8d0", wordBreak: "break-word", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{r.eventName || "イベント未登録"}</div>
                   <div style={{ fontSize: ".76rem", lineHeight: 1.45, wordBreak: "break-word" }}>
-                    <strong style={{ ...(vp.narrow ? MOBILE_CARD_NUMBER_STYLE : { fontSize: ".84rem", fontWeight: 600 }), fontFamily: vp.narrow ? MOBILE_CARD_NUMBER_STYLE.fontFamily : "inherit" }}>{dy(r.totalSales)}</strong>
+                    <strong style={{ ...(vp.narrow ? MOBILE_CARD_NUMBER_STYLE : { fontSize: ".84rem", fontWeight: 600, fontFamily: SALES_NUMBER_FONT_FAMILY, ...SALES_NUMBER_TABULAR }) }}>{dy(r.totalSales)}</strong>
                     {r.achievementRate != null ? (
                       <span style={{ display: "block", marginTop: ".12rem", color: "rgba(240,232,208,0.55)", fontSize: vp.narrow ? ".88rem" : ".62rem" }}>達成率 {pct(r.achievementRate)}</span>
                     ) : null}
@@ -3153,7 +3200,7 @@ export default function SalesModule({ events = [], navigateBack }) {
                   <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)" }}>{i + 1}. {r.businessDate}</div>
                   <div style={{ fontSize: ".78rem", color: "#f0e8d0", wordBreak: "break-word", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{r.eventName || "イベント未登録"}</div>
                   <div style={{ fontSize: ".82rem", lineHeight: 1.45 }}>
-                    <strong style={{ fontSize: ".84rem", fontWeight: 600 }}>{dy(r.foodDrinkSalesIncludingBand)}</strong>
+                    <strong style={{ fontSize: ".84rem", fontWeight: 600, fontFamily: SALES_NUMBER_FONT_FAMILY, ...SALES_NUMBER_TABULAR }}>{dy(r.foodDrinkSalesIncludingBand)}</strong>
                     {r.bandFoodDrinkSales != null && r.bandFoodDrinkSales > 0 ? (
                       <span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.55)", fontSize: ".68rem" }}>
                         バンド飲食代 {dy(r.bandFoodDrinkSales)}
@@ -3175,7 +3222,7 @@ export default function SalesModule({ events = [], navigateBack }) {
                   <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)" }}>{i + 1}. {r.businessDate}</div>
                   <div style={{ fontSize: ".78rem", color: "#f0e8d0", wordBreak: "break-word", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{r.eventName || "イベント未登録"}</div>
                   <div style={{ fontSize: ".82rem", lineHeight: 1.45 }}>
-                    <strong style={{ fontSize: ".84rem", fontWeight: 600 }}>{dy(r.drinkSales)}</strong>
+                    <strong style={{ fontSize: ".84rem", fontWeight: 600, fontFamily: SALES_NUMBER_FONT_FAMILY, ...SALES_NUMBER_TABULAR }}>{dy(r.drinkSales)}</strong>
                     <span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.55)", fontSize: ".68rem" }}>
                       飲食比率 {pct(r.drinkInFoodDrinkRate)}
                     </span>
@@ -3195,7 +3242,7 @@ export default function SalesModule({ events = [], navigateBack }) {
                   <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)" }}>{i + 1}. {r.businessDate}</div>
                   <div style={{ fontSize: ".78rem", color: "#f0e8d0", wordBreak: "break-word", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{r.eventName || "イベント未登録"}</div>
                   <div style={{ fontSize: ".82rem", lineHeight: 1.45 }}>
-                    <strong style={{ fontSize: ".84rem", fontWeight: 600 }}>{dy(r.foodSales)}</strong>
+                    <strong style={{ fontSize: ".84rem", fontWeight: 600, fontFamily: SALES_NUMBER_FONT_FAMILY, ...SALES_NUMBER_TABULAR }}>{dy(r.foodSales)}</strong>
                     <span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.55)", fontSize: ".68rem" }}>
                       飲食比率 {pct(r.foodInFoodDrinkRate)}
                     </span>
