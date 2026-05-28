@@ -31,6 +31,10 @@ function pct(v) {
   if (v == null || Number.isNaN(Number(v))) return "—";
   return Number(v).toFixed(2) + "%";
 }
+function pct1(v) {
+  if (v == null || Number.isNaN(Number(v))) return "—";
+  return Number(v).toFixed(1) + "%";
+}
 
 function normalizeMonth(value) {
   if (value && /^\d{4}-\d{2}$/.test(value)) return value;
@@ -111,6 +115,43 @@ export default function SalesModule({ events = [], navigateBack }) {
     });
   }, [records, events]);
 
+  const staffProgress = useMemo(() => {
+    const monthRows = rows.filter((r) => (r.businessDate || "").startsWith(targetMonth));
+    const actualRows = monthRows.filter((r) => (r.businessDate || "") < currentBusinessDate && r?.metrics?.totalSales != null);
+    const salesSum = actualRows.reduce((s, r) => s + Number(r.metrics.totalSales || 0), 0);
+    const targetSum = monthRows.reduce((s, r) => s + Number(r?.metrics?.targetSales || 0), 0);
+    const achievementRate = targetSum > 0 ? (salesSum / targetSum) * 100 : null;
+    const remaining = targetSum - salesSum;
+    const todayTargetSum = monthRows
+      .filter((r) => r.businessDate === currentBusinessDate)
+      .reduce((s, r) => s + Number(r?.metrics?.targetSales || 0), 0);
+
+    const last7 = [...actualRows]
+      .sort((a, b) => (b.businessDate || "").localeCompare(a.businessDate || ""))
+      .slice(0, 7)
+      .reverse();
+    const maxSales = last7.reduce((m, r) => Math.max(m, Number(r?.metrics?.totalSales || 0)), 0);
+    const graphBars = last7.map((r) => {
+      const sales = Number(r?.metrics?.totalSales || 0);
+      const h = maxSales > 0 ? Math.max(10, Math.round((sales / maxSales) * 100)) : 10;
+      return {
+        key: `${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}`,
+        date: r.businessDate,
+        sales,
+        heightPct: h,
+      };
+    });
+
+    return {
+      salesSum,
+      targetSum,
+      achievementRate,
+      remaining,
+      todayTargetSum,
+      graphBars,
+    };
+  }, [rows, targetMonth, currentBusinessDate]);
+
   return (
     <div style={{ padding:"1.5rem 2rem", maxWidth:1180, margin:"0 auto" }} className="hb-view">
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"1rem", flexWrap:"wrap", gap:".5rem" }}>
@@ -135,6 +176,57 @@ export default function SalesModule({ events = [], navigateBack }) {
       {updatedAt && (
         <div style={{ fontSize:".68rem", color:"rgba(240,232,208,0.55)", marginBottom:".7rem" }}>
           更新時刻: {updatedAt}
+        </div>
+      )}
+
+      {roleMode === "staff" && !loading && !error && (
+        <div style={{ ...S.card, marginBottom: ".75rem", border: "1px solid rgba(201,168,76,0.24)" }}>
+          <div style={{ ...S.secTitle, marginBottom: ".55rem" }}>今月の進捗</div>
+
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))", gap:".4rem .8rem", fontSize:".78rem", marginBottom:".6rem" }}>
+            <div>今月売上合計: <strong>{yen(staffProgress.salesSum)}</strong></div>
+            <div>今月目標合計: <strong>{yen(staffProgress.targetSum)}</strong></div>
+            <div>月間達成率: <strong>{pct(staffProgress.achievementRate)}</strong></div>
+            <div>目標まであと: <strong>{yen(staffProgress.remaining)}</strong></div>
+            <div>本日目標: <strong>{yen(staffProgress.todayTargetSum)}</strong></div>
+          </div>
+
+          <div style={{ marginBottom: ".65rem" }}>
+            <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.8)", marginBottom: ".3rem" }}>
+              目標達成までの進捗 {pct1(staffProgress.achievementRate)}
+            </div>
+            <div style={{ position: "relative", width: "100%", height: 10, borderRadius: 999, background: "rgba(201,168,76,0.15)", overflow: "hidden" }}>
+              <div
+                style={{
+                  height: "100%",
+                  width: `${Math.max(0, Math.min(100, Number(staffProgress.achievementRate || 0)))}%`,
+                  background:
+                    (staffProgress.achievementRate || 0) >= 100
+                      ? "linear-gradient(90deg,#7ec87e,#a7d8a7)"
+                      : (staffProgress.achievementRate || 0) >= 70
+                      ? "linear-gradient(90deg,#c9a84c,#dfc06a)"
+                      : "linear-gradient(90deg,#f4a261,#e58d4e)",
+                  transition: "width .2s ease",
+                }}
+              />
+            </div>
+          </div>
+
+          <div>
+            <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.8)", marginBottom: ".35rem" }}>直近7営業日</div>
+            {staffProgress.graphBars.length === 0 ? (
+              <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.45)" }}>実績データがまだありません</div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "flex-end", gap: ".35rem", height: 84 }}>
+                {staffProgress.graphBars.map((b) => (
+                  <div key={b.key} style={{ flex: 1, minWidth: 0, textAlign: "center" }} title={`${b.date} / ${yen(b.sales)}`}>
+                    <div style={{ height: `${b.heightPct}%`, minHeight: 6, borderRadius: "3px 3px 0 0", background: "linear-gradient(180deg, rgba(201,168,76,0.95), rgba(201,168,76,0.55))" }} />
+                    <div style={{ marginTop: ".2rem", fontSize: ".58rem", color: "rgba(240,232,208,0.55)" }}>{(b.date || "").slice(5)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
