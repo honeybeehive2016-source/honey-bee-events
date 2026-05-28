@@ -10,8 +10,9 @@ module.exports = async function handler(req, res) {
 
   try {
     const month = typeof req.query?.targetMonth === "string" ? req.query.targetMonth : "";
-    const sep = APPS_SCRIPT_SALES_ENDPOINT.includes("?") ? "&" : "?";
-    const upstreamUrl = `${APPS_SCRIPT_SALES_ENDPOINT}${sep}targetMonth=${encodeURIComponent(month)}`;
+    const baseUrl = String(APPS_SCRIPT_SALES_ENDPOINT || "").replace(/[?&]+$/, "");
+    const sep = baseUrl.includes("?") ? "&" : "?";
+    const upstreamUrl = baseUrl + sep + "targetMonth=" + encodeURIComponent(month);
 
     const upstream = await fetch(upstreamUrl, {
       method: "GET",
@@ -19,6 +20,7 @@ module.exports = async function handler(req, res) {
     });
 
     const text = await upstream.text();
+    const upstreamContentType = upstream.headers.get("content-type") || "";
     let data;
     try {
       data = JSON.parse(text);
@@ -26,7 +28,8 @@ module.exports = async function handler(req, res) {
       return res.status(502).json({
         error: "Invalid JSON from upstream Apps Script",
         upstreamStatus: upstream.status,
-        upstreamBody: text?.slice(0, 500),
+        upstreamContentType,
+        preview: text?.slice(0, 300),
       });
     }
 
