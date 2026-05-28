@@ -182,6 +182,22 @@ export default function SalesModule({ events = [], navigateBack }) {
   }, [rows, targetMonth, currentBusinessDate]);
 
   const monthTone = achievementTone(staffProgress.achievementRate, staffProgress.targetSum > 0);
+  const staffTodayRows = useMemo(
+    () => rows.filter((r) => r.businessDate === currentBusinessDate),
+    [rows, currentBusinessDate]
+  );
+  const staffUpcomingRows = useMemo(
+    () =>
+      rows
+        .filter((r) => (r.businessDate || "") > currentBusinessDate)
+        .sort((a, b) => {
+          const d = (a.businessDate || "").localeCompare(b.businessDate || "");
+          if (d !== 0) return d;
+          return (a.sourceColumn || 0) - (b.sourceColumn || 0);
+        })
+        .slice(0, 5),
+    [rows, currentBusinessDate]
+  );
 
   return (
     <div style={{ padding:"1.5rem 2rem", maxWidth:1180, margin:"0 auto" }} className="hb-view">
@@ -211,6 +227,7 @@ export default function SalesModule({ events = [], navigateBack }) {
       )}
 
       {roleMode === "staff" && !loading && !error && (
+        <>
         <div style={{ ...S.card, marginBottom: ".75rem", border: "1px solid rgba(201,168,76,0.24)", padding: "1.15rem 1.2rem" }}>
           <div style={{ ...S.secTitle, marginBottom: ".55rem" }}>今月の進捗</div>
 
@@ -251,6 +268,62 @@ export default function SalesModule({ events = [], navigateBack }) {
             <div>本日目標: <strong style={{ color:"#f0e8d0" }}>{yen(staffProgress.todayTargetSum)}</strong></div>
           </div>
         </div>
+        <div style={{ ...S.card, marginBottom: ".75rem" }}>
+          <div style={{ ...S.secTitle, marginBottom: ".55rem" }}>本日の営業</div>
+          {staffTodayRows.length === 0 ? (
+            <div style={{ fontSize: ".76rem", color: "rgba(240,232,208,0.45)" }}>本日の売上予定はありません。</div>
+          ) : (
+            <div style={{ display: "grid", gap: ".55rem" }}>
+              {staffTodayRows.map((r) => {
+                const m = r.metrics || {};
+                const hasEvents = r.resolvedEventNames.length > 0;
+                const isDup = !!r.flags?.isDuplicateBusinessDate;
+                const label = m.targetSales == null ? "未確定" : "本日";
+                const name = r.sheetEventName || (hasEvents ? r.resolvedEventNames[0] : "");
+                return (
+                  <div key={`today_${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}`} style={{ border:"1px solid rgba(201,168,76,0.16)", borderRadius:6, padding:".55rem .7rem" }}>
+                    <div style={{ display:"flex", gap:".45rem", alignItems:"center", flexWrap:"wrap", marginBottom:".25rem" }}>
+                      <span style={{ color:"#c9a84c", fontSize:".8rem" }}>{r.businessDate}</span>
+                      <span style={{ color:"rgba(240,232,208,0.65)", fontSize:".72rem" }}>{r.weekday || "—"}</span>
+                      <span style={{ fontSize:".58rem", padding:".08rem .42rem", borderRadius:3, border:"1px solid rgba(126,200,126,0.4)", color:"#7ec87e" }}>{label}</span>
+                      {isDup && <span style={{ fontSize:".58rem", padding:".08rem .42rem", borderRadius:3, border:"1px solid rgba(244,162,97,0.35)", color:"#f4a261" }}>同日複数</span>}
+                    </div>
+                    <div style={{ fontSize:".78rem", marginBottom:".2rem" }}>イベント名: <strong>{name || "イベント未登録"}</strong></div>
+                    <div style={{ fontSize:".78rem" }}>目標: <strong>{yen(m.targetSales)}</strong></div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        <div style={{ ...S.card, marginBottom: ".75rem" }}>
+          <div style={{ ...S.secTitle, marginBottom: ".55rem" }}>近日予定</div>
+          {staffUpcomingRows.length === 0 ? (
+            <div style={{ fontSize: ".76rem", color: "rgba(240,232,208,0.45)" }}>近日予定はありません。</div>
+          ) : (
+            <div style={{ display: "grid", gap: ".55rem" }}>
+              {staffUpcomingRows.map((r) => {
+                const m = r.metrics || {};
+                const hasEvents = r.resolvedEventNames.length > 0;
+                const isDup = !!r.flags?.isDuplicateBusinessDate;
+                const name = r.sheetEventName || (hasEvents ? r.resolvedEventNames[0] : "");
+                return (
+                  <div key={`upcoming_${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}`} style={{ border:"1px solid rgba(201,168,76,0.16)", borderRadius:6, padding:".55rem .7rem" }}>
+                    <div style={{ display:"flex", gap:".45rem", alignItems:"center", flexWrap:"wrap", marginBottom:".25rem" }}>
+                      <span style={{ color:"#c9a84c", fontSize:".8rem" }}>{r.businessDate}</span>
+                      <span style={{ color:"rgba(240,232,208,0.65)", fontSize:".72rem" }}>{r.weekday || "—"}</span>
+                      <span style={{ fontSize:".58rem", padding:".08rem .42rem", borderRadius:3, border:"1px solid rgba(201,168,76,0.35)", color:"#c9a84c" }}>予定</span>
+                      {isDup && <span style={{ fontSize:".58rem", padding:".08rem .42rem", borderRadius:3, border:"1px solid rgba(244,162,97,0.35)", color:"#f4a261" }}>同日複数</span>}
+                    </div>
+                    <div style={{ fontSize:".78rem", marginBottom:".2rem" }}>イベント名: <strong>{name || "イベント未登録"}</strong></div>
+                    <div style={{ fontSize:".78rem" }}>目標: <strong>{yen(m.targetSales)}</strong></div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        </>
       )}
 
       {error && (
@@ -271,7 +344,7 @@ export default function SalesModule({ events = [], navigateBack }) {
         </div>
       )}
 
-      {!loading && !error && rows.length > 0 && (
+      {!loading && !error && rows.length > 0 && roleMode === "admin" && (
         <div style={{ display:"grid", gap:".65rem" }}>
           {rows.map((r) => {
             const m = r.metrics || {};
