@@ -416,16 +416,27 @@ export default function SalesModule({ events = [], navigateBack }) {
           businessDate: r.businessDate,
           weekday: r.weekday || "—",
           eventName,
+          isDuplicateBusinessDate: !!r?.flags?.isDuplicateBusinessDate,
           totalSales,
           targetSales,
           achievementRate,
           tone,
-          foodDrinkSales: Number(r?.metrics?.foodDrinkSales || 0),
-          drinkSales: Number(r?.metrics?.drinkSales || 0),
-          foodSales: Number(r?.metrics?.foodSales || 0),
+          foodDrinkSales: r?.metrics?.foodDrinkSales != null ? Number(r.metrics.foodDrinkSales) : null,
+          drinkSales: r?.metrics?.drinkSales != null ? Number(r.metrics.drinkSales) : null,
+          foodSales: r?.metrics?.foodSales != null ? Number(r.metrics.foodSales) : null,
           customerUnitPrice: r?.metrics?.customerUnitPrice != null ? Number(r.metrics.customerUnitPrice) : null,
           foodDrinkUnitPrice: r?.metrics?.foodDrinkUnitPrice != null ? Number(r.metrics.foodDrinkUnitPrice) : null,
-          operatingProfit: Number(r?.metrics?.operatingProfit || 0),
+          operatingProfit: r?.metrics?.operatingProfit != null ? Number(r.metrics.operatingProfit) : null,
+          cash: r?.metrics?.cash != null ? Number(r.metrics.cash) : null,
+          creditCardSales: r?.metrics?.creditCardSales != null ? Number(r.metrics.creditCardSales) : null,
+          paypaySales: r?.metrics?.paypaySales != null ? Number(r.metrics.paypaySales) : null,
+          receivableTotal: r?.metrics?.receivableTotal != null ? Number(r.metrics.receivableTotal) : null,
+          purchaseTotal: r?.metrics?.purchaseTotal != null ? Number(r.metrics.purchaseTotal) : null,
+          drinkPurchase: r?.metrics?.drinkPurchase != null ? Number(r.metrics.drinkPurchase) : null,
+          foodPurchase: r?.metrics?.foodPurchase != null ? Number(r.metrics.foodPurchase) : null,
+          expense: r?.metrics?.expense != null ? Number(r.metrics.expense) : null,
+          laborCost: r?.metrics?.laborCost != null ? Number(r.metrics.laborCost) : null,
+          bandGuarantee: r?.metrics?.bandGuarantee != null ? Number(r.metrics.bandGuarantee) : null,
         };
       });
     const trendMaxSales = dailyTrendRows.reduce((m, r) => Math.max(m, Number(r.totalSales || 0)), 0);
@@ -778,21 +789,71 @@ export default function SalesModule({ events = [], navigateBack }) {
               </div>
             )}
             {selectedTrendRow && (
-              <div style={{ marginTop: ".65rem", borderTop: "1px dashed rgba(201,168,76,0.22)", paddingTop: ".55rem" }}>
-                <div style={{ fontSize: ".82rem", fontWeight: 700, color: "#e9dbb0", marginBottom: ".35rem" }}>選択中の売上詳細</div>
-                <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:".34rem .8rem", fontSize:".82rem" }}>
-                  <div>日付: <strong style={{ fontSize: ".92rem" }}>{selectedTrendRow.businessDate}</strong></div>
-                  <div>曜日: <strong style={{ fontSize: ".92rem" }}>{selectedTrendRow.weekday}</strong></div>
-                  <div>イベント名: <strong style={{ fontSize: ".92rem" }}>{selectedTrendRow.eventName || "イベント未登録"}</strong></div>
-                  <div>売上合計: <strong style={{ fontSize: ".92rem" }}>{yen(selectedTrendRow.totalSales)}</strong></div>
-                  <div>目標: <strong style={{ fontSize: ".92rem" }}>{yen(selectedTrendRow.targetSales)}</strong></div>
-                  <div>達成率: <strong style={{ fontSize: ".92rem" }}>{pct(selectedTrendRow.achievementRate)}</strong></div>
-                  <div>飲食売上: <strong style={{ fontSize: ".92rem" }}>{yen(selectedTrendRow.foodDrinkSales)}</strong></div>
-                  <div>ドリンク売上: <strong style={{ fontSize: ".92rem" }}>{yen(selectedTrendRow.drinkSales)}</strong></div>
-                  <div>フード売上: <strong style={{ fontSize: ".92rem" }}>{yen(selectedTrendRow.foodSales)}</strong></div>
-                  <div>客単価: <strong style={{ fontSize: ".92rem" }}>{num(selectedTrendRow.customerUnitPrice)}</strong></div>
-                  <div>飲食単価: <strong style={{ fontSize: ".92rem" }}>{num(selectedTrendRow.foodDrinkUnitPrice)}</strong></div>
-                  <div>営業利益: <strong style={{ fontSize: ".92rem" }}>{yen(selectedTrendRow.operatingProfit)}</strong></div>
+              <div style={{ marginTop: ".75rem", borderTop: "1px dashed rgba(201,168,76,0.22)", paddingTop: ".7rem" }}>
+                <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(201,168,76,0.2)", borderRadius: 8, padding: ".8rem .9rem" }}>
+                  <div style={{ fontSize: ".86rem", fontWeight: 700, color: "#e9dbb0", marginBottom: ".55rem" }}>選択日の営業レポート</div>
+
+                  <div style={{ marginBottom: ".55rem" }}>
+                    <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>A. 基本情報</div>
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:".34rem .7rem", fontSize:".8rem" }}>
+                      <div>日付: <strong style={{ fontSize: ".95rem" }}>{selectedTrendRow.businessDate || "—"}</strong></div>
+                      <div>曜日: <strong style={{ fontSize: ".95rem" }}>{selectedTrendRow.weekday || "—"}</strong></div>
+                      <div>
+                        イベント名: <strong style={{ fontSize: ".95rem" }}>{selectedTrendRow.eventName || "イベント未登録"}</strong>
+                        {selectedTrendRow.isDuplicateBusinessDate ? <span style={{ marginLeft: ".35rem", fontSize: ".6rem", padding: ".08rem .42rem", borderRadius: 3, border: "1px solid rgba(244,162,97,0.35)", color: "#f4a261" }}>同日複数</span> : null}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: ".55rem" }}>
+                    <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>B. 売上・目標</div>
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:".34rem .7rem", fontSize:".8rem" }}>
+                      <div>売上合計: <strong style={{ fontSize: "1rem", color: "#f3ead2" }}>{yen(selectedTrendRow.totalSales)}</strong></div>
+                      <div>目標: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.targetSales)}</strong></div>
+                      <div>達成率: <strong style={{ fontSize: "1rem", color: "#f3ead2" }}>{pct(selectedTrendRow.achievementRate)}</strong></div>
+                      <div>客単価: <strong style={{ fontSize: ".94rem" }}>{num(selectedTrendRow.customerUnitPrice)}</strong></div>
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: ".55rem" }}>
+                    <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>C. 飲食内訳</div>
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:".34rem .7rem", fontSize:".8rem" }}>
+                      <div>飲食売上: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.foodDrinkSales)}</strong></div>
+                      <div>ドリンク売上: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.drinkSales)}</strong></div>
+                      <div>フード売上: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.foodSales)}</strong></div>
+                      <div>飲食単価: <strong style={{ fontSize: ".94rem" }}>{num(selectedTrendRow.foodDrinkUnitPrice)}</strong></div>
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: ".55rem" }}>
+                    <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>D. 決済・入金</div>
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:".34rem .7rem", fontSize:".8rem" }}>
+                      <div>現金: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.cash)}</strong></div>
+                      <div>クレジット: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.creditCardSales)}</strong></div>
+                      <div>PayPay: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.paypaySales)}</strong></div>
+                      <div>売掛合計: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.receivableTotal)}</strong></div>
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: ".55rem" }}>
+                    <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>E. コスト・利益</div>
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:".34rem .7rem", fontSize:".8rem" }}>
+                      <div>営業利益: <strong style={{ fontSize: "1rem", color: "#f3ead2" }}>{yen(selectedTrendRow.operatingProfit)}</strong></div>
+                      <div>仕入れ合計: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.purchaseTotal)}</strong></div>
+                      <div>ドリンク仕入れ: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.drinkPurchase)}</strong></div>
+                      <div>フード仕入れ: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.foodPurchase)}</strong></div>
+                      <div>経費: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.expense)}</strong></div>
+                      <div>人件費: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.laborCost)}</strong></div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>F. 参考情報</div>
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:".34rem .7rem", fontSize:".8rem" }}>
+                      <div>参考：バンドギャラ <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.bandGuarantee)}</strong></div>
+                    </div>
+                    <div style={{ fontSize: ".64rem", color: "rgba(240,232,208,0.55)", marginTop: ".2rem" }}>※経費には含めていません</div>
+                  </div>
                 </div>
               </div>
             )}
