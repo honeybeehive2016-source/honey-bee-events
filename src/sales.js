@@ -732,8 +732,10 @@ function buildPurchaseCostRates_(
     foodCostRate,
   };
 }
+const YEARLY_TABLE_NUMBER_FONT = '"Consolas", "Roboto Mono", "Courier New", monospace';
 const TABLE_NUMBER_STYLE = {
   textAlign: "right",
+  fontFamily: YEARLY_TABLE_NUMBER_FONT,
   fontVariantNumeric: "tabular-nums",
   fontSize: ".78rem",
   fontWeight: 500,
@@ -741,14 +743,15 @@ const TABLE_NUMBER_STYLE = {
   whiteSpace: "nowrap",
   letterSpacing: 0,
   padding: ".46rem .42rem",
-  color: "rgba(245,240,208,0.92)",
+  color: "rgba(245,240,208,0.9)",
   overflow: "hidden",
   textOverflow: "ellipsis",
   boxSizing: "border-box",
 };
 const TABLE_MUTED_NUMBER_STYLE = {
   ...TABLE_NUMBER_STYLE,
-  color: "rgba(245,240,208,0.48)",
+  fontWeight: 500,
+  color: "rgba(245,240,208,0.55)",
 };
 const YEARLY_TABLE_STYLE = {
   width: "100%",
