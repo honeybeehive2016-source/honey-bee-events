@@ -737,12 +737,12 @@ const TABLE_NUMBER_STYLE = {
   textAlign: "right",
   fontFamily: YEARLY_TABLE_NUMBER_FONT,
   fontVariantNumeric: "tabular-nums",
-  fontSize: ".78rem",
+  fontSize: ".9rem",
   fontWeight: 500,
   lineHeight: 1.45,
   whiteSpace: "nowrap",
   letterSpacing: 0,
-  padding: ".46rem .42rem",
+  padding: ".44rem .38rem",
   color: "rgba(245,240,208,0.9)",
   overflow: "hidden",
   textOverflow: "ellipsis",
@@ -751,7 +751,7 @@ const TABLE_NUMBER_STYLE = {
 const TABLE_MUTED_NUMBER_STYLE = {
   ...TABLE_NUMBER_STYLE,
   fontWeight: 500,
-  color: "rgba(245,240,208,0.55)",
+  color: "rgba(245,240,208,0.58)",
 };
 const YEARLY_TABLE_STYLE = {
   width: "100%",
@@ -798,7 +798,7 @@ function yearlyThStyle_(widthPx, align = "right") {
 }
 const YEARLY_TD_MONTH = {
   textAlign: "left",
-  fontSize: ".78rem",
+  fontSize: ".88rem",
   fontWeight: 600,
   color: "#e8dcc0",
   lineHeight: 1.45,
@@ -837,6 +837,82 @@ function YearlyTableNumberCell({ m, value, kind = "yen", width }) {
   const cell = kind === "pct" ? yearlyTablePctCell_(m, value) : yearlyTableYenCell_(m, value);
   return <td style={yearlyNumTdStyle_(width, cell.muted)}>{cell.text}</td>;
 }
+const PURCHASE_BREAKDOWN_NOTE =
+  "※ドリンク仕入れ・フード仕入れは仕入れ合計の内訳です。月合計欄の値を優先しています。";
+
+function CostProfitBarRow({ bar, maxValue, isChild }) {
+  const isLaborZero = bar.key === "labor" && Number(bar.value || 0) === 0;
+  const scaleMax = maxValue > 0 ? maxValue : 1;
+  const w = isLaborZero ? 0 : Math.max(isChild ? 3 : 4, Math.round((Number(bar.value || 0) / scaleMax) * 100));
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: isChild ? "132px 1fr auto" : "110px 1fr auto",
+        alignItems: "center",
+        gap: ".45rem",
+        marginLeft: isChild ? ".28rem" : 0,
+        paddingLeft: isChild ? ".55rem" : 0,
+        borderLeft: isChild ? "2px solid rgba(205,134,74,0.22)" : "none",
+      }}
+    >
+      <div
+        style={{
+          fontSize: isChild ? ".68rem" : ".74rem",
+          color: isChild ? "rgba(240,232,208,0.58)" : "rgba(240,232,208,0.74)",
+          lineHeight: 1.4,
+        }}
+      >
+        {isChild ? `内訳：${bar.label}` : bar.label}
+        {!isChild && bar.note ? (
+          <span style={{ marginLeft: ".28rem", fontSize: ".6rem", color: "rgba(240,232,208,0.52)" }}>{bar.note}</span>
+        ) : null}
+      </div>
+      <div
+        style={{
+          height: isChild ? 7 : 10,
+          borderRadius: 999,
+          background: isChild ? "rgba(240,232,208,0.06)" : "rgba(240,232,208,0.1)",
+          border: isChild ? "1px solid rgba(201,168,76,0.12)" : "1px solid rgba(201,168,76,0.18)",
+          overflow: "hidden",
+        }}
+      >
+        {!isLaborZero ? (
+          <div
+            style={{
+              height: "100%",
+              width: `${w}%`,
+              background: bar.tone,
+              opacity: isChild ? 0.72 : 1,
+            }}
+          />
+        ) : null}
+      </div>
+      <div style={{ fontSize: isChild ? ".7rem" : ".74rem", color: isChild ? "rgba(240,232,208,0.82)" : "#f0e8d0" }}>
+        {isLaborZero ? "¥0 / 翌月反映" : yen(bar.value)}
+      </div>
+    </div>
+  );
+}
+
+function CostProfitBarList({ bars, maxValue }) {
+  const hasPurchaseChildren = bars.some((b) => b.isPurchaseChild);
+  return (
+    <>
+      <div style={{ display: "grid", gap: ".4rem" }}>
+        {bars.map((b) => (
+          <CostProfitBarRow key={b.key} bar={b} maxValue={maxValue} isChild={!!b.isPurchaseChild} />
+        ))}
+      </div>
+      {hasPurchaseChildren ? (
+        <div style={{ fontSize: ".62rem", color: "rgba(240,232,208,0.52)", marginTop: ".32rem", lineHeight: 1.5 }}>
+          {PURCHASE_BREAKDOWN_NOTE}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 function YearlyTableStatusCell({ m, width }) {
   return (
     <td
@@ -1276,8 +1352,8 @@ export default function SalesModule({ events = [], navigateBack }) {
     const costProfitBars = [
       { key: "profit", label: "営業利益", value: operatingProfitSum, tone: "linear-gradient(90deg, rgba(126,200,126,0.92), rgba(126,200,126,0.58))", note: "" },
       { key: "purchase", label: "仕入れ合計", value: purchaseTotalSum, tone: "linear-gradient(90deg, rgba(205,134,74,0.9), rgba(205,134,74,0.52))", note: "月末売掛反映あり" },
-      { key: "drinkPurchase", label: "ドリンク仕入れ", value: drinkPurchaseSum, tone: "linear-gradient(90deg, rgba(205,134,74,0.75), rgba(205,134,74,0.42))", note: "" },
-      { key: "foodPurchase", label: "フード仕入れ", value: foodPurchaseSum, tone: "linear-gradient(90deg, rgba(188,120,68,0.88), rgba(188,120,68,0.48))", note: "" },
+      { key: "drinkPurchase", label: "ドリンク仕入れ", value: drinkPurchaseSum, tone: "linear-gradient(90deg, rgba(205,134,74,0.75), rgba(205,134,74,0.42))", note: "", isPurchaseChild: true },
+      { key: "foodPurchase", label: "フード仕入れ", value: foodPurchaseSum, tone: "linear-gradient(90deg, rgba(188,120,68,0.88), rgba(188,120,68,0.48))", note: "", isPurchaseChild: true },
       { key: "expense", label: "経費", value: expenseSum, tone: "linear-gradient(90deg, rgba(155,84,94,0.9), rgba(155,84,94,0.52))", note: "暫定" },
       { key: "labor", label: "人件費", value: laborCostSum, tone: "linear-gradient(90deg, rgba(201,168,76,0.9), rgba(201,168,76,0.5))", note: "翌月反映" },
     ];
@@ -1448,8 +1524,8 @@ export default function SalesModule({ events = [], navigateBack }) {
     const yearlyCostBars = [
       { key: "profit", label: "営業利益", value: yearlyOperatingProfit, tone: "linear-gradient(90deg, rgba(126,200,126,0.92), rgba(126,200,126,0.58))", note: "" },
       { key: "purchase", label: "仕入れ合計", value: yearlyPurchase, tone: "linear-gradient(90deg, rgba(205,134,74,0.9), rgba(205,134,74,0.52))", note: "月末売掛反映あり" },
-      { key: "drinkPurchase", label: "ドリンク仕入れ", value: yearlyDrinkPurchase, tone: "linear-gradient(90deg, rgba(205,134,74,0.75), rgba(205,134,74,0.42))", note: "" },
-      { key: "foodPurchase", label: "フード仕入れ", value: yearlyFoodPurchase, tone: "linear-gradient(90deg, rgba(188,120,68,0.88), rgba(188,120,68,0.48))", note: "" },
+      { key: "drinkPurchase", label: "ドリンク仕入れ", value: yearlyDrinkPurchase, tone: "linear-gradient(90deg, rgba(205,134,74,0.75), rgba(205,134,74,0.42))", note: "", isPurchaseChild: true },
+      { key: "foodPurchase", label: "フード仕入れ", value: yearlyFoodPurchase, tone: "linear-gradient(90deg, rgba(188,120,68,0.88), rgba(188,120,68,0.48))", note: "", isPurchaseChild: true },
       { key: "expense", label: "経費", value: yearlyExpense, tone: "linear-gradient(90deg, rgba(155,84,94,0.9), rgba(155,84,94,0.52))", note: "暫定" },
       { key: "labor", label: "人件費", value: yearlyLabor, tone: "linear-gradient(90deg, rgba(201,168,76,0.9), rgba(201,168,76,0.5))", note: "翌月反映" },
     ];
@@ -1734,34 +1810,7 @@ export default function SalesModule({ events = [], navigateBack }) {
                 </span>
               ) : null}
             </div>
-            <div style={{ display:"grid", gap:".4rem" }}>
-              {monthlyAnalysis.costProfitBars.map((b) => {
-                const isLaborZero = b.key === "labor" && Number(b.value || 0) === 0;
-                const w = isLaborZero
-                  ? 0
-                  : monthlyAnalysis.costProfitMax > 0
-                  ? Math.max(4, Math.round((Number(b.value || 0) / monthlyAnalysis.costProfitMax) * 100))
-                  : 4;
-                return (
-                  <div key={b.key} style={{ display:"grid", gridTemplateColumns:"110px 1fr auto", alignItems:"center", gap:".45rem" }}>
-                    <div style={{ fontSize:".74rem", color:"rgba(240,232,208,0.74)" }}>
-                      {b.label}
-                      {b.note ? (
-                        <span style={{ marginLeft: ".28rem", fontSize: ".6rem", color: "rgba(240,232,208,0.52)" }}>
-                          {b.note}
-                        </span>
-                      ) : null}
-                    </div>
-                    <div style={{ height:10, borderRadius:999, background:"rgba(240,232,208,0.1)", border:"1px solid rgba(201,168,76,0.18)", overflow:"hidden" }}>
-                      {!isLaborZero ? <div style={{ height:"100%", width:`${w}%`, background:b.tone }} /> : null}
-                    </div>
-                    <div style={{ fontSize:".74rem", color:"#f0e8d0" }}>
-                      {isLaborZero ? "¥0 / 翌月反映" : yen(b.value)}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            <CostProfitBarList bars={monthlyAnalysis.costProfitBars} maxValue={monthlyAnalysis.costProfitMax} />
             <div style={{ marginTop: ".55rem", paddingTop: ".5rem", borderTop: "1px dashed rgba(201,168,76,0.2)" }}>
               <div style={{ fontSize: ".66rem", color: "rgba(201,168,76,0.85)", marginBottom: ".32rem" }}>原価率</div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: ".32rem .55rem", fontSize: ".74rem", color: "rgba(240,232,208,0.82)" }}>
@@ -2171,25 +2220,8 @@ export default function SalesModule({ events = [], navigateBack }) {
                     </span>
                   ) : null}
                 </div>
-                <div style={{ display: "grid", gap: ".4rem", marginBottom: ".65rem" }}>
-                  {yearlyAnalysis.yearlyCostBars.map((b) => {
-                    const isLaborZero = b.key === "labor" && Number(b.value || 0) === 0;
-                    const w = isLaborZero
-                      ? 0
-                      : Math.max(4, Math.round((Number(b.value || 0) / yearlyAnalysis.costProfitMax) * 100));
-                    return (
-                      <div key={b.key} style={{ display: "grid", gridTemplateColumns: "110px 1fr auto", alignItems: "center", gap: ".45rem" }}>
-                        <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.74)" }}>
-                          {b.label}
-                          {b.note ? <span style={{ marginLeft: ".28rem", fontSize: ".6rem", color: "rgba(240,232,208,0.52)" }}>{b.note}</span> : null}
-                        </div>
-                        <div style={{ height: 10, borderRadius: 999, background: "rgba(240,232,208,0.1)", border: "1px solid rgba(201,168,76,0.18)", overflow: "hidden" }}>
-                          {!isLaborZero ? <div style={{ height: "100%", width: `${w}%`, background: b.tone }} /> : null}
-                        </div>
-                        <div style={{ fontSize: ".74rem", color: "#f0e8d0" }}>{isLaborZero ? "¥0 / 翌月反映" : yen(b.value)}</div>
-                      </div>
-                    );
-                  })}
+                <div style={{ marginBottom: ".65rem" }}>
+                  <CostProfitBarList bars={yearlyAnalysis.yearlyCostBars} maxValue={yearlyAnalysis.costProfitMax} />
                 </div>
                 <div style={{ marginTop: ".55rem", paddingTop: ".5rem", borderTop: "1px dashed rgba(201,168,76,0.2)" }}>
                   <div style={{ fontSize: ".66rem", color: "rgba(201,168,76,0.85)", marginBottom: ".32rem" }}>年間原価率</div>
