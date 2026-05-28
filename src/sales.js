@@ -126,6 +126,31 @@ const MOBILE_METRIC_MID = {
   ...SALES_NUMBER_TABULAR,
 };
 
+const RANK_LIST_METRIC_LINE = {
+  fontSize: ".76rem",
+  lineHeight: 1.45,
+  color: "rgba(240,232,208,0.82)",
+  wordBreak: "break-word",
+};
+const RANK_LIST_AMOUNT = {
+  fontWeight: 600,
+  fontFamily: SALES_NUMBER_FONT_FAMILY,
+  ...SALES_NUMBER_TABULAR,
+  color: "#f0e8d0",
+};
+const RANK_LIST_SUB = {
+  fontWeight: 500,
+  fontFamily: SALES_NUMBER_FONT_FAMILY,
+  ...SALES_NUMBER_TABULAR,
+  color: "rgba(240,232,208,0.55)",
+};
+const RANK_LIST_SHORTFALL = {
+  fontWeight: 600,
+  fontFamily: SALES_NUMBER_FONT_FAMILY,
+  ...SALES_NUMBER_TABULAR,
+  color: "rgba(212,168,138,0.9)",
+};
+
 const ANALYSIS_CARD = {
   summary: {
     card: {
@@ -3225,13 +3250,23 @@ export default function SalesModule({ events = [], navigateBack }) {
                   <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)" }}>{i + 1}. {r.businessDate}</div>
                   <div style={{ fontSize: ".78rem", color: "#f0e8d0", wordBreak: "break-word", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{r.eventName || "イベント未登録"}</div>
                   {vp.narrow ? (
-                    <div style={{ display: "grid", gap: ".2rem", marginTop: ".15rem" }}>
-                      <div style={MOBILE_CARD_NUMBER_STYLE}>売上 {dy(r.totalSales)}</div>
-                      <div style={MOBILE_CARD_NUMBER_STYLE}>達成率 {pct(r.achievementRate)}</div>
-                      <div style={MOBILE_CARD_NUMBER_STYLE}>不足 {dy(r.shortfall)}</div>
+                    <div style={{ display: "grid", gap: ".14rem", marginTop: ".15rem" }}>
+                      <div style={RANK_LIST_METRIC_LINE}>
+                        売上 <span style={RANK_LIST_AMOUNT}>{dy(r.totalSales)}</span>
+                      </div>
+                      <div style={RANK_LIST_METRIC_LINE}>
+                        達成率 <span style={RANK_LIST_SUB}>{pct(r.achievementRate)}</span>
+                      </div>
+                      <div style={RANK_LIST_METRIC_LINE}>
+                        不足 <span style={RANK_LIST_SHORTFALL}>{dy(r.shortfall)}</span>
+                      </div>
                     </div>
                   ) : (
-                    <div style={{ fontSize: ".76rem", lineHeight: 1.45 }}>売上 <strong style={{ fontSize: ".84rem" }}>{dy(r.totalSales)}</strong> / 達成率 <strong style={{ fontSize: ".82rem" }}>{pct(r.achievementRate)}</strong> / 不足 <strong style={{ fontSize: ".84rem" }}>{dy(r.shortfall)}</strong></div>
+                    <div style={RANK_LIST_METRIC_LINE}>
+                      売上 <strong style={RANK_LIST_AMOUNT}>{dy(r.totalSales)}</strong> / 達成率{" "}
+                      <strong style={RANK_LIST_SUB}>{pct(r.achievementRate)}</strong> / 不足{" "}
+                      <strong style={RANK_LIST_SHORTFALL}>{dy(r.shortfall)}</strong>
+                    </div>
                   )}
                 </div>
               ))}
