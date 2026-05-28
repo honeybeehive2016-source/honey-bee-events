@@ -1,6 +1,6 @@
 const APPS_SCRIPT_SALES_ENDPOINT =
   process.env.APPS_SCRIPT_SALES_ENDPOINT ||
-  "https://script.google.com/macros/s/AKfycbyc4qjhJ0JrbYfbmqGH2eUQUVgWuUSUnPBBMstDRL4jR4l76T7f_ba25REkbb_Fw74/exec";
+  "https://script.google.com/macros/s/AKfycbyDJKp0uKJT_qqhS667Mmy3amDo53Hq1ENASe7T_JSnzGZEhSNkrypdAa9rxICbzT6D/exec";
 
 module.exports = async function handler(req, res) {
   if (req.method && req.method !== "GET") {
