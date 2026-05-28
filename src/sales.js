@@ -211,23 +211,25 @@ export default function SalesModule({ events = [], navigateBack }) {
       )}
 
       {roleMode === "staff" && !loading && !error && (
-        <div style={{ ...S.card, marginBottom: ".75rem", border: "1px solid rgba(201,168,76,0.24)" }}>
+        <div style={{ ...S.card, marginBottom: ".75rem", border: "1px solid rgba(201,168,76,0.24)", padding: "1.15rem 1.2rem" }}>
           <div style={{ ...S.secTitle, marginBottom: ".55rem" }}>今月の進捗</div>
 
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))", gap:".4rem .8rem", fontSize:".78rem", marginBottom:".6rem" }}>
-            <div>今月売上合計: <strong>{yen(staffProgress.salesSum)}</strong></div>
-            <div>今月目標合計: <strong>{yen(staffProgress.targetSum)}</strong></div>
-            <div>
-              月間達成率: <strong>{pct(staffProgress.achievementRate)}</strong>
-              <span style={{ marginLeft: ".4rem", fontSize: ".62rem", padding: ".08rem .38rem", borderRadius: 999, background: monthTone.chipBg, border: "1px solid " + monthTone.chipBd, color: monthTone.chipTx }}>
-                {monthTone.label}
-              </span>
+          <div style={{ display:"flex", alignItems:"baseline", gap:".55rem", flexWrap:"wrap", marginBottom:".28rem" }}>
+            <div style={{ fontFamily:"Georgia,serif", fontSize:"2rem", lineHeight:1, color:"#f0e8d0", letterSpacing:".02em" }}>
+              {pct(staffProgress.achievementRate)}
             </div>
-            <div>目標まであと: <strong>{yen(staffProgress.remaining)}</strong></div>
-            <div>本日目標: <strong>{yen(staffProgress.todayTargetSum)}</strong></div>
+            <span style={{ fontSize: ".7rem", padding: ".12rem .5rem", borderRadius: 999, background: monthTone.chipBg, border: "1px solid " + monthTone.chipBd, color: monthTone.chipTx }}>
+              {monthTone.label}
+            </span>
           </div>
 
-          <div style={{ marginBottom: ".65rem" }}>
+          <div style={{ marginBottom: ".6rem", fontSize: ".88rem", color: "rgba(240,232,208,0.92)", fontWeight: 500 }}>
+            {staffProgress.remaining > 0
+              ? `あと ${yen(staffProgress.remaining)} で目標達成`
+              : `月間目標達成 +${yen(Math.abs(staffProgress.remaining))}`}
+          </div>
+
+          <div style={{ marginBottom: ".7rem" }}>
             <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.8)", marginBottom: ".3rem" }}>
               目標達成までの進捗 {pct1(staffProgress.achievementRate)}
             </div>
@@ -241,6 +243,12 @@ export default function SalesModule({ events = [], navigateBack }) {
                 }}
               />
             </div>
+          </div>
+
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))", gap:".45rem .8rem", fontSize:".74rem", color:"rgba(240,232,208,0.72)", borderTop:"1px dashed rgba(201,168,76,0.2)", paddingTop:".55rem" }}>
+            <div>今月売上: <strong style={{ color:"#f0e8d0" }}>{yen(staffProgress.salesSum)}</strong></div>
+            <div>今月目標: <strong style={{ color:"#f0e8d0" }}>{yen(staffProgress.targetSum)}</strong></div>
+            <div>本日目標: <strong style={{ color:"#f0e8d0" }}>{yen(staffProgress.todayTargetSum)}</strong></div>
           </div>
         </div>
       )}
