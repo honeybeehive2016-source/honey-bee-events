@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 
 const SALES_API_URL = "/api/sales";
+const SALES_ROLE_MODE_KEY = "honeybee:salesRoleMode";
+const SALES_ADMIN_TAB_KEY = "honeybee:salesAdminTab";
+const SALES_TARGET_MONTH_KEY = "honeybee:salesTargetMonth";
 const SALES_MONTH_OPTIONS_2026 = Array.from({ length: 12 }, (_, i) => {
   const mm = String(i + 1).padStart(2, "0");
   return { value: `2026-${mm}`, label: `2026年${mm}月` };
@@ -88,6 +91,35 @@ function normalizeMonth(value) {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   return `${d.getFullYear()}-${m}`;
 }
+function readSalesRoleMode() {
+  try {
+    const v = localStorage.getItem(SALES_ROLE_MODE_KEY);
+    return v === "staff" || v === "admin" ? v : "staff";
+  } catch {
+    return "staff";
+  }
+}
+function readSalesAdminTab() {
+  try {
+    const v = localStorage.getItem(SALES_ADMIN_TAB_KEY);
+    return v === "daily" || v === "analysis" ? v : "daily";
+  } catch {
+    return "daily";
+  }
+}
+function readSalesTargetMonth() {
+  try {
+    const v = localStorage.getItem(SALES_TARGET_MONTH_KEY);
+    return normalizeMonth(v || "");
+  } catch {
+    return normalizeMonth("");
+  }
+}
+function compactYen(v) {
+  const n = Number(v || 0);
+  if (n >= 1000) return `¥${Math.round(n / 1000)}k`;
+  return `¥${n.toLocaleString("ja-JP")}`;
+}
 
 function getCurrentBusinessDateForSales() {
   const d = new Date();
@@ -140,12 +172,12 @@ function resolveEventNameForAdmin(record, matchedEventNames) {
 }
 
 export default function SalesModule({ events = [], navigateBack }) {
-  const [targetMonth, setTargetMonth] = useState(normalizeMonth(""));
+  const [targetMonth, setTargetMonth] = useState(() => readSalesTargetMonth());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [records, setRecords] = useState([]);
-  const [roleMode, setRoleMode] = useState("staff"); // staff | admin
-  const [adminTab, setAdminTab] = useState("daily"); // daily | analysis
+  const [roleMode, setRoleMode] = useState(() => readSalesRoleMode()); // staff | admin
+  const [adminTab, setAdminTab] = useState(() => readSalesAdminTab()); // daily | analysis
   const [updatedAt, setUpdatedAt] = useState("");
   const currentBusinessDate = getCurrentBusinessDateForSales();
 
@@ -183,6 +215,21 @@ export default function SalesModule({ events = [], navigateBack }) {
   useEffect(() => {
     loadSales(targetMonth);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetMonth]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(SALES_ROLE_MODE_KEY, roleMode === "admin" ? "admin" : "staff");
+    } catch {}
+  }, [roleMode]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(SALES_ADMIN_TAB_KEY, adminTab === "analysis" ? "analysis" : "daily");
+    } catch {}
+  }, [adminTab]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(SALES_TARGET_MONTH_KEY, normalizeMonth(targetMonth));
+    } catch {}
   }, [targetMonth]);
 
   const rows = useMemo(() => {
@@ -598,22 +645,27 @@ export default function SalesModule({ events = [], navigateBack }) {
             {monthlyAnalysis.dailyTrendRows.length === 0 ? (
               <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.45)" }}>データなし</div>
             ) : (
-              <div style={{ display:"flex", alignItems:"flex-end", gap:".3rem", height:120 }}>
-                {monthlyAnalysis.dailyTrendRows.map((r) => {
-                  const h = monthlyAnalysis.trendMaxSales > 0
-                    ? Math.max(10, Math.round((Number(r.totalSales || 0) / monthlyAnalysis.trendMaxSales) * 100))
-                    : 10;
-                  return (
-                    <div
-                      key={r.key}
-                      style={{ flex:1, minWidth:0, textAlign:"center" }}
-                      title={`${r.businessDate} / ${r.eventName} / 売上 ${yen(r.totalSales)} / 目標 ${yen(r.targetSales)} / 達成率 ${pct(r.achievementRate)}`}
-                    >
-                      <div style={{ height:`${h}%`, minHeight:8, borderRadius:"4px 4px 0 0", background:r.tone }} />
-                      <div style={{ marginTop:".2rem", fontSize:".58rem", color:"rgba(240,232,208,0.6)" }}>{(r.businessDate || "").slice(5)}</div>
-                    </div>
-                  );
-                })}
+              <div style={{ overflowX: "auto", paddingBottom: ".1rem" }}>
+                <div style={{ display:"flex", alignItems:"flex-end", gap:".38rem", height:200, minWidth:"100%" }}>
+                  {monthlyAnalysis.dailyTrendRows.map((r) => {
+                    const h = monthlyAnalysis.trendMaxSales > 0
+                      ? Math.max(6, Math.round((Number(r.totalSales || 0) / monthlyAnalysis.trendMaxSales) * 100))
+                      : 6;
+                    return (
+                      <div
+                        key={r.key}
+                        style={{ flex: "0 0 28px", minWidth: 28, textAlign:"center", display:"flex", flexDirection:"column", justifyContent:"flex-end" }}
+                        title={`${r.businessDate} / ${r.eventName} / 売上 ${yen(r.totalSales)} / 目標 ${yen(r.targetSales)} / 達成率 ${pct(r.achievementRate)}`}
+                      >
+                        <div style={{ fontSize:".52rem", color:"rgba(240,232,208,0.68)", marginBottom:".18rem", whiteSpace:"nowrap" }}>
+                          {compactYen(r.totalSales)}
+                        </div>
+                        <div style={{ height:`${h}%`, minHeight:10, borderRadius:"4px 4px 0 0", background:r.tone, boxShadow:"inset 0 0 0 1px rgba(255,255,255,0.08)" }} />
+                        <div style={{ marginTop:".22rem", fontSize:".58rem", color:"rgba(240,232,208,0.6)", whiteSpace:"nowrap" }}>{(r.businessDate || "").slice(5)}</div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>
