@@ -194,6 +194,27 @@ function previousYearSalesForMonth_(targetMonth) {
   const m = Number(String(targetMonth || "").slice(5, 7));
   return PREVIOUS_YEAR_SALES_2025_MAP[m] ?? 0;
 }
+/** 営業粗利 = 売上 − 仕入れ合計 − 経費（人件費・固定費は含まない） */
+function calcOperatingGrossProfit_(totalSales, purchaseTotal, expense) {
+  return Number(totalSales || 0) - Number(purchaseTotal || 0) - Number(expense || 0);
+}
+function buildMonthlyPriorYearComparison_(targetMonth, currentSales) {
+  const monthNum = Number(String(targetMonth || "").slice(5, 7));
+  if (!Number.isFinite(monthNum) || monthNum < 1 || monthNum > 12) {
+    return { prevMonthSales: null, prevMonthDiff: null, prevMonthRate: null };
+  }
+  const prevMonthSales = PREVIOUS_YEAR_SALES_2025_MAP[monthNum];
+  if (prevMonthSales == null) {
+    return { prevMonthSales: null, prevMonthDiff: null, prevMonthRate: null };
+  }
+  const prev = Number(prevMonthSales);
+  const current = Number(currentSales || 0);
+  return {
+    prevMonthSales: prev,
+    prevMonthDiff: current - prev,
+    prevMonthRate: prev > 0 ? (current / prev) * 100 : null,
+  };
+}
 function buildMonthlyYoYRows_(monthRows) {
   return (monthRows || []).map((m) => {
     const currentSales = Number(m.totalSalesSum || 0);
@@ -244,6 +265,8 @@ function buildLandingForecast_(monthRows, yearlyTotalSales, targetMetrics) {
     hasFullYearTarget && paceForecast != null && fullYearTargetSum != null && fullYearTargetSum > 0
       ? paceForecast - fullYearTargetSum
       : null;
+  const avgMonthlySalesFromYearlyTotal =
+    performanceMonthCount > 0 ? yearlyTotalSales / performanceMonthCount : null;
   return {
     hasFullYearTarget,
     enteredTargetSum,
@@ -253,6 +276,7 @@ function buildLandingForecast_(monthRows, yearlyTotalSales, targetMetrics) {
     performanceMonthCount,
     remainingMonths,
     avgMonthlySales,
+    avgMonthlySalesFromYearlyTotal,
     paceForecast,
     remainingNeeded,
     requiredMonthly,
@@ -299,6 +323,7 @@ function buildYearlyAlerts_(ctx) {
     landing,
     yearlyPurchaseCostRates,
     yearlyOperatingProfitRate,
+    yearlyOperatingGrossProfitRate,
     momComparison,
     taxMode,
   } = ctx;
@@ -346,6 +371,13 @@ function buildYearlyAlerts_(ctx) {
       key: "opProfit",
       title: "営業利益率要確認",
       detail: pct1(yearlyOperatingProfitRate),
+    });
+  }
+  if (yearlyOperatingGrossProfitRate != null && yearlyOperatingGrossProfitRate < 60) {
+    alerts.push({
+      key: "opGrossProfit",
+      title: "営業粗利率要確認",
+      detail: pct1(yearlyOperatingGrossProfitRate),
     });
   }
   if (momComparison && momComparison.salesDiff < 0) {
@@ -1524,6 +1556,9 @@ export default function SalesModule({ events = [], navigateBack }) {
     const foodPurchaseSum = pickMonthlyCostMetric_(monthlySummary, actualRows, "foodPurchase");
     const expenseSum = pickMonthlyCostMetric_(monthlySummary, actualRows, "expense");
     const bandGuaranteeSum = pickMonthlyCostMetric_(monthlySummary, actualRows, "bandGuarantee");
+    const operatingGrossProfitSum = calcOperatingGrossProfit_(totalSalesSum, purchaseTotalSum, expenseSum);
+    const operatingGrossProfitRate = calcRate(operatingGrossProfitSum, totalSalesSum);
+    const priorYearMonth = buildMonthlyPriorYearComparison_(targetMonth, totalSalesSum);
     const hasMonthlyCostSummary = hasMonthlyCostSummary_(monthlySummary);
     const validTargetRows = actualRows.filter((r) => Number(r?.metrics?.targetSales || 0) > 0);
     const underTargetRows = validTargetRows.filter((r) => {
@@ -1749,6 +1784,9 @@ export default function SalesModule({ events = [], navigateBack }) {
       avgDailySales,
       operatingProfitSum,
       operatingProfitRate,
+      operatingGrossProfitSum,
+      operatingGrossProfitRate,
+      priorYearMonth,
       foodDrinkSalesSum,
       foodDrinkSalesIncludingBandSum,
       drinkSalesSum,
@@ -1889,6 +1927,8 @@ export default function SalesModule({ events = [], navigateBack }) {
     ];
     const yearlyFoodDrinkGrossProfit = yearlyFoodDrink - yearlyPurchase;
     const yearlyFoodDrinkGrossProfitRate = calcRate(yearlyFoodDrinkGrossProfit, yearlyFoodDrink);
+    const yearlyOperatingGrossProfit = calcOperatingGrossProfit_(yearlyTotalSales, yearlyPurchase, yearlyExpense);
+    const yearlyOperatingGrossProfitRate = calcRate(yearlyOperatingGrossProfit, yearlyTotalSales);
     const monthlyYoYRows = buildMonthlyYoYRows_(monthRows);
     const previousYearTotal = PREVIOUS_YEAR_SALES_2025_TOTAL;
     const yoyDiff = yearlyTotalSales - previousYearTotal;
@@ -1934,6 +1974,8 @@ export default function SalesModule({ events = [], navigateBack }) {
       momComparison,
       yearlyFoodDrinkGrossProfit,
       yearlyFoodDrinkGrossProfitRate,
+      yearlyOperatingGrossProfit,
+      yearlyOperatingGrossProfitRate,
     };
   }, [yearlyMonthData, targetYear, currentBusinessDate]);
   const staffTodayRows = useMemo(
@@ -1974,6 +2016,7 @@ export default function SalesModule({ events = [], navigateBack }) {
       landing: yearlyAnalysis.landing,
       yearlyPurchaseCostRates: yearlyAnalysis.yearlyPurchaseCostRates,
       yearlyOperatingProfitRate: yearlyAnalysis.yearlyOperatingProfitRate,
+      yearlyOperatingGrossProfitRate: yearlyAnalysis.yearlyOperatingGrossProfitRate,
       momComparison: yearlyAnalysis.momComparison,
       taxMode,
     });
@@ -2179,12 +2222,59 @@ export default function SalesModule({ events = [], navigateBack }) {
                 ※終了済み営業日の目標に対する達成率
               </div>
               <div style={{ fontSize: ".9rem" }}>
+                営業粗利 <strong style={{ fontSize: "1rem" }}>{monthlyAnalysis.totalSalesSum > 0 ? dy(monthlyAnalysis.operatingGrossProfitSum) : "—"}</strong> / 営業粗利率 <strong style={{ fontSize: "1rem" }}>{monthlyAnalysis.operatingGrossProfitRate != null ? pct1(monthlyAnalysis.operatingGrossProfitRate) : "—"}</strong>
+              </div>
+              <div style={{ fontSize: ".9rem" }}>
                 営業利益 <strong style={{ fontSize: "1rem" }}>{dy(monthlyAnalysis.operatingProfitSum)}</strong> / 営業利益率 <strong style={{ fontSize: "1rem" }}>{pct(monthlyAnalysis.operatingProfitRate)}</strong>
               </div>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:".35rem .8rem", fontSize:".84rem", color:"rgba(240,232,208,0.85)" }}>
                 <div>実績日数 <strong>{num(monthlyAnalysis.actualDayCount)}日</strong></div>
                 <div>本日以降の予定 <strong>{num(monthlyAnalysis.futureDayCount)}件</strong></div>
                 <div>1日平均売上 <strong>{dy(monthlyAnalysis.avgDailySales)}</strong></div>
+              </div>
+              <div
+                style={{
+                  marginTop: ".55rem",
+                  paddingTop: ".5rem",
+                  borderTop: "1px dashed rgba(201,168,76,0.16)",
+                  fontSize: ".78rem",
+                  color: "rgba(240,232,208,0.68)",
+                }}
+              >
+                <div style={{ fontSize: ".66rem", color: "rgba(201,168,76,0.78)", marginBottom: ".28rem" }}>前年同月比較（2025年固定）</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: ".28rem .65rem" }}>
+                  <div>
+                    前年同月売上{" "}
+                    <strong style={{ color: "rgba(240,232,208,0.88)" }}>
+                      {monthlyAnalysis.priorYearMonth.prevMonthSales != null ? dy(monthlyAnalysis.priorYearMonth.prevMonthSales) : "—"}
+                    </strong>
+                  </div>
+                  <div>
+                    前年同月差額{" "}
+                    <strong
+                      style={{
+                        color:
+                          monthlyAnalysis.priorYearMonth.prevMonthDiff != null
+                            ? monthlyAnalysis.priorYearMonth.prevMonthDiff >= 0
+                              ? "#9ec9a8"
+                              : "#dca06a"
+                            : undefined,
+                      }}
+                    >
+                      {monthlyAnalysis.priorYearMonth.prevMonthDiff != null
+                        ? signedDy(monthlyAnalysis.priorYearMonth.prevMonthDiff)
+                        : "—"}
+                    </strong>
+                  </div>
+                  <div>
+                    前年同月比{" "}
+                    <strong style={{ color: "rgba(240,232,208,0.88)" }}>
+                      {monthlyAnalysis.priorYearMonth.prevMonthRate != null
+                        ? pct1(monthlyAnalysis.priorYearMonth.prevMonthRate)
+                        : "—"}
+                    </strong>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -2226,6 +2316,26 @@ export default function SalesModule({ events = [], navigateBack }) {
               ) : null}
             </div>
             <CostProfitBarList bars={monthlyAnalysis.costProfitBars} maxValue={monthlyAnalysis.costProfitMax} taxMode={taxMode} />
+            <div style={{ marginTop: ".55rem", paddingTop: ".5rem", borderTop: "1px dashed rgba(201,168,76,0.2)" }}>
+              <div style={{ fontSize: ".66rem", color: "rgba(201,168,76,0.85)", marginBottom: ".32rem" }}>営業粗利</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: ".32rem .55rem", fontSize: ".74rem", color: "rgba(240,232,208,0.82)" }}>
+                <div>
+                  営業粗利{" "}
+                  <span style={{ color: "#f0e8d0" }}>
+                    {monthlyAnalysis.totalSalesSum > 0 ? dy(monthlyAnalysis.operatingGrossProfitSum) : "—"}
+                  </span>
+                </div>
+                <div>
+                  営業粗利率{" "}
+                  <span style={{ color: "#f0e8d0" }}>
+                    {monthlyAnalysis.operatingGrossProfitRate != null ? pct1(monthlyAnalysis.operatingGrossProfitRate) : "—"}
+                  </span>
+                </div>
+              </div>
+              <div style={{ fontSize: ".6rem", color: "rgba(240,232,208,0.5)", marginTop: ".22rem" }}>
+                ※売上 − 仕入れ合計 − 経費（人件費・営業利益の追加差引は含みません）
+              </div>
+            </div>
             <div style={{ marginTop: ".55rem", paddingTop: ".5rem", borderTop: "1px dashed rgba(201,168,76,0.2)" }}>
               <div style={{ fontSize: ".66rem", color: "rgba(201,168,76,0.85)", marginBottom: ".32rem" }}>原価率</div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: ".32rem .55rem", fontSize: ".74rem", color: "rgba(240,232,208,0.82)" }}>
@@ -2547,6 +2657,17 @@ export default function SalesModule({ events = [], navigateBack }) {
                       </div>
                     </>
                   )}
+                  <div>
+                    年間営業粗利 <strong>{yearlyAnalysis.yearlyTotalSales > 0 ? dy(yearlyAnalysis.yearlyOperatingGrossProfit) : "—"}</strong>
+                  </div>
+                  <div>
+                    年間営業粗利率{" "}
+                    <strong>
+                      {yearlyAnalysis.yearlyOperatingGrossProfitRate != null
+                        ? pct1(yearlyAnalysis.yearlyOperatingGrossProfitRate)
+                        : "—"}
+                    </strong>
+                  </div>
                   <div>年間営業利益 <strong>{dy(yearlyAnalysis.yearlyOperatingProfit)}</strong></div>
                   <div>年間営業利益率 <strong>{pct(yearlyAnalysis.yearlyOperatingProfitRate)}</strong></div>
                   <div>年間飲食売上 <strong>{dy(yearlyAnalysis.yearlyFoodDrink)}</strong></div>
@@ -2572,6 +2693,12 @@ export default function SalesModule({ events = [], navigateBack }) {
                     <div style={analysisSecTitle("summary", ".5rem")}>着地予測</div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: ".35rem .8rem", fontSize: ".82rem", color: "rgba(240,232,208,0.88)" }}>
                       <div>現在までの実績売上 <strong style={{ color: landingTone.accent }}>{dy(landing?.performanceSalesSum)}</strong></div>
+                      <div>
+                        実績月平均売上{" "}
+                        <strong style={{ color: landingTone.accent }}>
+                          {landing?.avgMonthlySalesFromYearlyTotal != null ? dy(landing.avgMonthlySalesFromYearlyTotal) : "—"}
+                        </strong>
+                      </div>
                       {hasFullYearTarget ? (
                         <>
                           <div>年間目標 <strong>{dy(landing?.fullYearTargetSum)}</strong></div>
@@ -2592,6 +2719,11 @@ export default function SalesModule({ events = [], navigateBack }) {
                             現在ペースでの年間着地予測{" "}
                             <strong style={{ color: landingTone.accent }}>{landing?.paceForecast != null ? dy(landing.paceForecast) : "—"}</strong>
                           </div>
+                          {landing?.avgMonthlySalesFromYearlyTotal != null && landing?.paceForecast != null ? (
+                            <div style={{ gridColumn: "1 / -1", fontSize: ".68rem", color: "rgba(240,232,208,0.58)" }}>
+                              実績月平均 {dy(landing.avgMonthlySalesFromYearlyTotal)} × 12ヶ月 ≒ 着地予測の目安
+                            </div>
+                          ) : null}
                           <div>
                             着地予測と年間目標の差額{" "}
                             <strong style={{ color: landingTone.accent }}>
@@ -2612,11 +2744,16 @@ export default function SalesModule({ events = [], navigateBack }) {
                             現在ペースでの年間着地予測{" "}
                             <strong style={{ color: landingTone.accent }}>{landing?.paceForecast != null ? dy(landing.paceForecast) : "—"}</strong>
                           </div>
+                          {landing?.avgMonthlySalesFromYearlyTotal != null && landing?.paceForecast != null ? (
+                            <div style={{ gridColumn: "1 / -1", fontSize: ".68rem", color: "rgba(240,232,208,0.58)" }}>
+                              実績月平均 {dy(landing.avgMonthlySalesFromYearlyTotal)} × 12ヶ月 ≒ 着地予測の目安
+                            </div>
+                          ) : null}
                         </>
                       )}
                     </div>
                     <div style={{ fontSize: ".62rem", color: "rgba(240,232,208,0.52)", marginTop: ".42rem", lineHeight: 1.5 }}>
-                      ※実績月（売上が1円以上の月）{num(landing?.performanceMonthCount)}ヶ月の平均から年間12ヶ月分を試算しています。
+                      ※実績月平均売上は年間売上合計 ÷ 実績月数（売上が1円以上の月）です。着地予測は実績月の平均売上から年間12ヶ月分を試算しています（{num(landing?.performanceMonthCount)}ヶ月ベース）。
                       {!hasFullYearTarget ? (
                         <span style={{ display: "block", marginTop: ".22rem" }}>
                           ※年間目標が未設定のため、必要月商・目標差額は表示していません。現在ペース着地は実績月平均からの概算です。
@@ -2888,6 +3025,28 @@ export default function SalesModule({ events = [], navigateBack }) {
                 </div>
                 <div style={{ marginBottom: ".65rem" }}>
                   <CostProfitBarList bars={yearlyAnalysis.yearlyCostBars} maxValue={yearlyAnalysis.costProfitMax} taxMode={taxMode} />
+                </div>
+                <div style={{ marginTop: ".55rem", paddingTop: ".5rem", borderTop: "1px dashed rgba(201,168,76,0.2)" }}>
+                  <div style={{ fontSize: ".66rem", color: "rgba(201,168,76,0.85)", marginBottom: ".32rem" }}>営業粗利</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: ".32rem .55rem", fontSize: ".78rem", color: "rgba(240,232,208,0.85)" }}>
+                    <div>
+                      営業粗利{" "}
+                      <span style={{ color: "#f0e8d0" }}>
+                        {yearlyAnalysis.yearlyTotalSales > 0 ? dy(yearlyAnalysis.yearlyOperatingGrossProfit) : "—"}
+                      </span>
+                    </div>
+                    <div>
+                      営業粗利率{" "}
+                      <span style={{ color: "#f0e8d0" }}>
+                        {yearlyAnalysis.yearlyOperatingGrossProfitRate != null
+                          ? pct1(yearlyAnalysis.yearlyOperatingGrossProfitRate)
+                          : "—"}
+                      </span>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: ".6rem", color: "rgba(240,232,208,0.5)", marginTop: ".22rem" }}>
+                    ※売上 − 仕入れ合計 − 経費。営業利益（既存値）は人件費等を含む別指標です。
+                  </div>
                 </div>
                 <div style={{ marginTop: ".55rem", paddingTop: ".5rem", borderTop: "1px dashed rgba(201,168,76,0.2)" }}>
                   <div style={{ fontSize: ".66rem", color: "rgba(201,168,76,0.85)", marginBottom: ".32rem" }}>飲食粗利</div>
