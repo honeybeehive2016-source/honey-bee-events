@@ -232,6 +232,14 @@ export default function SalesModule({ events = [], navigateBack }) {
     const avgDailySales = actualDayCount > 0 ? totalSalesSum / actualDayCount : null;
     const operatingProfitSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.operatingProfit || 0), 0);
     const operatingProfitRate = calcRate(operatingProfitSum, totalSalesSum);
+    const drinkSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.drinkSales || 0), 0);
+    const foodSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.foodSales || 0), 0);
+    const rawOtherSales = totalSalesSum - drinkSalesSum - foodSalesSum;
+    const otherSalesSum = Math.max(0, rawOtherSales);
+    const laborCostSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.laborCost || 0), 0);
+    const purchaseTotalSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.purchaseTotal || 0), 0);
+    const expenseSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.expense || 0), 0);
+    const bandGuaranteeSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.bandGuarantee || 0), 0);
     const validTargetRows = actualRows.filter((r) => Number(r?.metrics?.targetSales || 0) > 0);
     const underTargetRows = validTargetRows.filter((r) => {
       const rate = calcRate(r?.metrics?.totalSales, r?.metrics?.targetSales);
@@ -288,6 +296,70 @@ export default function SalesModule({ events = [], navigateBack }) {
         };
       });
 
+    const dailyTrendRows = [...actualRows]
+      .sort((a, b) => {
+        const d = (a.businessDate || "").localeCompare(b.businessDate || "");
+        if (d !== 0) return d;
+        return (a.sourceColumn || 0) - (b.sourceColumn || 0);
+      })
+      .map((r) => {
+        const totalSales = Number(r?.metrics?.totalSales || 0);
+        const targetSales = Number(r?.metrics?.targetSales || 0);
+        const achievementRate = calcRate(totalSales, targetSales);
+        const eventName = resolveEventNameForAdmin(r, r.resolvedEventNames) || "イベント未登録";
+        const tone = targetSales > 0
+          ? (achievementRate != null && achievementRate >= 100
+            ? "linear-gradient(180deg, rgba(126,200,126,0.95), rgba(126,200,126,0.55))"
+            : "linear-gradient(180deg, rgba(205,134,74,0.95), rgba(205,134,74,0.55))")
+          : "linear-gradient(180deg, rgba(130,130,130,0.9), rgba(130,130,130,0.5))";
+        return {
+          key: `${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}_trend`,
+          businessDate: r.businessDate,
+          eventName,
+          totalSales,
+          targetSales,
+          achievementRate,
+          tone,
+        };
+      });
+    const trendMaxSales = dailyTrendRows.reduce((m, r) => Math.max(m, Number(r.totalSales || 0)), 0);
+
+    const salesComposition = {
+      drink: drinkSalesSum,
+      food: foodSalesSum,
+      other: otherSalesSum,
+      total: totalSalesSum,
+      drinkRate: calcRate(drinkSalesSum, totalSalesSum),
+      foodRate: calcRate(foodSalesSum, totalSalesSum),
+      otherRate: calcRate(otherSalesSum, totalSalesSum),
+    };
+
+    const costProfitBars = [
+      { key: "profit", label: "営業利益", value: operatingProfitSum, tone: "linear-gradient(90deg, rgba(126,200,126,0.92), rgba(126,200,126,0.58))" },
+      { key: "labor", label: "人件費", value: laborCostSum, tone: "linear-gradient(90deg, rgba(201,168,76,0.9), rgba(201,168,76,0.5))" },
+      { key: "purchase", label: "仕入れ", value: purchaseTotalSum, tone: "linear-gradient(90deg, rgba(205,134,74,0.9), rgba(205,134,74,0.52))" },
+      { key: "expense", label: "経費", value: expenseSum, tone: "linear-gradient(90deg, rgba(155,84,94,0.9), rgba(155,84,94,0.52))" },
+      { key: "band", label: "バンドギャラ", value: bandGuaranteeSum, tone: "linear-gradient(90deg, rgba(137,104,171,0.9), rgba(137,104,171,0.5))" },
+    ];
+    const costProfitMax = costProfitBars.reduce((m, r) => Math.max(m, Number(r.value || 0)), 0);
+
+    const topSalesDay = salesRankingTop5[0];
+    const biggestShortfallDay = underTargetWorst5[0];
+    const topProfitDay = profitRankingTop5[0];
+    const monthlyHighlights = [
+      topSalesDay
+        ? `売上トップ日：${(topSalesDay.businessDate || "").slice(5).replace("-", "/")} ${topSalesDay.eventName} ${yen(topSalesDay.totalSales)}`
+        : "売上トップ日：データなし",
+      biggestShortfallDay
+        ? `最大未達日：${(biggestShortfallDay.businessDate || "").slice(5).replace("-", "/")} ${biggestShortfallDay.eventName} 不足 ${yen(biggestShortfallDay.shortfall)}`
+        : "最大未達日：未達データなし",
+      topProfitDay
+        ? `利益トップ日：${(topProfitDay.businessDate || "").slice(5).replace("-", "/")} ${topProfitDay.eventName} ${yen(topProfitDay.operatingProfit)}`
+        : "利益トップ日：データなし",
+      `売上構成：ドリンク ${pct(salesComposition.drinkRate)} / フード ${pct(salesComposition.foodRate)} / その他 ${pct(salesComposition.otherRate)}`,
+      `コスト傾向：人件費 ${pct(calcRate(laborCostSum, totalSalesSum))} / 仕入れ ${pct(calcRate(purchaseTotalSum, totalSalesSum))}`,
+    ];
+
     return {
       targetMonth,
       currentBusinessDate,
@@ -302,6 +374,19 @@ export default function SalesModule({ events = [], navigateBack }) {
       avgDailySales,
       operatingProfitSum,
       operatingProfitRate,
+      drinkSalesSum,
+      foodSalesSum,
+      otherSalesSum,
+      laborCostSum,
+      purchaseTotalSum,
+      expenseSum,
+      bandGuaranteeSum,
+      dailyTrendRows,
+      trendMaxSales,
+      salesComposition,
+      costProfitBars,
+      costProfitMax,
+      monthlyHighlights,
       validTargetRows,
       underTargetRows,
       salesRankingTop5,
@@ -496,6 +581,74 @@ export default function SalesModule({ events = [], navigateBack }) {
               <div>1日平均売上: <strong>{yen(monthlyAnalysis.avgDailySales)}</strong></div>
               <div>営業利益合計: <strong>{yen(monthlyAnalysis.operatingProfitSum)}</strong></div>
               <div>営業利益率: <strong>{pct(monthlyAnalysis.operatingProfitRate)}</strong></div>
+            </div>
+          </div>
+
+          <div style={{ ...S.card }}>
+            <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>今月のポイント</div>
+            <div style={{ display:"grid", gap:".3rem", fontSize:".78rem", color:"rgba(240,232,208,0.82)" }}>
+              {monthlyAnalysis.monthlyHighlights.map((line, i) => (
+                <div key={i}>・{line}</div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ ...S.card }}>
+            <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>日別売上推移</div>
+            {monthlyAnalysis.dailyTrendRows.length === 0 ? (
+              <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.45)" }}>データなし</div>
+            ) : (
+              <div style={{ display:"flex", alignItems:"flex-end", gap:".3rem", height:120 }}>
+                {monthlyAnalysis.dailyTrendRows.map((r) => {
+                  const h = monthlyAnalysis.trendMaxSales > 0
+                    ? Math.max(10, Math.round((Number(r.totalSales || 0) / monthlyAnalysis.trendMaxSales) * 100))
+                    : 10;
+                  return (
+                    <div
+                      key={r.key}
+                      style={{ flex:1, minWidth:0, textAlign:"center" }}
+                      title={`${r.businessDate} / ${r.eventName} / 売上 ${yen(r.totalSales)} / 目標 ${yen(r.targetSales)} / 達成率 ${pct(r.achievementRate)}`}
+                    >
+                      <div style={{ height:`${h}%`, minHeight:8, borderRadius:"4px 4px 0 0", background:r.tone }} />
+                      <div style={{ marginTop:".2rem", fontSize:".58rem", color:"rgba(240,232,208,0.6)" }}>{(r.businessDate || "").slice(5)}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div style={{ ...S.card }}>
+            <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>売上構成</div>
+            <div style={{ position:"relative", width:"100%", height:16, borderRadius:999, overflow:"hidden", background:"rgba(240,232,208,0.1)", border:"1px solid rgba(201,168,76,0.22)", marginBottom:".45rem" }}>
+              <div style={{ position:"absolute", left:0, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.drinkRate || 0)))}%`, background:"linear-gradient(90deg, rgba(126,200,126,0.9), rgba(126,200,126,0.55))" }} />
+              <div style={{ position:"absolute", left:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.drinkRate || 0)))}%`, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.foodRate || 0)))}%`, background:"linear-gradient(90deg, rgba(201,168,76,0.9), rgba(201,168,76,0.55))" }} />
+              <div style={{ position:"absolute", right:0, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.otherRate || 0)))}%`, background:"linear-gradient(90deg, rgba(155,84,94,0.9), rgba(155,84,94,0.55))" }} />
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:".35rem .8rem", fontSize:".76rem" }}>
+              <div>ドリンク: <strong>{yen(monthlyAnalysis.drinkSalesSum)}</strong>（{pct(monthlyAnalysis.salesComposition.drinkRate)}）</div>
+              <div>フード: <strong>{yen(monthlyAnalysis.foodSalesSum)}</strong>（{pct(monthlyAnalysis.salesComposition.foodRate)}）</div>
+              <div>その他: <strong>{yen(monthlyAnalysis.otherSalesSum)}</strong>（{pct(monthlyAnalysis.salesComposition.otherRate)}）</div>
+            </div>
+          </div>
+
+          <div style={{ ...S.card }}>
+            <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>コスト・利益比較</div>
+            <div style={{ display:"grid", gap:".4rem" }}>
+              {monthlyAnalysis.costProfitBars.map((b) => {
+                const w = monthlyAnalysis.costProfitMax > 0
+                  ? Math.max(4, Math.round((Number(b.value || 0) / monthlyAnalysis.costProfitMax) * 100))
+                  : 4;
+                return (
+                  <div key={b.key} style={{ display:"grid", gridTemplateColumns:"110px 1fr auto", alignItems:"center", gap:".45rem" }}>
+                    <div style={{ fontSize:".74rem", color:"rgba(240,232,208,0.74)" }}>{b.label}</div>
+                    <div style={{ height:10, borderRadius:999, background:"rgba(240,232,208,0.1)", border:"1px solid rgba(201,168,76,0.18)", overflow:"hidden" }}>
+                      <div style={{ height:"100%", width:`${w}%`, background:b.tone }} />
+                    </div>
+                    <div style={{ fontSize:".74rem", color:"#f0e8d0" }}>{yen(b.value)}</div>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
