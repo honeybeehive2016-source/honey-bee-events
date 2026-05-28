@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 
 const SALES_API_URL = "/api/sales";
 const SALES_ROLE_MODE_KEY = "honeybee:salesRoleMode";
+const SALES_ADMIN_UNLOCKED_KEY = "honeybee:salesAdminUnlocked";
+const SALES_ADMIN_PIN = "2002";
 const SALES_ADMIN_TAB_KEY = "honeybee:salesAdminTab";
 const SALES_TARGET_MONTH_KEY = "honeybee:salesTargetMonth";
 const SALES_TAX_MODE_KEY = "honeybee:salesTaxMode";
@@ -783,10 +785,39 @@ function normalizeMonth(value) {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   return `${d.getFullYear()}-${m}`;
 }
+function readSalesAdminUnlocked() {
+  try {
+    return localStorage.getItem(SALES_ADMIN_UNLOCKED_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+function setSalesAdminUnlocked(unlocked) {
+  try {
+    if (unlocked) {
+      localStorage.setItem(SALES_ADMIN_UNLOCKED_KEY, "true");
+    } else {
+      localStorage.removeItem(SALES_ADMIN_UNLOCKED_KEY);
+    }
+  } catch {}
+}
+function requestSalesAdminAccess_() {
+  if (readSalesAdminUnlocked()) return true;
+  const input = window.prompt("管理表示用PINを入力してください");
+  if (input === null) return false;
+  if (String(input).trim() === SALES_ADMIN_PIN) {
+    setSalesAdminUnlocked(true);
+    return true;
+  }
+  window.alert("PINが違います。");
+  return false;
+}
 function readSalesRoleMode() {
   try {
     const v = localStorage.getItem(SALES_ROLE_MODE_KEY);
-    return v === "staff" || v === "admin" ? v : "staff";
+    const mode = v === "staff" || v === "admin" ? v : "staff";
+    if (mode === "admin" && !readSalesAdminUnlocked()) return "staff";
+    return mode;
   } catch {
     return "staff";
   }
@@ -2519,11 +2550,23 @@ export default function SalesModule({ events = [], navigateBack }) {
   const compactDy = (v) => formatDisplayCompactYen(v, taxMode);
   const signedDy = (v) => formatSignedDisplayYen(v, taxMode);
 
+  const switchToStaffMode = () => {
+    setRoleMode("staff");
+  };
+  const switchToAdminMode = () => {
+    if (roleMode === "admin") return;
+    if (requestSalesAdminAccess_()) setRoleMode("admin");
+  };
+  const lockAdminView = () => {
+    setSalesAdminUnlocked(false);
+    setRoleMode("staff");
+  };
+
   const navigateToMonthAnalysis = (month) => {
     const tm = normalizeMonth(month);
     if (tm) setTargetMonth(tm);
     setAdminTab("analysis");
-    setRoleMode("admin");
+    if (readSalesAdminUnlocked()) setRoleMode("admin");
   };
 
   const yearlyAlertsDisplay = useMemo(() => {
@@ -2574,8 +2617,13 @@ export default function SalesModule({ events = [], navigateBack }) {
             width: vp.narrow ? "100%" : "auto",
           }}
         >
-          <button type="button" style={{ ...S.btn(roleMode === "staff" ? "gold" : "ghost"), ...touchBtnExtra(vp.narrow) }} onClick={() => setRoleMode("staff")}>現場表示</button>
-          <button type="button" style={{ ...S.btn(roleMode === "admin" ? "gold" : "ghost"), ...touchBtnExtra(vp.narrow) }} onClick={() => setRoleMode("admin")}>管理表示</button>
+          <button type="button" style={{ ...S.btn(roleMode === "staff" ? "gold" : "ghost"), ...touchBtnExtra(vp.narrow) }} onClick={switchToStaffMode}>現場表示</button>
+          <button type="button" style={{ ...S.btn(roleMode === "admin" ? "gold" : "ghost"), ...touchBtnExtra(vp.narrow) }} onClick={switchToAdminMode}>管理表示</button>
+          {roleMode === "admin" && (
+            <button type="button" style={{ ...S.btn("sm"), ...touchBtnExtra(vp.narrow), color: "rgba(220,168,130,0.9)", border: "1px solid rgba(201,168,76,0.28)" }} onClick={lockAdminView}>
+              管理ロック
+            </button>
+          )}
           <span style={{ display:"inline-flex", gap:".2rem", alignItems:"center", padding:".12rem .2rem", borderRadius:4, border:"1px solid rgba(201,168,76,0.22)", background:"rgba(0,0,0,0.2)", flexWrap:"wrap" }}>
             <button type="button" style={{ ...S.btn(taxMode === "gross" ? "gold" : "ghost"), ...touchBtnExtra(vp.narrow) }} onClick={() => setTaxMode("gross")}>税込</button>
             <button type="button" style={{ ...S.btn(taxMode === "net" ? "gold" : "ghost"), ...touchBtnExtra(vp.narrow) }} onClick={() => setTaxMode("net")}>税抜</button>
