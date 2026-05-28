@@ -254,6 +254,12 @@ function emptyMonthAggregate_(targetMonth, status, fetchError) {
     targetSalesSum: 0,
     progressRate: null,
     foodDrinkSalesSum: 0,
+    foodDrinkSalesIncludingBandSum: 0,
+    bandFoodDrinkSalesSum: 0,
+    hasBandDrinkBreakdown: false,
+    hasBandFoodBreakdown: false,
+    bandDrinkSalesSum: null,
+    bandFoodSalesSum: null,
     drinkSalesSum: 0,
     foodSalesSum: 0,
     operatingProfitSum: 0,
@@ -280,6 +286,16 @@ function aggregateMonthFromRecords_(records, targetMonth, currentBusinessDate, m
   const totalSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.totalSales || 0), 0);
   const targetSalesSum = monthRows.reduce((s, r) => s + Number(r?.metrics?.targetSales || 0), 0);
   const foodDrinkSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.foodDrinkSales || 0), 0);
+  const bandFoodDrinkSalesSum = actualRows.reduce((s, r) => s + bandFoodDrinkSalesFromMetrics_(r?.metrics), 0);
+  const foodDrinkSalesIncludingBandSum = foodDrinkSalesSum + bandFoodDrinkSalesSum;
+  const hasBandDrinkBreakdown = actualRows.some((r) => pickMetricNullable(r?.metrics, BAND_DRINK_SALES_KEYS) != null);
+  const hasBandFoodBreakdown = actualRows.some((r) => pickMetricNullable(r?.metrics, BAND_FOOD_SALES_KEYS) != null);
+  const bandDrinkSalesSum = hasBandDrinkBreakdown
+    ? actualRows.reduce((s, r) => s + pickMetricValue(r?.metrics, BAND_DRINK_SALES_KEYS), 0)
+    : null;
+  const bandFoodSalesSum = hasBandFoodBreakdown
+    ? actualRows.reduce((s, r) => s + pickMetricValue(r?.metrics, BAND_FOOD_SALES_KEYS), 0)
+    : null;
   const drinkSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.drinkSales || 0), 0);
   const foodSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.foodSales || 0), 0);
   const operatingProfitSum = pickMonthlyCostMetric_(monthlySummary, actualRows, "operatingProfit");
@@ -301,6 +317,12 @@ function aggregateMonthFromRecords_(records, targetMonth, currentBusinessDate, m
     targetSalesSum,
     progressRate: calcRate(totalSalesSum, targetSalesSum),
     foodDrinkSalesSum,
+    foodDrinkSalesIncludingBandSum,
+    bandFoodDrinkSalesSum,
+    hasBandDrinkBreakdown,
+    hasBandFoodBreakdown,
+    bandDrinkSalesSum,
+    bandFoodSalesSum,
     drinkSalesSum,
     foodSalesSum,
     operatingProfitSum,
@@ -320,7 +342,12 @@ function aggregateMonthFromRecords_(records, targetMonth, currentBusinessDate, m
       foodPurchaseSum,
       foodDrinkSalesSum,
       drinkSalesSum,
-      foodSalesSum
+      foodSalesSum,
+      bandFoodDrinkSalesSum,
+      hasBandDrinkBreakdown,
+      bandDrinkSalesSum,
+      hasBandFoodBreakdown,
+      bandFoodSalesSum
     ),
     shortfall: Math.max(0, targetSalesSum - totalSalesSum),
   };
@@ -430,6 +457,20 @@ const RENTAL_SALES_KEYS = ["hallRentalSales", "rentalSales", "hallRentalFee", "r
 const BAND_FOOD_DRINK_SALES_KEYS = ["bandFoodDrinkSales"];
 const BAND_DRINK_SALES_KEYS = ["bandDrinkSales", "bandMealDrinkSales", "bandDrink"];
 const BAND_FOOD_SALES_KEYS = ["bandFoodSales", "bandMealFoodSales", "bandFood", "bandMealSales"];
+function bandFoodDrinkSalesFromMetrics_(metrics) {
+  return pickMetricValue(metrics, BAND_FOOD_DRINK_SALES_KEYS);
+}
+function foodDrinkSalesIncludingBand_(foodDrinkSales, bandFoodDrinkSales) {
+  const base = foodDrinkSales != null ? Number(foodDrinkSales) : 0;
+  const band = bandFoodDrinkSales != null ? Number(bandFoodDrinkSales) : 0;
+  if (foodDrinkSales == null && bandFoodDrinkSales == null) return null;
+  return base + band;
+}
+function foodDrinkIncludingBandFromRecord_(record) {
+  const m = record?.metrics;
+  if (!m) return null;
+  return foodDrinkSalesIncludingBand_(m.foodDrinkSales, pickMetricNullable(m, BAND_FOOD_DRINK_SALES_KEYS));
+}
 const SALES_COMPOSITION_COLORS = {
   drink: "linear-gradient(90deg, rgba(86,156,255,0.95), rgba(86,156,255,0.62))",
   food: "linear-gradient(90deg, rgba(102,197,124,0.95), rgba(102,197,124,0.62))",
@@ -663,11 +704,32 @@ function calcRate(numer, denom) {
   if (!(d > 0)) return null;
   return (n / d) * 100;
 }
-function buildPurchaseCostRates_(purchaseTotal, drinkPurchase, foodPurchase, foodDrinkSales, drinkSales, foodSales) {
+function buildPurchaseCostRates_(
+  purchaseTotal,
+  drinkPurchase,
+  foodPurchase,
+  foodDrinkSales,
+  drinkSales,
+  foodSales,
+  bandFoodDrinkSales,
+  hasBandDrinkBreakdown,
+  bandDrinkSalesSum,
+  hasBandFoodBreakdown,
+  bandFoodSalesSum
+) {
+  const foodDrinkIncludingBand = Number(foodDrinkSales || 0) + Number(bandFoodDrinkSales || 0);
+  let drinkCostRate = calcRate(drinkPurchase, drinkSales);
+  if (hasBandDrinkBreakdown) {
+    drinkCostRate = calcRate(drinkPurchase, Number(drinkSales || 0) + Number(bandDrinkSalesSum || 0));
+  }
+  let foodCostRate = calcRate(foodPurchase, foodSales);
+  if (hasBandFoodBreakdown) {
+    foodCostRate = calcRate(foodPurchase, Number(foodSales || 0) + Number(bandFoodSalesSum || 0));
+  }
   return {
-    totalPurchaseRate: calcRate(purchaseTotal, foodDrinkSales),
-    drinkCostRate: calcRate(drinkPurchase, drinkSales),
-    foodCostRate: calcRate(foodPurchase, foodSales),
+    totalPurchaseRate: calcRate(purchaseTotal, foodDrinkIncludingBand),
+    drinkCostRate,
+    foodCostRate,
   };
 }
 const YEARLY_TABLE_STYLE = {
@@ -902,7 +964,8 @@ export default function SalesModule({ events = [], navigateBack }) {
     const foodDrinkSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.foodDrinkSales || 0), 0);
     const drinkSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.drinkSales || 0), 0);
     const foodSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.foodSales || 0), 0);
-    const bandFoodDrinkSalesSum = actualRows.reduce((s, r) => s + pickMetricValue(r?.metrics, BAND_FOOD_DRINK_SALES_KEYS), 0);
+    const bandFoodDrinkSalesSum = actualRows.reduce((s, r) => s + bandFoodDrinkSalesFromMetrics_(r?.metrics), 0);
+    const foodDrinkSalesIncludingBandSum = foodDrinkSalesSum + bandFoodDrinkSalesSum;
     const hasBandDrinkBreakdown = actualRows.some((r) => pickMetricNullable(r?.metrics, BAND_DRINK_SALES_KEYS) != null);
     const hasBandFoodBreakdown = actualRows.some((r) => pickMetricNullable(r?.metrics, BAND_FOOD_SALES_KEYS) != null);
     const bandDrinkSalesSum = hasBandDrinkBreakdown
@@ -967,35 +1030,39 @@ export default function SalesModule({ events = [], navigateBack }) {
       });
 
     const foodDrinkRankingTop10 = actualRows
-      .filter((r) => r?.metrics?.foodDrinkSales != null)
-      .sort((a, b) => Number(b?.metrics?.foodDrinkSales || 0) - Number(a?.metrics?.foodDrinkSales || 0))
-      .slice(0, 10)
       .map((r) => {
-        const foodDrinkSales = Number(r?.metrics?.foodDrinkSales || 0);
+        const foodDrinkSalesBase = r?.metrics?.foodDrinkSales != null ? Number(r.metrics.foodDrinkSales) : null;
+        const bandFoodDrinkSales = pickMetricNullable(r?.metrics, BAND_FOOD_DRINK_SALES_KEYS);
+        const foodDrinkSalesIncludingBand = foodDrinkSalesIncludingBand_(foodDrinkSalesBase, bandFoodDrinkSales);
         const totalSales = Number(r?.metrics?.totalSales || 0);
         return {
           key: `${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}_fooddrink`,
           businessDate: r.businessDate,
           eventName: resolveEventNameForAdmin(r, r.resolvedEventNames),
-          foodDrinkSales,
+          foodDrinkSalesBase,
+          bandFoodDrinkSales: bandFoodDrinkSales != null ? Number(bandFoodDrinkSales) : null,
+          foodDrinkSalesIncludingBand,
           foodDrinkUnitPrice: r?.metrics?.foodDrinkUnitPrice != null ? Number(r.metrics.foodDrinkUnitPrice) : null,
-          foodDrinkRate: calcRate(foodDrinkSales, totalSales),
+          foodDrinkRate: calcRate(foodDrinkSalesIncludingBand, totalSales),
         };
-      });
+      })
+      .filter((r) => r.foodDrinkSalesIncludingBand != null && r.foodDrinkSalesIncludingBand > 0)
+      .sort((a, b) => Number(b.foodDrinkSalesIncludingBand || 0) - Number(a.foodDrinkSalesIncludingBand || 0))
+      .slice(0, 10);
     const drinkRankingTop10 = actualRows
       .filter((r) => r?.metrics?.drinkSales != null)
       .sort((a, b) => Number(b?.metrics?.drinkSales || 0) - Number(a?.metrics?.drinkSales || 0))
       .slice(0, 10)
       .map((r) => {
         const drinkSales = Number(r?.metrics?.drinkSales || 0);
-        const foodDrinkSales = Number(r?.metrics?.foodDrinkSales || 0);
+        const foodDrinkIncluding = foodDrinkIncludingBandFromRecord_(r) ?? 0;
         const totalSales = Number(r?.metrics?.totalSales || 0);
         return {
           key: `${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}_drink`,
           businessDate: r.businessDate,
           eventName: resolveEventNameForAdmin(r, r.resolvedEventNames),
           drinkSales,
-          drinkInFoodDrinkRate: calcRate(drinkSales, foodDrinkSales),
+          drinkInFoodDrinkRate: calcRate(drinkSales, foodDrinkIncluding),
           drinkInTotalRate: calcRate(drinkSales, totalSales),
         };
       });
@@ -1005,14 +1072,14 @@ export default function SalesModule({ events = [], navigateBack }) {
       .slice(0, 10)
       .map((r) => {
         const foodSales = Number(r?.metrics?.foodSales || 0);
-        const foodDrinkSales = Number(r?.metrics?.foodDrinkSales || 0);
+        const foodDrinkIncluding = foodDrinkIncludingBandFromRecord_(r) ?? 0;
         const totalSales = Number(r?.metrics?.totalSales || 0);
         return {
           key: `${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}_food`,
           businessDate: r.businessDate,
           eventName: resolveEventNameForAdmin(r, r.resolvedEventNames),
           foodSales,
-          foodInFoodDrinkRate: calcRate(foodSales, foodDrinkSales),
+          foodInFoodDrinkRate: calcRate(foodSales, foodDrinkIncluding),
           foodInTotalRate: calcRate(foodSales, totalSales),
         };
       });
@@ -1046,7 +1113,8 @@ export default function SalesModule({ events = [], navigateBack }) {
           achievementRate,
           tone: trendTone.tone,
           trendLabel: trendTone.label,
-          foodDrinkSales: r?.metrics?.foodDrinkSales != null ? Number(r.metrics.foodDrinkSales) : null,
+          foodDrinkSalesBase: r?.metrics?.foodDrinkSales != null ? Number(r.metrics.foodDrinkSales) : null,
+          foodDrinkSalesIncludingBand: foodDrinkIncludingBandFromRecord_(r),
           drinkSales: r?.metrics?.drinkSales != null ? Number(r.metrics.drinkSales) : null,
           foodSales: r?.metrics?.foodSales != null ? Number(r.metrics.foodSales) : null,
           customerUnitPrice: r?.metrics?.customerUnitPrice != null ? Number(r.metrics.customerUnitPrice) : null,
@@ -1093,7 +1161,12 @@ export default function SalesModule({ events = [], navigateBack }) {
       foodPurchaseSum,
       foodDrinkSalesSum,
       drinkSalesSum,
-      foodSalesSum
+      foodSalesSum,
+      bandFoodDrinkSalesSum,
+      hasBandDrinkBreakdown,
+      bandDrinkSalesSum,
+      hasBandFoodBreakdown,
+      bandFoodSalesSum
     );
     const costProfitBars = [
       { key: "profit", label: "営業利益", value: operatingProfitSum, tone: "linear-gradient(90deg, rgba(126,200,126,0.92), rgba(126,200,126,0.58))", note: "" },
@@ -1110,7 +1183,7 @@ export default function SalesModule({ events = [], navigateBack }) {
     const topFoodDrinkDay = foodDrinkRankingTop10[0];
     const monthlyHighlights = [
       topFoodDrinkDay
-        ? `飲食売上トップ日：${(topFoodDrinkDay.businessDate || "").slice(5).replace("-", "/")} ${topFoodDrinkDay.eventName} ${yen(topFoodDrinkDay.foodDrinkSales)}`
+        ? `飲食売上トップ日：${(topFoodDrinkDay.businessDate || "").slice(5).replace("-", "/")} ${topFoodDrinkDay.eventName} ${yen(topFoodDrinkDay.foodDrinkSalesIncludingBand)}`
         : "飲食売上トップ日：データなし",
       topSalesDay
         ? `売上トップ日：${(topSalesDay.businessDate || "").slice(5).replace("-", "/")} ${topSalesDay.eventName} ${yen(topSalesDay.totalSales)}`
@@ -1139,6 +1212,7 @@ export default function SalesModule({ events = [], navigateBack }) {
       operatingProfitSum,
       operatingProfitRate,
       foodDrinkSalesSum,
+      foodDrinkSalesIncludingBandSum,
       drinkSalesSum,
       foodSalesSum,
       purchaseCostRates,
@@ -1199,7 +1273,16 @@ export default function SalesModule({ events = [], navigateBack }) {
     const yearlyTotalSales = aggregatedMonths.reduce((s, m) => s + Number(m.totalSalesSum || 0), 0);
     const yearlyTarget = okMonths.reduce((s, m) => s + Number(m.targetSalesSum || 0), 0);
     const yearlyOperatingProfit = aggregatedMonths.reduce((s, m) => s + Number(m.operatingProfitSum || 0), 0);
-    const yearlyFoodDrink = aggregatedMonths.reduce((s, m) => s + Number(m.foodDrinkSalesSum || 0), 0);
+    const yearlyFoodDrink = aggregatedMonths.reduce((s, m) => s + Number(m.foodDrinkSalesIncludingBandSum || 0), 0);
+    const yearlyBandFoodDrink = aggregatedMonths.reduce((s, m) => s + Number(m.bandFoodDrinkSalesSum || 0), 0);
+    const yearlyHasBandDrink = aggregatedMonths.some((m) => m.hasBandDrinkBreakdown);
+    const yearlyHasBandFood = aggregatedMonths.some((m) => m.hasBandFoodBreakdown);
+    const yearlyBandDrink = yearlyHasBandDrink
+      ? aggregatedMonths.reduce((s, m) => s + Number(m.bandDrinkSalesSum || 0), 0)
+      : null;
+    const yearlyBandFood = yearlyHasBandFood
+      ? aggregatedMonths.reduce((s, m) => s + Number(m.bandFoodSalesSum || 0), 0)
+      : null;
     const yearlyDrink = aggregatedMonths.reduce((s, m) => s + Number(m.drinkSalesSum || 0), 0);
     const yearlyFood = aggregatedMonths.reduce((s, m) => s + Number(m.foodSalesSum || 0), 0);
     const yearlyLabor = aggregatedMonths.reduce((s, m) => s + Number(m.laborCostSum || 0), 0);
@@ -1208,13 +1291,19 @@ export default function SalesModule({ events = [], navigateBack }) {
     const yearlyFoodPurchase = aggregatedMonths.reduce((s, m) => s + Number(m.foodPurchaseSum || 0), 0);
     const yearlyExpense = aggregatedMonths.reduce((s, m) => s + Number(m.expenseSum || 0), 0);
     const yearlyBandGuarantee = aggregatedMonths.reduce((s, m) => s + Number(m.bandGuaranteeSum || 0), 0);
+    const yearlyFoodDrinkBase = aggregatedMonths.reduce((s, m) => s + Number(m.foodDrinkSalesSum || 0), 0);
     const yearlyPurchaseCostRates = buildPurchaseCostRates_(
       yearlyPurchase,
       yearlyDrinkPurchase,
       yearlyFoodPurchase,
-      yearlyFoodDrink,
+      yearlyFoodDrinkBase,
       yearlyDrink,
-      yearlyFood
+      yearlyFood,
+      yearlyBandFoodDrink,
+      yearlyHasBandDrink,
+      yearlyBandDrink,
+      yearlyHasBandFood,
+      yearlyBandFood
     );
     const topN = (list, cmp, n) => [...list].sort(cmp).slice(0, n);
     const salesTop3 = topN(
@@ -1229,7 +1318,7 @@ export default function SalesModule({ events = [], navigateBack }) {
     );
     const foodDrinkTop3 = topN(
       aggregatedMonths,
-      (a, b) => Number(b.foodDrinkSalesSum || 0) - Number(a.foodDrinkSalesSum || 0),
+      (a, b) => Number(b.foodDrinkSalesIncludingBandSum || 0) - Number(a.foodDrinkSalesIncludingBandSum || 0),
       3
     );
     const drinkTop3 = topN(
@@ -1680,13 +1769,15 @@ export default function SalesModule({ events = [], navigateBack }) {
                   <div style={{ marginBottom: ".55rem" }}>
                     <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>C. 飲食内訳</div>
                     <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:".34rem .7rem", fontSize:".8rem" }}>
-                      <div>飲食売上: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.foodDrinkSales)}</strong></div>
+                      <div>飲食売上: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.foodDrinkSalesIncludingBand)}</strong></div>
+                      <div>通常飲食売上: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.foodDrinkSalesBase)}</strong></div>
+                      {selectedTrendRow.bandFoodDrinkSales != null && Number(selectedTrendRow.bandFoodDrinkSales) > 0 ? (
+                        <div>バンド飲食代: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.bandFoodDrinkSales)}</strong></div>
+                      ) : null}
+                      <div>飲食比率: <strong style={{ fontSize: ".94rem" }}>{pct(calcRate(selectedTrendRow.foodDrinkSalesIncludingBand, selectedTrendRow.totalSales))}</strong></div>
                       <div>ドリンク売上: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.drinkSales)}</strong></div>
                       <div>フード売上: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.foodSales)}</strong></div>
                       <div>飲食単価: <strong style={{ fontSize: ".94rem" }}>{num(selectedTrendRow.foodDrinkUnitPrice)}</strong></div>
-                      {selectedTrendRow.bandFoodDrinkSales != null ? (
-                        <div>バンド飲食代: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.bandFoodDrinkSales)}</strong></div>
-                      ) : null}
                       {selectedTrendRow.bandDrinkSales != null ? (
                         <div>バンドドリンク: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.bandDrinkSales)}</strong></div>
                       ) : null}
@@ -1784,12 +1875,14 @@ export default function SalesModule({ events = [], navigateBack }) {
                   <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)" }}>{i + 1}. {r.businessDate}</div>
                   <div style={{ fontSize: ".78rem", color: "#f0e8d0" }}>{r.eventName || "イベント未登録"}</div>
                   <div style={{ fontSize: ".82rem" }}>
-                    <strong style={{ fontSize: ".94rem" }}>{yen(r.foodDrinkSales)}</strong>
+                    <strong style={{ fontSize: ".94rem" }}>{yen(r.foodDrinkSalesIncludingBand)}</strong>
+                    {r.bandFoodDrinkSales != null && r.bandFoodDrinkSales > 0 ? (
+                      <span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.55)", fontSize: ".68rem" }}>
+                        バンド飲食代 {yen(r.bandFoodDrinkSales)}
+                      </span>
+                    ) : null}
                     <span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.55)", fontSize: ".68rem" }}>
                       飲食比率 {pct(r.foodDrinkRate)}
-                    </span>
-                    <span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.55)", fontSize: ".68rem" }}>
-                      飲食単価 {num(r.foodDrinkUnitPrice)}
                     </span>
                   </div>
                 </div>
@@ -1903,7 +1996,7 @@ export default function SalesModule({ events = [], navigateBack }) {
                         <td style={YEARLY_TD_NUM}>{yearlyTableYen_(m, m.totalSalesSum)}</td>
                         <td style={YEARLY_TD_NUM}>{yearlyTableYen_(m, m.targetSalesSum)}</td>
                         <td style={YEARLY_TD_NUM}>{yearlyTablePct_(m, m.progressRate)}</td>
-                        <td style={YEARLY_TD_NUM}>{yearlyTableYen_(m, m.foodDrinkSalesSum)}</td>
+                        <td style={YEARLY_TD_NUM}>{yearlyTableYen_(m, m.foodDrinkSalesIncludingBandSum)}</td>
                         <td style={YEARLY_TD_NUM}>{yearlyTableYen_(m, m.operatingProfitSum)}</td>
                         <td style={YEARLY_TD_NUM}>{yearlyTableYen_(m, m.laborCostSum)}</td>
                         <td style={YEARLY_TD_STATUS}>
@@ -1954,14 +2047,14 @@ export default function SalesModule({ events = [], navigateBack }) {
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: ".65rem" }}>
                 <YearlyMonthBarChart title="月別売上推移" rows={yearlyAnalysis.monthRows} valueKey="totalSalesSum" barTone="linear-gradient(180deg, rgba(201,168,76,0.95), rgba(201,168,76,0.55))" />
                 <YearlyMonthBarChart title="月別目標達成率" rows={yearlyAnalysis.monthRows} valueKey="progressRate" barTone="linear-gradient(180deg, rgba(102,197,124,0.95), rgba(102,197,124,0.55))" formatTop={(r) => (r.progressRate != null ? pct(r.progressRate) : "—")} />
-                <YearlyMonthBarChart title="月別飲食売上" rows={yearlyAnalysis.monthRows} valueKey="foodDrinkSalesSum" barTone="linear-gradient(180deg, rgba(102,197,124,0.9), rgba(102,197,124,0.5))" />
+                <YearlyMonthBarChart title="月別飲食売上" rows={yearlyAnalysis.monthRows} valueKey="foodDrinkSalesIncludingBandSum" barTone="linear-gradient(180deg, rgba(102,197,124,0.9), rgba(102,197,124,0.5))" />
                 <YearlyMonthBarChart title="月別営業利益" rows={yearlyAnalysis.monthRows} valueKey="operatingProfitSum" barTone="linear-gradient(180deg, rgba(126,200,126,0.95), rgba(126,200,126,0.55))" />
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: ".65rem" }}>
                 <YearlyRankList title="月間売上TOP月" variant="rankSales" items={yearlyAnalysis.salesTop3} valueLabel="年間月次売上" formatValue={(r) => yen(r.totalSalesSum)} />
                 <YearlyRankList title="月間未達ワースト月" variant="rankUnder" items={yearlyAnalysis.underWorst3} valueLabel="進捗率" formatValue={(r) => pct(r.progressRate)} />
-                <YearlyRankList title="月間飲食売上TOP月" variant="rankFoodDrink" items={yearlyAnalysis.foodDrinkTop3} valueLabel="飲食売上" formatValue={(r) => yen(r.foodDrinkSalesSum)} />
+                <YearlyRankList title="月間飲食売上TOP月" variant="rankFoodDrink" items={yearlyAnalysis.foodDrinkTop3} valueLabel="飲食売上" formatValue={(r) => yen(r.foodDrinkSalesIncludingBandSum)} />
                 <YearlyRankList title="月間ドリンク売上TOP月" variant="rankDrink" items={yearlyAnalysis.drinkTop3} valueLabel="ドリンク売上" formatValue={(r) => yen(r.drinkSalesSum)} />
                 <YearlyRankList title="月間フード売上TOP月" variant="rankFood" items={yearlyAnalysis.foodTop3} valueLabel="フード売上" formatValue={(r) => yen(r.foodSalesSum)} />
               </div>
