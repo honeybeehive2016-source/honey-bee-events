@@ -282,8 +282,10 @@ export default function SalesModule({ events = [], navigateBack }) {
     const futureRows = monthRows.filter((r) => (r.businessDate || "") >= currentBusinessDate);
 
     const totalSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.totalSales || 0), 0);
-    const targetSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.targetSales || 0), 0);
-    const achievementRate = calcRate(totalSalesSum, targetSalesSum);
+    const actualTargetSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.targetSales || 0), 0);
+    const fullMonthTargetSalesSum = monthRows.reduce((s, r) => s + Number(r?.metrics?.targetSales || 0), 0);
+    const monthlyProgressRate = calcRate(totalSalesSum, fullMonthTargetSalesSum);
+    const actualAchievementRate = calcRate(totalSalesSum, actualTargetSalesSum);
     const actualDayCount = actualRows.length;
     const futureDayCount = futureRows.length;
     const avgDailySales = actualDayCount > 0 ? totalSalesSum / actualDayCount : null;
@@ -476,8 +478,10 @@ export default function SalesModule({ events = [], navigateBack }) {
       actualDayCount,
       futureDayCount,
       totalSalesSum,
-      targetSalesSum,
-      achievementRate,
+      fullMonthTargetSalesSum,
+      monthlyProgressRate,
+      actualTargetSalesSum,
+      actualAchievementRate,
       avgDailySales,
       operatingProfitSum,
       operatingProfitRate,
@@ -699,18 +703,28 @@ export default function SalesModule({ events = [], navigateBack }) {
             <div style={{ ...S.secTitle, marginBottom: ".55rem" }}>月次サマリー</div>
             <div style={{ display:"grid", gap:".52rem" }}>
               <div style={{ display:"flex", alignItems:"baseline", gap:".45rem", flexWrap:"wrap" }}>
-                <div style={{ fontFamily:"Georgia,serif", fontSize:"2.25rem", lineHeight:1, color:"#f3ead2" }}>{pct(monthlyAnalysis.achievementRate)}</div>
-                <span style={{ fontSize: ".76rem", fontWeight: 700, padding: ".16rem .58rem", borderRadius: 999, background: achievementTone(monthlyAnalysis.achievementRate, monthlyAnalysis.targetSalesSum > 0).chipBg, border: "1px solid " + achievementTone(monthlyAnalysis.achievementRate, monthlyAnalysis.targetSalesSum > 0).chipBd, color: achievementTone(monthlyAnalysis.achievementRate, monthlyAnalysis.targetSalesSum > 0).chipTx }}>
-                  {achievementTone(monthlyAnalysis.achievementRate, monthlyAnalysis.targetSalesSum > 0).label}
+                <div style={{ fontFamily:"Georgia,serif", fontSize:"2.25rem", lineHeight:1, color:"#f3ead2" }}>{pct(monthlyAnalysis.monthlyProgressRate)}</div>
+                <span style={{ fontSize: ".76rem", fontWeight: 700, padding: ".16rem .58rem", borderRadius: 999, background: achievementTone(monthlyAnalysis.monthlyProgressRate, monthlyAnalysis.fullMonthTargetSalesSum > 0).chipBg, border: "1px solid " + achievementTone(monthlyAnalysis.monthlyProgressRate, monthlyAnalysis.fullMonthTargetSalesSum > 0).chipBd, color: achievementTone(monthlyAnalysis.monthlyProgressRate, monthlyAnalysis.fullMonthTargetSalesSum > 0).chipTx }}>
+                  {achievementTone(monthlyAnalysis.monthlyProgressRate, monthlyAnalysis.fullMonthTargetSalesSum > 0).label}
                 </span>
               </div>
               <div style={{ fontSize: ".94rem", color: "rgba(240,232,208,0.95)", fontWeight: 700 }}>
-                {monthlyAnalysis.targetSalesSum > 0 && monthlyAnalysis.totalSalesSum >= monthlyAnalysis.targetSalesSum
-                  ? `月間目標達成 +${yen(Math.abs(monthlyAnalysis.totalSalesSum - monthlyAnalysis.targetSalesSum))}`
-                  : `あと ${yen(Math.max(0, monthlyAnalysis.targetSalesSum - monthlyAnalysis.totalSalesSum))}`}
+                {monthlyAnalysis.fullMonthTargetSalesSum > 0 && monthlyAnalysis.totalSalesSum >= monthlyAnalysis.fullMonthTargetSalesSum
+                  ? `月間目標達成 +${yen(Math.abs(monthlyAnalysis.totalSalesSum - monthlyAnalysis.fullMonthTargetSalesSum))}`
+                  : `あと ${yen(Math.max(0, monthlyAnalysis.fullMonthTargetSalesSum - monthlyAnalysis.totalSalesSum))}`}
               </div>
               <div style={{ fontSize: ".9rem" }}>
-                月間売上 <strong style={{ fontSize: "1rem" }}>{yen(monthlyAnalysis.totalSalesSum)}</strong> / 月間目標 <strong style={{ fontSize: "1rem" }}>{yen(monthlyAnalysis.targetSalesSum)}</strong>
+                月間進捗率 <strong style={{ fontSize: "1rem" }}>{pct(monthlyAnalysis.monthlyProgressRate)}</strong>
+              </div>
+              <div style={{ fontSize: ".9rem" }}>
+                月間売上 <strong style={{ fontSize: "1rem" }}>{yen(monthlyAnalysis.totalSalesSum)}</strong> / 月間目標 <strong style={{ fontSize: "1rem" }}>{yen(monthlyAnalysis.fullMonthTargetSalesSum)}</strong>
+              </div>
+              <div style={{ fontSize: ".84rem", color:"rgba(240,232,208,0.75)" }}>
+                実績日達成率: <strong>{pct(monthlyAnalysis.actualAchievementRate)}</strong>
+                <span style={{ marginLeft: ".35rem" }}>（実績日ベース目標 {yen(monthlyAnalysis.actualTargetSalesSum)}）</span>
+              </div>
+              <div style={{ fontSize: ".72rem", color:"rgba(240,232,208,0.58)" }}>
+                ※終了済み営業日の目標に対する達成率
               </div>
               <div style={{ fontSize: ".9rem" }}>
                 営業利益 <strong style={{ fontSize: "1rem" }}>{yen(monthlyAnalysis.operatingProfitSum)}</strong> / 営業利益率 <strong style={{ fontSize: "1rem" }}>{pct(monthlyAnalysis.operatingProfitRate)}</strong>
