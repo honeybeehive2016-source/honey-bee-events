@@ -211,10 +211,153 @@ function readSalesRoleMode() {
 function readSalesAdminTab() {
   try {
     const v = localStorage.getItem(SALES_ADMIN_TAB_KEY);
-    return v === "daily" || v === "analysis" ? v : "analysis";
+    return v === "daily" || v === "analysis" || v === "yearly" ? v : "analysis";
   } catch {
     return "analysis";
   }
+}
+function buildYearMonths_(year) {
+  return Array.from({ length: 12 }, (_, i) => {
+    const mm = String(i + 1).padStart(2, "0");
+    return `${year}-${mm}`;
+  });
+}
+function monthLabelFromTarget_(targetMonth) {
+  const m = Number(String(targetMonth || "").slice(5, 7));
+  return Number.isFinite(m) && m > 0 ? `${m}月` : targetMonth;
+}
+function emptyMonthAggregate_(targetMonth, status, fetchError) {
+  return {
+    targetMonth,
+    monthLabel: monthLabelFromTarget_(targetMonth),
+    status,
+    fetchError: fetchError || null,
+    totalSalesSum: 0,
+    targetSalesSum: 0,
+    progressRate: null,
+    foodDrinkSalesSum: 0,
+    drinkSalesSum: 0,
+    foodSalesSum: 0,
+    operatingProfitSum: 0,
+    operatingProfitRate: null,
+    actualDayCount: 0,
+    futureDayCount: 0,
+    laborCostSum: 0,
+    purchaseTotalSum: 0,
+    expenseSum: 0,
+    bandGuaranteeSum: 0,
+    shortfall: 0,
+  };
+}
+function aggregateMonthFromRecords_(records, targetMonth, currentBusinessDate) {
+  const monthRows = (records || []).filter((r) => (r.businessDate || "").startsWith(targetMonth));
+  const actualRows = monthRows.filter(
+    (r) => (r.businessDate || "") < currentBusinessDate && r?.metrics?.totalSales != null
+  );
+  const futureRows = monthRows.filter((r) => (r.businessDate || "") >= currentBusinessDate);
+  const totalSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.totalSales || 0), 0);
+  const targetSalesSum = monthRows.reduce((s, r) => s + Number(r?.metrics?.targetSales || 0), 0);
+  const foodDrinkSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.foodDrinkSales || 0), 0);
+  const drinkSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.drinkSales || 0), 0);
+  const foodSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.foodSales || 0), 0);
+  const operatingProfitSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.operatingProfit || 0), 0);
+  const laborCostSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.laborCost || 0), 0);
+  const purchaseTotalSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.purchaseTotal || 0), 0);
+  const expenseSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.expense || 0), 0);
+  const bandGuaranteeSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.bandGuarantee || 0), 0);
+  let status = "未入力";
+  if (actualRows.length > 0) status = "集計済み";
+  else if (futureRows.length > 0) status = "予定あり";
+  return {
+    targetMonth,
+    monthLabel: monthLabelFromTarget_(targetMonth),
+    status,
+    fetchError: null,
+    totalSalesSum,
+    targetSalesSum,
+    progressRate: calcRate(totalSalesSum, targetSalesSum),
+    foodDrinkSalesSum,
+    drinkSalesSum,
+    foodSalesSum,
+    operatingProfitSum,
+    operatingProfitRate: calcRate(operatingProfitSum, totalSalesSum),
+    actualDayCount: actualRows.length,
+    futureDayCount: futureRows.length,
+    laborCostSum,
+    purchaseTotalSum,
+    expenseSum,
+    bandGuaranteeSum,
+    shortfall: Math.max(0, targetSalesSum - totalSalesSum),
+  };
+}
+async function fetchSalesMonth_(targetMonth) {
+  const sep = SALES_API_URL.includes("?") ? "&" : "?";
+  const url = `${SALES_API_URL}${sep}targetMonth=${encodeURIComponent(targetMonth)}`;
+  const res = await fetch(url, { cache: "no-store" });
+  const text = await res.text();
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new Error(`売上APIの応答がJSONではありません（HTTP ${res.status}）`);
+  }
+  if (!res.ok) {
+    throw new Error(json?.error || `HTTP ${res.status}`);
+  }
+  if (!json || !Array.isArray(json.records)) throw new Error("JSON形式が不正です");
+  return json;
+}
+function YearlyMonthBarChart({ title, rows, valueKey, barTone, formatTop }) {
+  const eligible = rows.filter((r) => r.status !== "取得失敗");
+  const maxVal = eligible.reduce((m, r) => Math.max(m, Number(r[valueKey] || 0)), 0);
+  const scaleMax = maxVal > 0 ? maxVal : 1;
+  return (
+    <div style={analysisCard("trend")}>
+      <div style={analysisSecTitle("trend", ".5rem")}>{title}</div>
+      {eligible.length === 0 ? (
+        <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.45)" }}>データなし</div>
+      ) : (
+        <div style={{ overflowX: "auto", paddingBottom: ".1rem" }}>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: ".32rem", height: 168, minWidth: "100%" }}>
+            {eligible.map((r) => {
+              const v = Number(r[valueKey] || 0);
+              const h = Math.max(2, Math.round((v / scaleMax) * 100));
+              const topLabel = formatTop ? formatTop(r) : compactYen(v);
+              return (
+                <div key={r.targetMonth} style={{ flex: "1 0 36px", minWidth: 36, textAlign: "center", opacity: r.status === "未入力" ? 0.45 : 1 }}>
+                  <div style={{ fontSize: ".5rem", color: "rgba(240,232,208,0.65)", marginBottom: ".16rem", whiteSpace: "nowrap" }}>{topLabel}</div>
+                  <div style={{ height: 130, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+                    <div style={{ width: "100%", height: `${h}%`, minHeight: 4, borderRadius: "4px 4px 0 0", background: barTone }} />
+                  </div>
+                  <div style={{ marginTop: ".2rem", fontSize: ".58rem", color: "rgba(240,232,208,0.62)" }}>{r.monthLabel}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+function YearlyRankList({ title, variant, items, valueLabel, formatValue }) {
+  return (
+    <div style={analysisCard(variant)}>
+      <div style={analysisSecTitle(variant, ".5rem")}>{title}</div>
+      {items.length === 0 ? (
+        <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.45)" }}>データなし</div>
+      ) : (
+        items.map((r, i) => (
+          <div key={r.targetMonth} style={{ padding: ".3rem 0", borderBottom: `1px solid ${analysisRowBorder(variant)}` }}>
+            <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)" }}>{i + 1}. {r.monthLabel}</div>
+            <div style={{ fontSize: ".82rem", color: "#f0e8d0" }}>
+              <strong style={{ fontSize: ".94rem" }}>{formatValue(r)}</strong>
+              <span style={{ marginLeft: ".35rem", fontSize: ".68rem", color: "rgba(240,232,208,0.55)" }}>{valueLabel}</span>
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
 }
 function readSalesTargetMonth() {
   try {
@@ -502,7 +645,10 @@ export default function SalesModule({ events = [], navigateBack }) {
   const [error, setError] = useState("");
   const [records, setRecords] = useState([]);
   const [roleMode, setRoleMode] = useState(() => readSalesRoleMode()); // staff | admin
-  const [adminTab, setAdminTab] = useState(() => readSalesAdminTab()); // daily | analysis
+  const [adminTab, setAdminTab] = useState(() => readSalesAdminTab()); // daily | analysis | yearly
+  const [targetYear, setTargetYear] = useState(2026);
+  const [yearlyLoading, setYearlyLoading] = useState(false);
+  const [yearlyMonthData, setYearlyMonthData] = useState([]);
   const [selectedTrendRowKey, setSelectedTrendRowKey] = useState("");
   const [updatedAt, setUpdatedAt] = useState("");
   const currentBusinessDate = getCurrentBusinessDateForSales();
@@ -549,9 +695,37 @@ export default function SalesModule({ events = [], navigateBack }) {
   }, [roleMode]);
   useEffect(() => {
     try {
-      localStorage.setItem(SALES_ADMIN_TAB_KEY, adminTab === "analysis" ? "analysis" : "daily");
+      if (adminTab === "daily" || adminTab === "analysis" || adminTab === "yearly") {
+        localStorage.setItem(SALES_ADMIN_TAB_KEY, adminTab);
+      }
     } catch {}
   }, [adminTab]);
+  useEffect(() => {
+    if (roleMode !== "admin" || adminTab !== "yearly") return undefined;
+    let cancelled = false;
+    const months = buildYearMonths_(targetYear);
+    setYearlyLoading(true);
+    setYearlyMonthData([]);
+    (async () => {
+      const results = await Promise.all(
+        months.map(async (month) => {
+          try {
+            const json = await fetchSalesMonth_(month);
+            return { month, ok: true, records: json.records || [], error: null };
+          } catch (e) {
+            return { month, ok: false, records: [], error: e?.message || "取得失敗" };
+          }
+        })
+      );
+      if (!cancelled) {
+        setYearlyMonthData(results);
+        setYearlyLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [roleMode, adminTab, targetYear]);
   useEffect(() => {
     try {
       localStorage.setItem(SALES_TARGET_MONTH_KEY, normalizeMonth(targetMonth));
@@ -875,6 +1049,84 @@ export default function SalesModule({ events = [], navigateBack }) {
     () => monthlyAnalysis.dailyTrendRows.find((r) => r.rowKey === selectedTrendRowKey) || null,
     [monthlyAnalysis.dailyTrendRows, selectedTrendRowKey]
   );
+  const yearlyAnalysis = useMemo(() => {
+    if (!yearlyMonthData.length) return null;
+    const monthRows = yearlyMonthData.map((item) => {
+      if (!item.ok) {
+        return emptyMonthAggregate_(item.month, "取得失敗", item.error);
+      }
+      return aggregateMonthFromRecords_(item.records, item.month, currentBusinessDate);
+    });
+    const okMonths = monthRows.filter((m) => m.status !== "取得失敗");
+    const aggregatedMonths = monthRows.filter((m) => m.status === "集計済み");
+    const yearlyTotalSales = aggregatedMonths.reduce((s, m) => s + Number(m.totalSalesSum || 0), 0);
+    const yearlyTarget = okMonths.reduce((s, m) => s + Number(m.targetSalesSum || 0), 0);
+    const yearlyOperatingProfit = aggregatedMonths.reduce((s, m) => s + Number(m.operatingProfitSum || 0), 0);
+    const yearlyFoodDrink = aggregatedMonths.reduce((s, m) => s + Number(m.foodDrinkSalesSum || 0), 0);
+    const yearlyDrink = aggregatedMonths.reduce((s, m) => s + Number(m.drinkSalesSum || 0), 0);
+    const yearlyFood = aggregatedMonths.reduce((s, m) => s + Number(m.foodSalesSum || 0), 0);
+    const yearlyLabor = aggregatedMonths.reduce((s, m) => s + Number(m.laborCostSum || 0), 0);
+    const yearlyPurchase = aggregatedMonths.reduce((s, m) => s + Number(m.purchaseTotalSum || 0), 0);
+    const yearlyExpense = aggregatedMonths.reduce((s, m) => s + Number(m.expenseSum || 0), 0);
+    const yearlyBandGuarantee = aggregatedMonths.reduce((s, m) => s + Number(m.bandGuaranteeSum || 0), 0);
+    const topN = (list, cmp, n) => [...list].sort(cmp).slice(0, n);
+    const salesTop3 = topN(
+      aggregatedMonths,
+      (a, b) => Number(b.totalSalesSum || 0) - Number(a.totalSalesSum || 0),
+      3
+    );
+    const underWorst3 = topN(
+      okMonths.filter((m) => Number(m.targetSalesSum || 0) > 0 && m.progressRate != null && m.progressRate < 100),
+      (a, b) => Number(a.progressRate || 0) - Number(b.progressRate || 0),
+      3
+    );
+    const foodDrinkTop3 = topN(
+      aggregatedMonths,
+      (a, b) => Number(b.foodDrinkSalesSum || 0) - Number(a.foodDrinkSalesSum || 0),
+      3
+    );
+    const drinkTop3 = topN(
+      aggregatedMonths,
+      (a, b) => Number(b.drinkSalesSum || 0) - Number(a.drinkSalesSum || 0),
+      3
+    );
+    const foodTop3 = topN(
+      aggregatedMonths,
+      (a, b) => Number(b.foodSalesSum || 0) - Number(a.foodSalesSum || 0),
+      3
+    );
+    const costProfitMax = Math.max(yearlyOperatingProfit, yearlyLabor, yearlyPurchase, yearlyExpense, 1);
+    const yearlyCostBars = [
+      { key: "profit", label: "営業利益", value: yearlyOperatingProfit, tone: "linear-gradient(90deg, rgba(126,200,126,0.92), rgba(126,200,126,0.58))", note: "" },
+      { key: "labor", label: "人件費", value: yearlyLabor, tone: "linear-gradient(90deg, rgba(201,168,76,0.9), rgba(201,168,76,0.5))", note: "翌月反映" },
+      { key: "purchase", label: "仕入れ", value: yearlyPurchase, tone: "linear-gradient(90deg, rgba(205,134,74,0.9), rgba(205,134,74,0.52))", note: "月末売掛反映あり" },
+      { key: "expense", label: "経費", value: yearlyExpense, tone: "linear-gradient(90deg, rgba(155,84,94,0.9), rgba(155,84,94,0.52))", note: "暫定" },
+    ];
+    return {
+      targetYear,
+      monthRows,
+      aggregatedMonthCount: aggregatedMonths.length,
+      yearlyTotalSales,
+      yearlyTarget,
+      yearlyProgressRate: calcRate(yearlyTotalSales, yearlyTarget),
+      yearlyOperatingProfit,
+      yearlyOperatingProfitRate: calcRate(yearlyOperatingProfit, yearlyTotalSales),
+      yearlyFoodDrink,
+      yearlyDrink,
+      yearlyFood,
+      yearlyLabor,
+      yearlyPurchase,
+      yearlyExpense,
+      yearlyBandGuarantee,
+      yearlyCostBars,
+      costProfitMax,
+      salesTop3,
+      underWorst3,
+      foodDrinkTop3,
+      drinkTop3,
+      foodTop3,
+    };
+  }, [yearlyMonthData, targetYear, currentBusinessDate]);
   const staffTodayRows = useMemo(
     () => rows.filter((r) => r.businessDate === currentBusinessDate),
     [rows, currentBusinessDate]
@@ -926,6 +1178,9 @@ export default function SalesModule({ events = [], navigateBack }) {
           </button>
           <button type="button" style={S.btn(adminTab === "analysis" ? "gold" : "ghost")} onClick={() => setAdminTab("analysis")}>
             月次分析
+          </button>
+          <button type="button" style={S.btn(adminTab === "yearly" ? "gold" : "ghost")} onClick={() => setAdminTab("yearly")}>
+            年次分析
           </button>
         </div>
       )}
@@ -1405,6 +1660,175 @@ export default function SalesModule({ events = [], navigateBack }) {
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {roleMode === "admin" && adminTab === "yearly" && (
+        <div style={{ display: "grid", gap: ".75rem", marginBottom: ".75rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: ".5rem", flexWrap: "wrap", marginBottom: ".15rem" }}>
+            <span style={{ fontSize: ".72rem", color: "rgba(201,168,76,0.85)" }}>対象年</span>
+            <select
+              style={{ ...S.inp, width: "auto", minWidth: 100 }}
+              value={String(targetYear)}
+              onChange={(e) => setTargetYear(Number(e.target.value) || 2026)}
+            >
+              <option value="2026">2026年</option>
+            </select>
+          </div>
+
+          {yearlyLoading && (
+            <div style={{ ...S.card, textAlign: "center", color: "rgba(201,168,76,0.85)", letterSpacing: ".08em", padding: "1.2rem" }}>
+              年次データを読み込み中...
+            </div>
+          )}
+
+          {!yearlyLoading && yearlyAnalysis && (
+            <>
+              <div style={analysisCard("summary")}>
+                <div style={analysisSecTitle("summary", ".55rem")}>{targetYear}年 年次サマリー</div>
+                <div style={{ display: "flex", alignItems: "baseline", gap: ".45rem", flexWrap: "wrap", marginBottom: ".4rem" }}>
+                  <div style={{ fontFamily: "Georgia,serif", fontSize: "2.1rem", lineHeight: 1, color: "#f8efd8", textShadow: "0 0 28px rgba(201,168,76,0.22)" }}>
+                    {pct(yearlyAnalysis.yearlyProgressRate)}
+                  </div>
+                  <span style={{ fontSize: ".76rem", color: "rgba(240,232,208,0.72)" }}>年間進捗率</span>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: ".35rem .8rem", fontSize: ".84rem", color: "rgba(240,232,208,0.88)" }}>
+                  <div>年間売上 <strong style={{ fontSize: "1rem" }}>{yen(yearlyAnalysis.yearlyTotalSales)}</strong></div>
+                  <div>年間目標 <strong style={{ fontSize: "1rem" }}>{yen(yearlyAnalysis.yearlyTarget)}</strong></div>
+                  <div>年間営業利益 <strong>{yen(yearlyAnalysis.yearlyOperatingProfit)}</strong></div>
+                  <div>年間営業利益率 <strong>{pct(yearlyAnalysis.yearlyOperatingProfitRate)}</strong></div>
+                  <div>年間飲食売上 <strong>{yen(yearlyAnalysis.yearlyFoodDrink)}</strong></div>
+                  <div>年間ドリンク <strong>{yen(yearlyAnalysis.yearlyDrink)}</strong></div>
+                  <div>年間フード <strong>{yen(yearlyAnalysis.yearlyFood)}</strong></div>
+                  <div>集計済み月数 <strong>{num(yearlyAnalysis.aggregatedMonthCount)}ヶ月</strong></div>
+                </div>
+              </div>
+
+              <div style={analysisCard("composition")}>
+                <div style={analysisSecTitle("composition", ".5rem")}>月別一覧</div>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: ".74rem", minWidth: 920 }}>
+                    <thead>
+                      <tr style={{ color: "rgba(201,168,76,0.9)", borderBottom: "1px solid rgba(201,168,76,0.25)" }}>
+                        <th style={{ textAlign: "left", padding: ".4rem .35rem" }}>月</th>
+                        <th style={{ textAlign: "right", padding: ".4rem .35rem" }}>売上</th>
+                        <th style={{ textAlign: "right", padding: ".4rem .35rem" }}>目標</th>
+                        <th style={{ textAlign: "right", padding: ".4rem .35rem" }}>進捗率</th>
+                        <th style={{ textAlign: "right", padding: ".4rem .35rem" }}>飲食</th>
+                        <th style={{ textAlign: "right", padding: ".4rem .35rem" }}>ドリンク</th>
+                        <th style={{ textAlign: "right", padding: ".4rem .35rem" }}>フード</th>
+                        <th style={{ textAlign: "right", padding: ".4rem .35rem" }}>営業利益</th>
+                        <th style={{ textAlign: "right", padding: ".4rem .35rem" }}>実績日</th>
+                        <th style={{ textAlign: "right", padding: ".4rem .35rem" }}>予定</th>
+                        <th style={{ textAlign: "center", padding: ".4rem .35rem" }}>状態</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {yearlyAnalysis.monthRows.map((m) => (
+                        <tr key={m.targetMonth} style={{ borderBottom: "1px solid rgba(201,168,76,0.12)", color: "rgba(240,232,208,0.85)" }}>
+                          <td style={{ padding: ".38rem .35rem", fontWeight: 600, color: "#e8dcc0" }}>{m.monthLabel}</td>
+                          <td style={{ textAlign: "right", padding: ".38rem .35rem" }}>{m.status === "取得失敗" ? "—" : yen(m.totalSalesSum)}</td>
+                          <td style={{ textAlign: "right", padding: ".38rem .35rem" }}>{m.status === "取得失敗" ? "—" : yen(m.targetSalesSum)}</td>
+                          <td style={{ textAlign: "right", padding: ".38rem .35rem" }}>{m.status === "取得失敗" ? "—" : pct(m.progressRate)}</td>
+                          <td style={{ textAlign: "right", padding: ".38rem .35rem" }}>{m.status === "取得失敗" ? "—" : yen(m.foodDrinkSalesSum)}</td>
+                          <td style={{ textAlign: "right", padding: ".38rem .35rem" }}>{m.status === "取得失敗" ? "—" : yen(m.drinkSalesSum)}</td>
+                          <td style={{ textAlign: "right", padding: ".38rem .35rem" }}>{m.status === "取得失敗" ? "—" : yen(m.foodSalesSum)}</td>
+                          <td style={{ textAlign: "right", padding: ".38rem .35rem" }}>{m.status === "取得失敗" ? "—" : yen(m.operatingProfitSum)}</td>
+                          <td style={{ textAlign: "right", padding: ".38rem .35rem" }}>{m.status === "取得失敗" ? "—" : num(m.actualDayCount)}</td>
+                          <td style={{ textAlign: "right", padding: ".38rem .35rem" }}>{m.status === "取得失敗" ? "—" : num(m.futureDayCount)}</td>
+                          <td style={{ textAlign: "center", padding: ".38rem .35rem" }}>
+                            <span style={{
+                              fontSize: ".62rem",
+                              padding: ".1rem .4rem",
+                              borderRadius: 3,
+                              border: m.status === "取得失敗" ? "1px solid rgba(200,90,90,0.4)" : m.status === "集計済み" ? "1px solid rgba(126,200,126,0.35)" : m.status === "予定あり" ? "1px solid rgba(201,168,76,0.35)" : "1px solid rgba(140,140,140,0.35)",
+                              color: m.status === "取得失敗" ? "#e8a0a0" : m.status === "集計済み" ? "#9ec9a8" : m.status === "予定あり" ? "#dfc06a" : "rgba(240,232,208,0.55)",
+                            }}>
+                              {m.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: ".65rem" }}>
+                <YearlyMonthBarChart title="月別売上推移" rows={yearlyAnalysis.monthRows} valueKey="totalSalesSum" barTone="linear-gradient(180deg, rgba(201,168,76,0.95), rgba(201,168,76,0.55))" />
+                <YearlyMonthBarChart title="月別目標達成率" rows={yearlyAnalysis.monthRows} valueKey="progressRate" barTone="linear-gradient(180deg, rgba(102,197,124,0.95), rgba(102,197,124,0.55))" formatTop={(r) => (r.progressRate != null ? pct(r.progressRate) : "—")} />
+                <YearlyMonthBarChart title="月別飲食売上" rows={yearlyAnalysis.monthRows} valueKey="foodDrinkSalesSum" barTone="linear-gradient(180deg, rgba(102,197,124,0.9), rgba(102,197,124,0.5))" />
+                <YearlyMonthBarChart title="月別営業利益" rows={yearlyAnalysis.monthRows} valueKey="operatingProfitSum" barTone="linear-gradient(180deg, rgba(126,200,126,0.95), rgba(126,200,126,0.55))" />
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: ".65rem" }}>
+                <YearlyRankList title="月間売上TOP月" variant="rankSales" items={yearlyAnalysis.salesTop3} valueLabel="年間月次売上" formatValue={(r) => yen(r.totalSalesSum)} />
+                <YearlyRankList title="月間未達ワースト月" variant="rankUnder" items={yearlyAnalysis.underWorst3} valueLabel="進捗率" formatValue={(r) => pct(r.progressRate)} />
+                <YearlyRankList title="月間飲食売上TOP月" variant="rankFoodDrink" items={yearlyAnalysis.foodDrinkTop3} valueLabel="飲食売上" formatValue={(r) => yen(r.foodDrinkSalesSum)} />
+                <YearlyRankList title="月間ドリンク売上TOP月" variant="rankDrink" items={yearlyAnalysis.drinkTop3} valueLabel="ドリンク売上" formatValue={(r) => yen(r.drinkSalesSum)} />
+                <YearlyRankList title="月間フード売上TOP月" variant="rankFood" items={yearlyAnalysis.foodTop3} valueLabel="フード売上" formatValue={(r) => yen(r.foodSalesSum)} />
+              </div>
+
+              <div style={analysisCard("costProfit")}>
+                <div style={analysisSecTitle("costProfit", ".35rem")}>年間コスト状況（暫定）</div>
+                <div style={{ fontSize: ".68rem", color: "rgba(240,232,208,0.62)", marginBottom: ".5rem", lineHeight: 1.5 }}>
+                  ※人件費は翌月まとめて反映されます。仕入・経費は月末に売掛分が加算されるため、月中は暫定値です。
+                </div>
+                <div style={{ display: "grid", gap: ".4rem", marginBottom: ".65rem" }}>
+                  {yearlyAnalysis.yearlyCostBars.map((b) => {
+                    const isLaborZero = b.key === "labor" && Number(b.value || 0) === 0;
+                    const w = isLaborZero
+                      ? 0
+                      : Math.max(4, Math.round((Number(b.value || 0) / yearlyAnalysis.costProfitMax) * 100));
+                    return (
+                      <div key={b.key} style={{ display: "grid", gridTemplateColumns: "110px 1fr auto", alignItems: "center", gap: ".45rem" }}>
+                        <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.74)" }}>
+                          {b.label}
+                          {b.note ? <span style={{ marginLeft: ".28rem", fontSize: ".6rem", color: "rgba(240,232,208,0.52)" }}>{b.note}</span> : null}
+                        </div>
+                        <div style={{ height: 10, borderRadius: 999, background: "rgba(240,232,208,0.1)", border: "1px solid rgba(201,168,76,0.18)", overflow: "hidden" }}>
+                          {!isLaborZero ? <div style={{ height: "100%", width: `${w}%`, background: b.tone }} /> : null}
+                        </div>
+                        <div style={{ fontSize: ".74rem", color: "#f0e8d0" }}>{isLaborZero ? "¥0 / 翌月反映" : yen(b.value)}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.78)" }}>
+                  参考：バンドギャラ（年間合計） <strong>{yen(yearlyAnalysis.yearlyBandGuarantee)}</strong>
+                </div>
+                <div style={{ fontSize: ".64rem", color: "rgba(240,232,208,0.54)", marginTop: ".12rem" }}>※経費には含めていません</div>
+
+                <div style={{ marginTop: ".7rem", paddingTop: ".55rem", borderTop: "1px dashed rgba(201,168,76,0.2)" }}>
+                  <div style={{ fontSize: ".66rem", color: "rgba(201,168,76,0.85)", marginBottom: ".35rem" }}>月別コスト内訳</div>
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: ".72rem", minWidth: 520 }}>
+                      <thead>
+                        <tr style={{ color: "rgba(201,168,76,0.85)", borderBottom: "1px solid rgba(201,168,76,0.2)" }}>
+                          <th style={{ textAlign: "left", padding: ".35rem" }}>月</th>
+                          <th style={{ textAlign: "right", padding: ".35rem" }}>人件費</th>
+                          <th style={{ textAlign: "right", padding: ".35rem" }}>仕入れ</th>
+                          <th style={{ textAlign: "right", padding: ".35rem" }}>経費</th>
+                          <th style={{ textAlign: "right", padding: ".35rem" }}>バンドギャラ参考</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {yearlyAnalysis.monthRows.filter((m) => m.status === "集計済み").map((m) => (
+                          <tr key={m.targetMonth} style={{ borderBottom: "1px solid rgba(201,168,76,0.1)" }}>
+                            <td style={{ padding: ".32rem" }}>{m.monthLabel}</td>
+                            <td style={{ textAlign: "right", padding: ".32rem" }}>{yen(m.laborCostSum)}</td>
+                            <td style={{ textAlign: "right", padding: ".32rem" }}>{yen(m.purchaseTotalSum)}</td>
+                            <td style={{ textAlign: "right", padding: ".32rem" }}>{yen(m.expenseSum)}</td>
+                            <td style={{ textAlign: "right", padding: ".32rem" }}>{yen(m.bandGuaranteeSum)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
 
