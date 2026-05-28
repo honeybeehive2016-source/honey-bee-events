@@ -211,19 +211,44 @@ function buildMonthlyYoYRows_(monthRows) {
     };
   });
 }
-function buildLandingForecast_(monthRows, yearlyTotalSales, yearlyTarget) {
+function buildYearlyTargetMetrics_(monthRows) {
+  const okMonths = (monthRows || []).filter((m) => m.status !== "取得失敗");
+  const monthsWithTarget = okMonths.filter((m) => Number(m.targetSalesSum || 0) > 0);
+  const enteredTargetSum = monthsWithTarget.reduce((s, m) => s + Number(m.targetSalesSum || 0), 0);
+  const enteredTargetMonthCount = monthsWithTarget.length;
+  const hasFullYearTarget = enteredTargetMonthCount === 12;
+  const fullYearTargetSum = hasFullYearTarget ? enteredTargetSum : null;
+  return { enteredTargetSum, enteredTargetMonthCount, hasFullYearTarget, fullYearTargetSum };
+}
+function buildLandingForecast_(monthRows, yearlyTotalSales, targetMetrics) {
+  const { hasFullYearTarget, fullYearTargetSum, enteredTargetSum, enteredTargetMonthCount } = targetMetrics;
   const performanceMonths = (monthRows || []).filter((m) => Number(m.totalSalesSum || 0) > 0);
   const performanceMonthCount = performanceMonths.length;
   const remainingMonths = Math.max(0, 12 - performanceMonthCount);
   const performanceSalesSum = performanceMonths.reduce((s, m) => s + Number(m.totalSalesSum || 0), 0);
   const avgMonthlySales = performanceMonthCount > 0 ? performanceSalesSum / performanceMonthCount : null;
   const paceForecast = avgMonthlySales != null ? avgMonthlySales * 12 : null;
-  const remainingNeeded = yearlyTarget - yearlyTotalSales;
-  const targetAchievedOutlook = yearlyTarget > 0 && remainingNeeded <= 0;
+  const remainingNeeded =
+    hasFullYearTarget && fullYearTargetSum != null ? fullYearTargetSum - yearlyTotalSales : null;
+  const targetAchievedOutlook =
+    hasFullYearTarget && fullYearTargetSum != null && fullYearTargetSum > 0 && remainingNeeded <= 0;
   const requiredMonthly =
-    !targetAchievedOutlook && remainingNeeded > 0 && remainingMonths > 0 ? remainingNeeded / remainingMonths : null;
-  const forecastGap = paceForecast != null && yearlyTarget > 0 ? paceForecast - yearlyTarget : null;
+    hasFullYearTarget &&
+    !targetAchievedOutlook &&
+    remainingNeeded != null &&
+    remainingNeeded > 0 &&
+    remainingMonths > 0
+      ? remainingNeeded / remainingMonths
+      : null;
+  const forecastGap =
+    hasFullYearTarget && paceForecast != null && fullYearTargetSum != null && fullYearTargetSum > 0
+      ? paceForecast - fullYearTargetSum
+      : null;
   return {
+    hasFullYearTarget,
+    enteredTargetSum,
+    enteredTargetMonthCount,
+    fullYearTargetSum,
     performanceSalesSum,
     performanceMonthCount,
     remainingMonths,
@@ -268,7 +293,9 @@ function buildYearlyAlerts_(ctx) {
   const alerts = [];
   const {
     yearlyProgressRate,
-    yearlyTarget,
+    hasFullYearTarget,
+    fullYearTargetSum,
+    enteredTargetMonthCount,
     landing,
     yearlyPurchaseCostRates,
     yearlyOperatingProfitRate,
@@ -276,11 +303,13 @@ function buildYearlyAlerts_(ctx) {
     taxMode,
   } = ctx;
   if (
+    hasFullYearTarget &&
     yearlyProgressRate != null &&
     yearlyProgressRate < 100 &&
     landing?.paceForecast != null &&
-    yearlyTarget > 0 &&
-    landing.paceForecast < yearlyTarget
+    fullYearTargetSum != null &&
+    fullYearTargetSum > 0 &&
+    landing.paceForecast < fullYearTargetSum
   ) {
     alerts.push({
       key: "targetRisk",
@@ -338,6 +367,13 @@ function buildYearlyAlerts_(ctx) {
         detail: formatSignedDisplayYen(laborDiff, taxMode),
       });
     }
+  }
+  if (!hasFullYearTarget) {
+    alerts.push({
+      key: "noAnnualTarget",
+      title: "年間目標が未設定です",
+      detail: `目標入力済み ${enteredTargetMonthCount}/12ヶ月`,
+    });
   }
   return alerts.slice(0, 5);
 }
@@ -1773,7 +1809,8 @@ export default function SalesModule({ events = [], navigateBack }) {
     const okMonths = monthRows.filter((m) => m.status !== "取得失敗");
     const aggregatedMonths = monthRows.filter((m) => m.status === "集計済み");
     const yearlyTotalSales = aggregatedMonths.reduce((s, m) => s + Number(m.totalSalesSum || 0), 0);
-    const yearlyTarget = okMonths.reduce((s, m) => s + Number(m.targetSalesSum || 0), 0);
+    const targetMetrics = buildYearlyTargetMetrics_(monthRows);
+    const { enteredTargetSum, enteredTargetMonthCount, hasFullYearTarget, fullYearTargetSum } = targetMetrics;
     const yearlyOperatingProfit = aggregatedMonths.reduce((s, m) => s + Number(m.operatingProfitSum || 0), 0);
     const yearlyFoodDrink = aggregatedMonths.reduce((s, m) => s + Number(m.foodDrinkSalesIncludingBandSum || 0), 0);
     const yearlyBandFoodDrink = aggregatedMonths.reduce((s, m) => s + Number(m.bandFoodDrinkSalesSum || 0), 0);
@@ -1856,15 +1893,20 @@ export default function SalesModule({ events = [], navigateBack }) {
     const previousYearTotal = PREVIOUS_YEAR_SALES_2025_TOTAL;
     const yoyDiff = yearlyTotalSales - previousYearTotal;
     const yoyRate = previousYearTotal > 0 ? (yearlyTotalSales / previousYearTotal) * 100 : null;
-    const landing = buildLandingForecast_(monthRows, yearlyTotalSales, yearlyTarget);
+    const landing = buildLandingForecast_(monthRows, yearlyTotalSales, targetMetrics);
     const momComparison = buildMomComparison_(monthRows);
     return {
       targetYear,
       monthRows,
       aggregatedMonthCount: aggregatedMonths.length,
       yearlyTotalSales,
-      yearlyTarget,
-      yearlyProgressRate: calcRate(yearlyTotalSales, yearlyTarget),
+      enteredTargetSum,
+      enteredTargetMonthCount,
+      hasFullYearTarget,
+      fullYearTargetSum,
+      yearlyProgressRate: hasFullYearTarget
+        ? calcRate(yearlyTotalSales, fullYearTargetSum)
+        : calcRate(yearlyTotalSales, enteredTargetSum),
       yearlyOperatingProfit,
       yearlyOperatingProfitRate: calcRate(yearlyOperatingProfit, yearlyTotalSales),
       yearlyFoodDrink,
@@ -1926,7 +1968,9 @@ export default function SalesModule({ events = [], navigateBack }) {
     if (!yearlyAnalysis) return [];
     return buildYearlyAlerts_({
       yearlyProgressRate: yearlyAnalysis.yearlyProgressRate,
-      yearlyTarget: yearlyAnalysis.yearlyTarget,
+      hasFullYearTarget: yearlyAnalysis.hasFullYearTarget,
+      fullYearTargetSum: yearlyAnalysis.fullYearTargetSum,
+      enteredTargetMonthCount: yearlyAnalysis.enteredTargetMonthCount,
       landing: yearlyAnalysis.landing,
       yearlyPurchaseCostRates: yearlyAnalysis.yearlyPurchaseCostRates,
       yearlyOperatingProfitRate: yearlyAnalysis.yearlyOperatingProfitRate,
@@ -2484,11 +2528,25 @@ export default function SalesModule({ events = [], navigateBack }) {
                   <div style={{ fontFamily: "Georgia,serif", fontSize: "2.1rem", lineHeight: 1, color: "#f8efd8", textShadow: "0 0 28px rgba(201,168,76,0.22)" }}>
                     {pct(yearlyAnalysis.yearlyProgressRate)}
                   </div>
-                  <span style={{ fontSize: ".76rem", color: "rgba(240,232,208,0.72)" }}>年間進捗率</span>
+                  <span style={{ fontSize: ".76rem", color: "rgba(240,232,208,0.72)" }}>
+                    {yearlyAnalysis.hasFullYearTarget ? "年間進捗率" : "入力済み目標進捗率"}
+                  </span>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: ".35rem .8rem", fontSize: ".84rem", color: "rgba(240,232,208,0.88)" }}>
                   <div>年間売上 <strong style={{ fontSize: "1rem" }}>{dy(yearlyAnalysis.yearlyTotalSales)}</strong></div>
-                  <div>年間目標 <strong style={{ fontSize: "1rem" }}>{dy(yearlyAnalysis.yearlyTarget)}</strong></div>
+                  {yearlyAnalysis.hasFullYearTarget ? (
+                    <div>年間目標 <strong style={{ fontSize: "1rem" }}>{dy(yearlyAnalysis.fullYearTargetSum)}</strong></div>
+                  ) : (
+                    <>
+                      <div>入力済み目標合計 <strong style={{ fontSize: "1rem" }}>{dy(yearlyAnalysis.enteredTargetSum)}</strong></div>
+                      <div>
+                        目標入力済み{" "}
+                        <strong>
+                          {num(yearlyAnalysis.enteredTargetMonthCount)}ヶ月 / 12ヶ月
+                        </strong>
+                      </div>
+                    </>
+                  )}
                   <div>年間営業利益 <strong>{dy(yearlyAnalysis.yearlyOperatingProfit)}</strong></div>
                   <div>年間営業利益率 <strong>{pct(yearlyAnalysis.yearlyOperatingProfitRate)}</strong></div>
                   <div>年間飲食売上 <strong>{dy(yearlyAnalysis.yearlyFoodDrink)}</strong></div>
@@ -2500,37 +2558,70 @@ export default function SalesModule({ events = [], navigateBack }) {
 
               {(() => {
                 const landing = yearlyAnalysis.landing;
-                const pacePositive = landing?.targetAchievedOutlook || (landing?.forecastGap != null && landing.forecastGap >= 0);
-                const landingTone = pacePositive
-                  ? { border: "1px solid rgba(102,197,124,0.35)", accent: "#9ec9a8" }
-                  : { border: "1px solid rgba(190,120,88,0.32)", accent: "#dca06a" };
+                const hasFullYearTarget = landing?.hasFullYearTarget;
+                const pacePositive =
+                  hasFullYearTarget &&
+                  (landing?.targetAchievedOutlook || (landing?.forecastGap != null && landing.forecastGap >= 0));
+                const landingTone = hasFullYearTarget
+                  ? pacePositive
+                    ? { border: "1px solid rgba(102,197,124,0.35)", accent: "#9ec9a8" }
+                    : { border: "1px solid rgba(190,120,88,0.32)", accent: "#dca06a" }
+                  : { border: "1px solid rgba(201,168,76,0.22)", accent: "#c9a84c" };
                 return (
                   <div style={{ ...analysisCard("summary"), ...landingTone, marginTop: 0 }}>
                     <div style={analysisSecTitle("summary", ".5rem")}>着地予測</div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: ".35rem .8rem", fontSize: ".82rem", color: "rgba(240,232,208,0.88)" }}>
                       <div>現在までの実績売上 <strong style={{ color: landingTone.accent }}>{dy(landing?.performanceSalesSum)}</strong></div>
-                      <div>年間目標 <strong>{dy(yearlyAnalysis.yearlyTarget)}</strong></div>
-                      <div>
-                        残り必要売上{" "}
-                        <strong style={{ color: landingTone.accent }}>
-                          {landing?.targetAchievedOutlook ? "目標達成見込み" : dy(Math.max(0, landing?.remainingNeeded ?? 0))}
-                        </strong>
-                      </div>
-                      <div>残り月数 <strong>{num(landing?.remainingMonths)}ヶ月</strong></div>
-                      <div>
-                        目標達成に必要な月商{" "}
-                        <strong>{landing?.targetAchievedOutlook ? "—" : landing?.requiredMonthly != null ? dy(landing.requiredMonthly) : "—"}</strong>
-                      </div>
-                      <div>現在ペースでの年間着地予測 <strong style={{ color: landingTone.accent }}>{landing?.paceForecast != null ? dy(landing.paceForecast) : "—"}</strong></div>
-                      <div>
-                        着地予測と年間目標の差額{" "}
-                        <strong style={{ color: landingTone.accent }}>
-                          {landing?.forecastGap != null ? signedDy(landing.forecastGap) : "—"}
-                        </strong>
-                      </div>
+                      {hasFullYearTarget ? (
+                        <>
+                          <div>年間目標 <strong>{dy(landing?.fullYearTargetSum)}</strong></div>
+                          <div>
+                            残り必要売上{" "}
+                            <strong style={{ color: landingTone.accent }}>
+                              {landing?.targetAchievedOutlook ? "目標達成見込み" : dy(Math.max(0, landing?.remainingNeeded ?? 0))}
+                            </strong>
+                          </div>
+                          <div>残り月数 <strong>{num(landing?.remainingMonths)}ヶ月</strong></div>
+                          <div>
+                            目標達成に必要な月商{" "}
+                            <strong>
+                              {landing?.targetAchievedOutlook ? "—" : landing?.requiredMonthly != null ? dy(landing.requiredMonthly) : "—"}
+                            </strong>
+                          </div>
+                          <div>
+                            現在ペースでの年間着地予測{" "}
+                            <strong style={{ color: landingTone.accent }}>{landing?.paceForecast != null ? dy(landing.paceForecast) : "—"}</strong>
+                          </div>
+                          <div>
+                            着地予測と年間目標の差額{" "}
+                            <strong style={{ color: landingTone.accent }}>
+                              {landing?.forecastGap != null ? signedDy(landing.forecastGap) : "—"}
+                            </strong>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div>入力済み目標合計 <strong>{dy(landing?.enteredTargetSum)}</strong></div>
+                          <div>
+                            目標入力済み月数{" "}
+                            <strong>
+                              {num(landing?.enteredTargetMonthCount)}ヶ月 / 12ヶ月
+                            </strong>
+                          </div>
+                          <div>
+                            現在ペースでの年間着地予測{" "}
+                            <strong style={{ color: landingTone.accent }}>{landing?.paceForecast != null ? dy(landing.paceForecast) : "—"}</strong>
+                          </div>
+                        </>
+                      )}
                     </div>
-                    <div style={{ fontSize: ".62rem", color: "rgba(240,232,208,0.52)", marginTop: ".42rem" }}>
+                    <div style={{ fontSize: ".62rem", color: "rgba(240,232,208,0.52)", marginTop: ".42rem", lineHeight: 1.5 }}>
                       ※実績月（売上が1円以上の月）{num(landing?.performanceMonthCount)}ヶ月の平均から年間12ヶ月分を試算しています。
+                      {!hasFullYearTarget ? (
+                        <span style={{ display: "block", marginTop: ".22rem" }}>
+                          ※年間目標が未設定のため、必要月商・目標差額は表示していません。現在ペース着地は実績月平均からの概算です。
+                        </span>
+                      ) : null}
                     </div>
                   </div>
                 );
