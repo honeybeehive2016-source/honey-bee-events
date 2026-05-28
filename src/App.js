@@ -15,6 +15,22 @@ import { getBusinessDate } from "./businessDate";
 
 const DAYS = ["日","月","火","水","木","金","土"];
 const MONTH_NAMES = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
+const LAST_VIEW_STORAGE_KEY = "honeybee:lastView";
+const ALLOWED_VIEWS = new Set([
+  "home",
+  "today",
+  "reservation",
+  "seat_layout",
+  "kitchen",
+  "events_list",
+  "events_form",
+  "rentals",
+  "settlement",
+  "sales",
+  "shift",
+  "procurement",
+  "staffDay",
+]);
 const STAFF_DAY_SHEET_URL = "https://docs.google.com/spreadsheets/d/1qD302u-RornvrxYd1-FDuTzEDiFU8krBQ6JuWT0pbE8/edit?usp=drive_link";
 /** Apps Script Web アプリ：シートの values（string[][]）を JSON で返す */
 const STAFF_DAY_JSON_URL =
@@ -805,9 +821,30 @@ function StaffDaySpreadsheetTable({ rows }) {
 export default function App() {
   // ナビゲーション履歴スタック（戻るボタンの動作を制御）
   // home → events_list → events_form と進んだら、戻るボタンで events_list に戻る
-  const [viewStack, setViewStack] = useState(["home"]);
+  const [viewStack, setViewStack] = useState(() => {
+    try {
+      const saved = localStorage.getItem(LAST_VIEW_STORAGE_KEY);
+      if (saved && ALLOWED_VIEWS.has(saved)) return [saved];
+    } catch {
+      // localStorage 参照不可時は home へフォールバック
+    }
+    return ["home"];
+  });
   const view = viewStack[viewStack.length - 1];
   const setView = (v) => setViewStack([v]); // 互換性用
+
+  // 最後に開いていた画面を保存
+  useEffect(() => {
+    try {
+      if (ALLOWED_VIEWS.has(view)) {
+        localStorage.setItem(LAST_VIEW_STORAGE_KEY, view);
+      } else {
+        localStorage.setItem(LAST_VIEW_STORAGE_KEY, "home");
+      }
+    } catch {
+      // 保存失敗時は無視（既存動作を優先）
+    }
+  }, [view]);
 
   // ブラウザの戻るボタン対応
   useEffect(() => {
@@ -820,10 +857,10 @@ export default function App() {
     };
     window.addEventListener("popstate", handlePopState);
     if (!window.history.state || !window.history.state.view) {
-      window.history.replaceState({ view: "home" }, "");
+      window.history.replaceState({ view }, "");
     }
     return () => window.removeEventListener("popstate", handlePopState);
-  }, []);
+  }, [view]);
 
   const navigateTo = (newView) => {
     if (newView === view) return;
