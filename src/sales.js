@@ -104,6 +104,27 @@ function eventNamesForDate(events, businessDate) {
   const list = (events || []).filter((e) => e.date === businessDate);
   return list.map((e) => e.name).filter(Boolean);
 }
+function normText(s) {
+  return String(s || "").trim().toLowerCase();
+}
+function resolveEventNameForStaff(record, matchedEventNames) {
+  const sheetName = String(record?.sheetEventName || "").trim();
+  const names = Array.isArray(matchedEventNames) ? matchedEventNames.filter(Boolean) : [];
+  if (names.length === 1) return names[0];
+  if (names.length >= 2) {
+    const sheetNorm = normText(sheetName);
+    if (sheetNorm) {
+      const exact = names.find((n) => normText(n) === sheetNorm);
+      if (exact) return exact;
+      const partial = names.find((n) => {
+        const nn = normText(n);
+        return nn.includes(sheetNorm) || sheetNorm.includes(nn);
+      });
+      if (partial) return partial;
+    }
+  }
+  return sheetName || "";
+}
 
 export default function SalesModule({ events = [], navigateBack }) {
   const [targetMonth, setTargetMonth] = useState(normalizeMonth(""));
@@ -276,10 +297,9 @@ export default function SalesModule({ events = [], navigateBack }) {
             <div style={{ display: "grid", gap: ".55rem" }}>
               {staffTodayRows.map((r) => {
                 const m = r.metrics || {};
-                const hasEvents = r.resolvedEventNames.length > 0;
                 const isDup = !!r.flags?.isDuplicateBusinessDate;
                 const label = m.targetSales == null ? "未確定" : "本日";
-                const name = r.sheetEventName || (hasEvents ? r.resolvedEventNames[0] : "");
+                const name = resolveEventNameForStaff(r, r.resolvedEventNames);
                 return (
                   <div key={`today_${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}`} style={{ padding: ".1rem 0 .45rem", borderBottom: "1px solid rgba(201,168,76,0.16)" }}>
                     <div style={{ display:"flex", gap:".45rem", alignItems:"center", flexWrap:"wrap", marginBottom:".25rem" }}>
@@ -304,9 +324,8 @@ export default function SalesModule({ events = [], navigateBack }) {
             <div style={{ display: "grid", gap: ".1rem" }}>
               {staffUpcomingRows.map((r) => {
                 const m = r.metrics || {};
-                const hasEvents = r.resolvedEventNames.length > 0;
                 const isDup = !!r.flags?.isDuplicateBusinessDate;
-                const name = r.sheetEventName || (hasEvents ? r.resolvedEventNames[0] : "");
+                const name = resolveEventNameForStaff(r, r.resolvedEventNames);
                 return (
                   <div key={`upcoming_${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}`} style={{ padding: ".5rem 0", borderBottom: "1px solid rgba(201,168,76,0.14)" }}>
                     <div style={{ display:"grid", gridTemplateColumns:"140px 1fr auto", gap:".55rem", alignItems:"center" }}>
@@ -317,7 +336,6 @@ export default function SalesModule({ events = [], navigateBack }) {
                       <div style={{ fontSize:".8rem", lineHeight:1.4, color:"#f0e8d0" }}>{name || "イベント未登録"}</div>
                       <div style={{ textAlign:"right", whiteSpace:"nowrap" }}>
                         <span style={{ fontSize:".74rem", color:"rgba(240,232,208,0.85)", marginRight:".45rem" }}>{yen(m.targetSales)}</span>
-                        <span style={{ fontSize:".58rem", padding:".08rem .42rem", borderRadius:3, border:"1px solid rgba(201,168,76,0.35)", color:"#c9a84c" }}>予定</span>
                         {isDup && <span style={{ marginLeft: ".28rem", fontSize:".56rem", padding:".06rem .35rem", borderRadius:3, border:"1px solid rgba(244,162,97,0.35)", color:"#f4a261" }}>同日複数</span>}
                       </div>
                     </div>
