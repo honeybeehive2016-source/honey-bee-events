@@ -732,54 +732,76 @@ function buildPurchaseCostRates_(
     foodCostRate,
   };
 }
+const TABLE_NUMBER_STYLE = {
+  textAlign: "right",
+  fontVariantNumeric: "tabular-nums",
+  fontSize: ".82rem",
+  fontWeight: 500,
+  color: "#f5f0d0",
+  lineHeight: 1.45,
+  whiteSpace: "nowrap",
+  padding: ".5rem .44rem",
+};
+const TABLE_MUTED_NUMBER_STYLE = {
+  ...TABLE_NUMBER_STYLE,
+  color: "rgba(245,240,208,0.42)",
+};
 const YEARLY_TABLE_STYLE = {
   width: "100%",
   borderCollapse: "collapse",
-  fontSize: ".72rem",
   fontVariantNumeric: "tabular-nums",
+};
+const YEARLY_TABLE_ROW = {
+  borderBottom: "1px solid rgba(201,168,76,0.08)",
 };
 const YEARLY_TH = {
   textAlign: "right",
-  padding: ".44rem .42rem",
+  padding: ".42rem .44rem",
   fontWeight: 500,
-  color: "rgba(201,168,76,0.82)",
-  borderBottom: "1px solid rgba(201,168,76,0.18)",
-  fontSize: ".66rem",
-  letterSpacing: ".02em",
+  color: "rgba(201,168,76,0.78)",
+  borderBottom: "1px solid rgba(201,168,76,0.14)",
+  fontSize: ".64rem",
+  letterSpacing: ".03em",
   whiteSpace: "nowrap",
+  lineHeight: 1.35,
 };
 const YEARLY_TH_LEFT = { ...YEARLY_TH, textAlign: "left" };
 const YEARLY_TH_CENTER = { ...YEARLY_TH, textAlign: "center" };
-const YEARLY_TD_NUM = {
-  textAlign: "right",
-  padding: ".46rem .42rem",
-  color: "rgba(240,232,208,0.86)",
-  whiteSpace: "nowrap",
-};
 const YEARLY_TD_MONTH = {
   textAlign: "left",
-  padding: ".46rem .42rem",
-  color: "#e8dcc0",
+  padding: ".5rem .44rem",
+  fontSize: ".82rem",
   fontWeight: 500,
+  color: "#e8dcc0",
+  lineHeight: 1.45,
   whiteSpace: "nowrap",
 };
 const YEARLY_TD_STATUS = {
   textAlign: "center",
-  padding: ".46rem .42rem",
+  padding: ".5rem .44rem",
   whiteSpace: "nowrap",
+  verticalAlign: "middle",
 };
 function yearlyTableRowOpacity_(m) {
   if (m.status === "取得失敗") return 0.45;
-  if (m.status === "未入力" || m.status === "予定あり") return 0.5;
+  if (m.status === "未入力" || m.status === "予定あり") return 0.52;
   return 1;
 }
-function yearlyTableYen_(m, value) {
-  if (m.status === "取得失敗") return "—";
-  return yen(value);
+function yearlyTableYenCell_(m, value) {
+  if (m.status === "取得失敗") return { text: "—", muted: true };
+  const n = value != null ? Number(value) : null;
+  if (n == null || Number.isNaN(n)) return { text: "—", muted: true };
+  const muted = m.status === "未入力" || m.status === "予定あり" || n === 0;
+  return { text: yen(n), muted };
 }
-function yearlyTablePct_(m, rate) {
-  if (m.status === "取得失敗") return "—";
-  return pct1(rate);
+function yearlyTablePctCell_(m, rate) {
+  if (m.status === "取得失敗") return { text: "—", muted: true };
+  const muted = m.status === "未入力" || m.status === "予定あり" || rate == null;
+  return { text: pct1(rate), muted };
+}
+function YearlyTableNumberCell({ m, value, kind = "yen" }) {
+  const cell = kind === "pct" ? yearlyTablePctCell_(m, value) : yearlyTableYenCell_(m, value);
+  return <td style={cell.muted ? TABLE_MUTED_NUMBER_STYLE : TABLE_NUMBER_STYLE}>{cell.text}</td>;
 }
 function normText(s) {
   return String(s || "").trim().toLowerCase();
@@ -1991,14 +2013,14 @@ export default function SalesModule({ events = [], navigateBack }) {
                   </thead>
                   <tbody>
                     {yearlyAnalysis.monthRows.map((m) => (
-                      <tr key={`${m.targetMonth}_basic`} style={{ borderBottom: "1px solid rgba(201,168,76,0.1)", opacity: yearlyTableRowOpacity_(m) }}>
+                      <tr key={`${m.targetMonth}_basic`} style={{ ...YEARLY_TABLE_ROW, opacity: yearlyTableRowOpacity_(m) }}>
                         <td style={YEARLY_TD_MONTH}>{m.monthLabel}</td>
-                        <td style={YEARLY_TD_NUM}>{yearlyTableYen_(m, m.totalSalesSum)}</td>
-                        <td style={YEARLY_TD_NUM}>{yearlyTableYen_(m, m.targetSalesSum)}</td>
-                        <td style={YEARLY_TD_NUM}>{yearlyTablePct_(m, m.progressRate)}</td>
-                        <td style={YEARLY_TD_NUM}>{yearlyTableYen_(m, m.foodDrinkSalesIncludingBandSum)}</td>
-                        <td style={YEARLY_TD_NUM}>{yearlyTableYen_(m, m.operatingProfitSum)}</td>
-                        <td style={YEARLY_TD_NUM}>{yearlyTableYen_(m, m.laborCostSum)}</td>
+                        <YearlyTableNumberCell m={m} value={m.totalSalesSum} />
+                        <YearlyTableNumberCell m={m} value={m.targetSalesSum} />
+                        <YearlyTableNumberCell m={m} value={m.progressRate} kind="pct" />
+                        <YearlyTableNumberCell m={m} value={m.foodDrinkSalesIncludingBandSum} />
+                        <YearlyTableNumberCell m={m} value={m.operatingProfitSum} />
+                        <YearlyTableNumberCell m={m} value={m.laborCostSum} />
                         <td style={YEARLY_TD_STATUS}>
                           <span style={{
                             fontSize: ".6rem",
@@ -2030,18 +2052,21 @@ export default function SalesModule({ events = [], navigateBack }) {
                   </thead>
                   <tbody>
                     {yearlyAnalysis.monthRows.map((m) => (
-                      <tr key={`${m.targetMonth}_purchase`} style={{ borderBottom: "1px solid rgba(201,168,76,0.1)", opacity: yearlyTableRowOpacity_(m) }}>
+                      <tr key={`${m.targetMonth}_purchase`} style={{ ...YEARLY_TABLE_ROW, opacity: yearlyTableRowOpacity_(m) }}>
                         <td style={YEARLY_TD_MONTH}>{m.monthLabel}</td>
-                        <td style={YEARLY_TD_NUM}>{yearlyTableYen_(m, m.purchaseTotalSum)}</td>
-                        <td style={YEARLY_TD_NUM}>{yearlyTableYen_(m, m.drinkPurchaseSum)}</td>
-                        <td style={YEARLY_TD_NUM}>{yearlyTableYen_(m, m.foodPurchaseSum)}</td>
-                        <td style={YEARLY_TD_NUM}>{yearlyTablePct_(m, m.purchaseCostRates?.totalPurchaseRate)}</td>
-                        <td style={YEARLY_TD_NUM}>{yearlyTablePct_(m, m.purchaseCostRates?.drinkCostRate)}</td>
-                        <td style={YEARLY_TD_NUM}>{yearlyTablePct_(m, m.purchaseCostRates?.foodCostRate)}</td>
+                        <YearlyTableNumberCell m={m} value={m.purchaseTotalSum} />
+                        <YearlyTableNumberCell m={m} value={m.drinkPurchaseSum} />
+                        <YearlyTableNumberCell m={m} value={m.foodPurchaseSum} />
+                        <YearlyTableNumberCell m={m} value={m.purchaseCostRates?.totalPurchaseRate} kind="pct" />
+                        <YearlyTableNumberCell m={m} value={m.purchaseCostRates?.drinkCostRate} kind="pct" />
+                        <YearlyTableNumberCell m={m} value={m.purchaseCostRates?.foodCostRate} kind="pct" />
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                <div style={{ fontSize: ".62rem", color: "rgba(240,232,208,0.52)", marginTop: ".38rem", lineHeight: 1.55 }}>
+                  ※総仕入率はバンド飲食代を含む飲食売上で計算しています。ドリンク/フード原価率は、バンド飲食代の内訳がある月のみ個別反映します。
+                </div>
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: ".65rem" }}>
