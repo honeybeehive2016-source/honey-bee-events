@@ -122,19 +122,24 @@ function compactYen(v) {
 }
 const VENUE_SALES_KEYS = ["venueFee", "venueSales"];
 const RENTAL_SALES_KEYS = ["hallRentalSales", "rentalSales", "hallRentalFee", "rentalFee"];
+const BAND_FOOD_DRINK_SALES_KEYS = ["bandFoodDrinkSales"];
+const BAND_DRINK_SALES_KEYS = ["bandDrinkSales", "bandMealDrinkSales", "bandDrink"];
+const BAND_FOOD_SALES_KEYS = ["bandFoodSales", "bandMealFoodSales", "bandFood", "bandMealSales"];
 const SALES_COMPOSITION_COLORS = {
   drink: "linear-gradient(90deg, rgba(86,156,255,0.95), rgba(86,156,255,0.62))",
   food: "linear-gradient(90deg, rgba(102,197,124,0.95), rgba(102,197,124,0.62))",
+  bandFoodDrink: "linear-gradient(90deg, rgba(232,128,168,0.95), rgba(232,128,168,0.62))",
   venue: "linear-gradient(90deg, rgba(222,181,78,0.95), rgba(222,181,78,0.6))",
   rental: "linear-gradient(90deg, rgba(167,126,255,0.95), rgba(167,126,255,0.62))",
-  other: "linear-gradient(90deg, rgba(143,96,88,0.95), rgba(143,96,88,0.6))",
+  other: "linear-gradient(90deg, rgba(120,120,120,0.95), rgba(120,120,120,0.58))",
 };
 const SALES_COMPOSITION_CHIP_COLORS = {
   drink: "rgba(86,156,255,0.95)",
   food: "rgba(102,197,124,0.95)",
+  bandFoodDrink: "rgba(232,128,168,0.95)",
   venue: "rgba(222,181,78,0.95)",
   rental: "rgba(167,126,255,0.95)",
-  other: "rgba(143,96,88,0.95)",
+  other: "rgba(120,120,120,0.95)",
 };
 function pickMetricValue(metrics, keys) {
   const m = metrics || {};
@@ -142,6 +147,52 @@ function pickMetricValue(metrics, keys) {
     if (m[key] != null && !Number.isNaN(Number(m[key]))) return Number(m[key] || 0);
   }
   return 0;
+}
+function pickMetricNullable(metrics, keys) {
+  const m = metrics || {};
+  for (const key of keys) {
+    if (m[key] != null && !Number.isNaN(Number(m[key]))) return Number(m[key]);
+  }
+  return null;
+}
+function compositionRatesFromParts(parts, total) {
+  const totalN = Number(total || 0);
+  const drinkRate = calcRate(parts.drink, totalN);
+  const foodRate = calcRate(parts.food, totalN);
+  const bandFoodDrinkRate = calcRate(parts.bandFoodDrink, totalN);
+  const venueRate = calcRate(parts.venue, totalN);
+  const rentalRate = calcRate(parts.rental, totalN);
+  const otherRate = calcRate(parts.other, totalN);
+  return { drinkRate, foodRate, bandFoodDrinkRate, venueRate, rentalRate, otherRate };
+}
+function SalesCompositionLegend() {
+  return (
+    <div style={{ display:"flex", gap:".85rem", flexWrap:"wrap", marginBottom:".42rem", fontSize:".78rem", color:"rgba(240,232,208,0.86)" }}>
+      <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".34rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.drink }} />ドリンク</span>
+      <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".34rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.food }} />フード</span>
+      <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".34rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.bandFoodDrink }} />バンド飲食代</span>
+      <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".34rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.venue }} />会場費</span>
+      <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".34rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.rental }} />レンタル</span>
+      <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".34rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.other }} />その他</span>
+    </div>
+  );
+}
+function SalesCompositionBar({ rates, barHeight = 16 }) {
+  const r = rates || {};
+  const leftAfterDrink = Number(r.drinkRate || 0);
+  const leftAfterFood = leftAfterDrink + Number(r.foodRate || 0);
+  const leftAfterBand = leftAfterFood + Number(r.bandFoodDrinkRate || 0);
+  const leftAfterVenue = leftAfterBand + Number(r.venueRate || 0);
+  return (
+    <div style={{ position:"relative", width:"100%", height:barHeight, borderRadius:999, overflow:"hidden", background:"rgba(240,232,208,0.1)", border:"1px solid rgba(201,168,76,0.22)", marginBottom:".45rem" }}>
+      <div style={{ position:"absolute", left:0, top:0, height:"100%", width:`${Math.max(0, Math.min(100, leftAfterDrink))}%`, background:SALES_COMPOSITION_COLORS.drink }} />
+      <div style={{ position:"absolute", left:`${Math.max(0, Math.min(100, leftAfterDrink))}%`, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(r.foodRate || 0)))}%`, background:SALES_COMPOSITION_COLORS.food }} />
+      <div style={{ position:"absolute", left:`${Math.max(0, Math.min(100, leftAfterFood))}%`, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(r.bandFoodDrinkRate || 0)))}%`, background:SALES_COMPOSITION_COLORS.bandFoodDrink }} />
+      <div style={{ position:"absolute", left:`${Math.max(0, Math.min(100, leftAfterBand))}%`, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(r.venueRate || 0)))}%`, background:SALES_COMPOSITION_COLORS.venue }} />
+      <div style={{ position:"absolute", left:`${Math.max(0, Math.min(100, leftAfterVenue))}%`, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(r.rentalRate || 0)))}%`, background:SALES_COMPOSITION_COLORS.rental }} />
+      <div style={{ position:"absolute", right:0, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(r.otherRate || 0)))}%`, background:SALES_COMPOSITION_COLORS.other }} />
+    </div>
+  );
 }
 function trendToneByAchievement(achievementRate, targetSales) {
   if (!(Number(targetSales || 0) > 0) || achievementRate == null) {
@@ -338,10 +389,21 @@ export default function SalesModule({ events = [], navigateBack }) {
     const operatingProfitRate = calcRate(operatingProfitSum, totalSalesSum);
     const drinkSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.drinkSales || 0), 0);
     const foodSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.foodSales || 0), 0);
-    const rawOtherSales = totalSalesSum - drinkSalesSum - foodSalesSum;
+    const bandFoodDrinkSalesSum = actualRows.reduce((s, r) => s + pickMetricValue(r?.metrics, BAND_FOOD_DRINK_SALES_KEYS), 0);
+    const hasBandDrinkBreakdown = actualRows.some((r) => pickMetricNullable(r?.metrics, BAND_DRINK_SALES_KEYS) != null);
+    const hasBandFoodBreakdown = actualRows.some((r) => pickMetricNullable(r?.metrics, BAND_FOOD_SALES_KEYS) != null);
+    const bandDrinkSalesSum = hasBandDrinkBreakdown
+      ? actualRows.reduce((s, r) => s + pickMetricValue(r?.metrics, BAND_DRINK_SALES_KEYS), 0)
+      : null;
+    const bandFoodSalesSum = hasBandFoodBreakdown
+      ? actualRows.reduce((s, r) => s + pickMetricValue(r?.metrics, BAND_FOOD_SALES_KEYS), 0)
+      : null;
     const venueFeeSum = actualRows.reduce((s, r) => s + pickMetricValue(r?.metrics, VENUE_SALES_KEYS), 0);
     const rentalSalesSum = actualRows.reduce((s, r) => s + pickMetricValue(r?.metrics, RENTAL_SALES_KEYS), 0);
-    const otherSalesSum = Math.max(0, rawOtherSales - venueFeeSum - rentalSalesSum);
+    const otherSalesSum = Math.max(
+      0,
+      totalSalesSum - drinkSalesSum - foodSalesSum - bandFoodDrinkSalesSum - venueFeeSum - rentalSalesSum
+    );
     const laborCostSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.laborCost || 0), 0);
     const purchaseTotalSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.purchaseTotal || 0), 0);
     const expenseSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.expense || 0), 0);
@@ -479,6 +541,11 @@ export default function SalesModule({ events = [], navigateBack }) {
           expense: r?.metrics?.expense != null ? Number(r.metrics.expense) : null,
           laborCost: r?.metrics?.laborCost != null ? Number(r.metrics.laborCost) : null,
           bandGuarantee: r?.metrics?.bandGuarantee != null ? Number(r.metrics.bandGuarantee) : null,
+          bandFoodDrinkSales: pickMetricNullable(r?.metrics, BAND_FOOD_DRINK_SALES_KEYS),
+          bandDrinkSales: pickMetricNullable(r?.metrics, BAND_DRINK_SALES_KEYS),
+          bandFoodSales: pickMetricNullable(r?.metrics, BAND_FOOD_SALES_KEYS),
+          venueFee: pickMetricNullable(r?.metrics, VENUE_SALES_KEYS),
+          rentalSales: pickMetricNullable(r?.metrics, RENTAL_SALES_KEYS),
         };
       });
     const trendMaxSales = dailyTrendRows.reduce((m, r) => Math.max(m, Number(r.totalSales || 0)), 0);
@@ -486,12 +553,14 @@ export default function SalesModule({ events = [], navigateBack }) {
     const salesComposition = {
       drink: drinkSalesSum,
       food: foodSalesSum,
+      bandFoodDrink: bandFoodDrinkSalesSum,
       venue: venueFeeSum,
       rental: rentalSalesSum,
       other: otherSalesSum,
       total: totalSalesSum,
       drinkRate: calcRate(drinkSalesSum, totalSalesSum),
       foodRate: calcRate(foodSalesSum, totalSalesSum),
+      bandFoodDrinkRate: calcRate(bandFoodDrinkSalesSum, totalSalesSum),
       venueRate: calcRate(venueFeeSum, totalSalesSum),
       rentalRate: calcRate(rentalSalesSum, totalSalesSum),
       otherRate: calcRate(otherSalesSum, totalSalesSum),
@@ -518,7 +587,7 @@ export default function SalesModule({ events = [], navigateBack }) {
       biggestShortfallDay
         ? `最大未達日：${(biggestShortfallDay.businessDate || "").slice(5).replace("-", "/")} ${biggestShortfallDay.eventName} 不足 ${yen(biggestShortfallDay.shortfall)}`
         : "最大未達日：未達データなし",
-      `売上構成：ドリンク ${pct(salesComposition.drinkRate)} / フード ${pct(salesComposition.foodRate)} / 会場費 ${pct(salesComposition.venueRate)} / レンタル ${pct(salesComposition.rentalRate)} / その他 ${pct(salesComposition.otherRate)}`,
+      `売上構成：ドリンク ${pct(salesComposition.drinkRate)} / フード ${pct(salesComposition.foodRate)} / バンド飲食代 ${pct(salesComposition.bandFoodDrinkRate)} / 会場費 ${pct(salesComposition.venueRate)} / レンタル ${pct(salesComposition.rentalRate)} / その他 ${pct(salesComposition.otherRate)}`,
       `参考：バンドギャラ ${yen(bandGuaranteeSum)}（経費には含めていません）`,
     ];
 
@@ -540,6 +609,11 @@ export default function SalesModule({ events = [], navigateBack }) {
       operatingProfitRate,
       drinkSalesSum,
       foodSalesSum,
+      bandFoodDrinkSalesSum,
+      hasBandDrinkBreakdown,
+      hasBandFoodBreakdown,
+      bandDrinkSalesSum,
+      bandFoodSalesSum,
       venueFeeSum,
       rentalSalesSum,
       otherSalesSum,
@@ -791,11 +865,71 @@ export default function SalesModule({ events = [], navigateBack }) {
           </div>
 
           <div style={{ ...S.card }}>
-            <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>今月のポイント</div>
-            <div style={{ display:"grid", gap:".3rem", fontSize:".84rem", color:"rgba(240,232,208,0.82)" }}>
-              {monthlyAnalysis.monthlyHighlights.map((line, i) => (
-                <div key={i}>・{line}</div>
-              ))}
+            <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>売上構成</div>
+            <SalesCompositionLegend />
+            <SalesCompositionBar rates={monthlyAnalysis.salesComposition} />
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))", gap:".35rem .8rem", fontSize:".76rem" }}>
+              <div>ドリンク: <strong>{yen(monthlyAnalysis.drinkSalesSum)}</strong>（{pct(monthlyAnalysis.salesComposition.drinkRate)}）</div>
+              <div>フード: <strong>{yen(monthlyAnalysis.foodSalesSum)}</strong>（{pct(monthlyAnalysis.salesComposition.foodRate)}）</div>
+              <div>
+                バンド飲食代: <strong>{yen(monthlyAnalysis.bandFoodDrinkSalesSum)}</strong>（{pct(monthlyAnalysis.salesComposition.bandFoodDrinkRate)}）
+                {monthlyAnalysis.hasBandDrinkBreakdown ? (
+                  <span style={{ display:"block", marginTop:".12rem", paddingLeft:".5rem", fontSize:".7rem", color:"rgba(240,232,208,0.68)" }}>
+                    うちバンドドリンク {yen(monthlyAnalysis.bandDrinkSalesSum)}
+                  </span>
+                ) : null}
+                {monthlyAnalysis.hasBandFoodBreakdown ? (
+                  <span style={{ display:"block", marginTop:".12rem", paddingLeft:".5rem", fontSize:".7rem", color:"rgba(240,232,208,0.68)" }}>
+                    うちバンドフード {yen(monthlyAnalysis.bandFoodSalesSum)}
+                  </span>
+                ) : null}
+              </div>
+              <div>会場費: <strong>{yen(monthlyAnalysis.venueFeeSum)}</strong>（{pct(monthlyAnalysis.salesComposition.venueRate)}）</div>
+              <div>レンタル: <strong>{yen(monthlyAnalysis.rentalSalesSum)}</strong>（{pct(monthlyAnalysis.salesComposition.rentalRate)}）</div>
+              <div>その他: <strong>{yen(monthlyAnalysis.otherSalesSum)}</strong>（{pct(monthlyAnalysis.salesComposition.otherRate)}）</div>
+            </div>
+          </div>
+
+          <div style={{ ...S.card }}>
+            <div style={{ ...S.secTitle, marginBottom: ".35rem" }}>コスト・利益比較（暫定）</div>
+            <div style={{ fontSize: ".68rem", color: "rgba(240,232,208,0.62)", marginBottom: ".5rem", lineHeight: 1.5 }}>
+              ※人件費は翌月まとめて反映されます。仕入・経費は月末に売掛分が加算されるため、月中は暫定値です。
+            </div>
+            <div style={{ display:"grid", gap:".4rem" }}>
+              {monthlyAnalysis.costProfitBars.map((b) => {
+                const isLaborZero = b.key === "labor" && Number(b.value || 0) === 0;
+                const w = isLaborZero
+                  ? 0
+                  : monthlyAnalysis.costProfitMax > 0
+                  ? Math.max(4, Math.round((Number(b.value || 0) / monthlyAnalysis.costProfitMax) * 100))
+                  : 4;
+                return (
+                  <div key={b.key} style={{ display:"grid", gridTemplateColumns:"110px 1fr auto", alignItems:"center", gap:".45rem" }}>
+                    <div style={{ fontSize:".74rem", color:"rgba(240,232,208,0.74)" }}>
+                      {b.label}
+                      {b.note ? (
+                        <span style={{ marginLeft: ".28rem", fontSize: ".6rem", color: "rgba(240,232,208,0.52)" }}>
+                          {b.note}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div style={{ height:10, borderRadius:999, background:"rgba(240,232,208,0.1)", border:"1px solid rgba(201,168,76,0.18)", overflow:"hidden" }}>
+                      {!isLaborZero ? <div style={{ height:"100%", width:`${w}%`, background:b.tone }} /> : null}
+                    </div>
+                    <div style={{ fontSize:".74rem", color:"#f0e8d0" }}>
+                      {isLaborZero ? "¥0 / 翌月反映" : yen(b.value)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ marginTop: ".55rem", paddingTop: ".5rem", borderTop: "1px dashed rgba(201,168,76,0.2)" }}>
+              <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.78)" }}>
+                参考：バンドギャラ <strong>{yen(monthlyAnalysis.bandGuaranteeSum)}</strong>
+              </div>
+              <div style={{ fontSize: ".64rem", color: "rgba(240,232,208,0.54)", marginTop: ".12rem" }}>
+                ※経費には含めていません
+              </div>
             </div>
           </div>
 
@@ -871,22 +1005,29 @@ export default function SalesModule({ events = [], navigateBack }) {
                       <div>ドリンク売上: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.drinkSales)}</strong></div>
                       <div>フード売上: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.foodSales)}</strong></div>
                       <div>飲食単価: <strong style={{ fontSize: ".94rem" }}>{num(selectedTrendRow.foodDrinkUnitPrice)}</strong></div>
+                      {selectedTrendRow.bandFoodDrinkSales != null ? (
+                        <div>バンド飲食代: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.bandFoodDrinkSales)}</strong></div>
+                      ) : null}
+                      {selectedTrendRow.bandDrinkSales != null ? (
+                        <div>バンドドリンク: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.bandDrinkSales)}</strong></div>
+                      ) : null}
+                      {selectedTrendRow.bandFoodSales != null ? (
+                        <div>バンドフード: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.bandFoodSales)}</strong></div>
+                      ) : null}
                     </div>
                     <div style={{ marginTop: ".4rem", fontSize: ".66rem", color: "rgba(240,232,208,0.72)" }}>売上構成</div>
-                    <div style={{ display:"flex", gap:".7rem", flexWrap:"wrap", margin:".2rem 0 .26rem", fontSize:".72rem", color:"rgba(240,232,208,0.82)" }}>
-                      <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".32rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.drink }} />ドリンク</span>
-                      <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".32rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.food }} />フード</span>
-                      <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".32rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.venue }} />会場費</span>
-                      <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".32rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.rental }} />レンタル</span>
-                      <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".32rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.other }} />その他</span>
-                    </div>
-                    <div style={{ position:"relative", width:"100%", height:12, borderRadius:999, overflow:"hidden", background:"rgba(240,232,208,0.1)", border:"1px solid rgba(201,168,76,0.22)" }}>
-                      <div style={{ position:"absolute", left:0, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(calcRate(selectedTrendRow.drinkSales, selectedTrendRow.totalSales) || 0)))}%`, background:SALES_COMPOSITION_COLORS.drink }} />
-                      <div style={{ position:"absolute", left:`${Math.max(0, Math.min(100, Number(calcRate(selectedTrendRow.drinkSales, selectedTrendRow.totalSales) || 0)))}%`, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(calcRate(selectedTrendRow.foodSales, selectedTrendRow.totalSales) || 0)))}%`, background:SALES_COMPOSITION_COLORS.food }} />
-                      <div style={{ position:"absolute", left:`${Math.max(0, Math.min(100, Number(calcRate(selectedTrendRow.drinkSales, selectedTrendRow.totalSales) || 0) + Number(calcRate(selectedTrendRow.foodSales, selectedTrendRow.totalSales) || 0)))}%`, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(calcRate(pickMetricValue(selectedTrendRow, VENUE_SALES_KEYS), selectedTrendRow.totalSales) || 0)))}%`, background:SALES_COMPOSITION_COLORS.venue }} />
-                      <div style={{ position:"absolute", left:`${Math.max(0, Math.min(100, Number(calcRate(selectedTrendRow.drinkSales, selectedTrendRow.totalSales) || 0) + Number(calcRate(selectedTrendRow.foodSales, selectedTrendRow.totalSales) || 0) + Number(calcRate(pickMetricValue(selectedTrendRow, VENUE_SALES_KEYS), selectedTrendRow.totalSales) || 0)))}%`, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(calcRate(pickMetricValue(selectedTrendRow, RENTAL_SALES_KEYS), selectedTrendRow.totalSales) || 0)))}%`, background:SALES_COMPOSITION_COLORS.rental }} />
-                      <div style={{ position:"absolute", right:0, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(calcRate(Math.max(0, Number(selectedTrendRow.totalSales || 0) - Number(selectedTrendRow.drinkSales || 0) - Number(selectedTrendRow.foodSales || 0) - pickMetricValue(selectedTrendRow, VENUE_SALES_KEYS) - pickMetricValue(selectedTrendRow, RENTAL_SALES_KEYS)), selectedTrendRow.totalSales) || 0)))}%`, background:SALES_COMPOSITION_COLORS.other }} />
-                    </div>
+                    <SalesCompositionLegend />
+                    <SalesCompositionBar
+                      rates={compositionRatesFromParts({
+                        drink: Number(selectedTrendRow.drinkSales || 0),
+                        food: Number(selectedTrendRow.foodSales || 0),
+                        bandFoodDrink: Number(selectedTrendRow.bandFoodDrinkSales || 0),
+                        venue: Number(selectedTrendRow.venueFee || 0),
+                        rental: Number(selectedTrendRow.rentalSales || 0),
+                        other: Math.max(0, Number(selectedTrendRow.totalSales || 0) - Number(selectedTrendRow.drinkSales || 0) - Number(selectedTrendRow.foodSales || 0) - Number(selectedTrendRow.bandFoodDrinkSales || 0) - Number(selectedTrendRow.venueFee || 0) - Number(selectedTrendRow.rentalSales || 0)),
+                      }, selectedTrendRow.totalSales)}
+                      barHeight={12}
+                    />
                   </div>
 
                   <div style={{ marginBottom: ".55rem" }}>
@@ -921,74 +1062,6 @@ export default function SalesModule({ events = [], navigateBack }) {
                 </div>
               </div>
             )}
-          </div>
-
-          <div style={{ ...S.card }}>
-            <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>売上構成</div>
-            <div style={{ display:"flex", gap:".9rem", flexWrap:"wrap", marginBottom:".42rem", fontSize:".78rem", color:"rgba(240,232,208,0.84)" }}>
-              <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".34rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.drink }} />ドリンク</span>
-              <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".34rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.food }} />フード</span>
-              <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".34rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.venue }} />会場費</span>
-              <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".34rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.rental }} />レンタル</span>
-              <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".34rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.other }} />その他</span>
-            </div>
-            <div style={{ position:"relative", width:"100%", height:16, borderRadius:999, overflow:"hidden", background:"rgba(240,232,208,0.1)", border:"1px solid rgba(201,168,76,0.22)", marginBottom:".45rem" }}>
-              <div style={{ position:"absolute", left:0, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.drinkRate || 0)))}%`, background:SALES_COMPOSITION_COLORS.drink }} />
-              <div style={{ position:"absolute", left:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.drinkRate || 0)))}%`, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.foodRate || 0)))}%`, background:SALES_COMPOSITION_COLORS.food }} />
-              <div style={{ position:"absolute", left:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.drinkRate || 0) + Number(monthlyAnalysis.salesComposition.foodRate || 0)))}%`, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.venueRate || 0)))}%`, background:SALES_COMPOSITION_COLORS.venue }} />
-              <div style={{ position:"absolute", left:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.drinkRate || 0) + Number(monthlyAnalysis.salesComposition.foodRate || 0) + Number(monthlyAnalysis.salesComposition.venueRate || 0)))}%`, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.rentalRate || 0)))}%`, background:SALES_COMPOSITION_COLORS.rental }} />
-              <div style={{ position:"absolute", right:0, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.otherRate || 0)))}%`, background:SALES_COMPOSITION_COLORS.other }} />
-            </div>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:".35rem .8rem", fontSize:".76rem" }}>
-              <div>ドリンク: <strong>{yen(monthlyAnalysis.drinkSalesSum)}</strong>（{pct(monthlyAnalysis.salesComposition.drinkRate)}）</div>
-              <div>フード: <strong>{yen(monthlyAnalysis.foodSalesSum)}</strong>（{pct(monthlyAnalysis.salesComposition.foodRate)}）</div>
-              <div>会場費: <strong>{yen(monthlyAnalysis.venueFeeSum)}</strong>（{pct(monthlyAnalysis.salesComposition.venueRate)}）</div>
-              <div>レンタル: <strong>{yen(monthlyAnalysis.rentalSalesSum)}</strong>（{pct(monthlyAnalysis.salesComposition.rentalRate)}）</div>
-              <div>その他: <strong>{yen(monthlyAnalysis.otherSalesSum)}</strong>（{pct(monthlyAnalysis.salesComposition.otherRate)}）</div>
-            </div>
-          </div>
-
-          <div style={{ ...S.card }}>
-            <div style={{ ...S.secTitle, marginBottom: ".35rem" }}>コスト・利益比較（暫定）</div>
-            <div style={{ fontSize: ".68rem", color: "rgba(240,232,208,0.62)", marginBottom: ".5rem", lineHeight: 1.5 }}>
-              ※人件費は翌月まとめて反映されます。仕入・経費は月末に売掛分が加算されるため、月中は暫定値です。
-            </div>
-            <div style={{ display:"grid", gap:".4rem" }}>
-              {monthlyAnalysis.costProfitBars.map((b) => {
-                const isLaborZero = b.key === "labor" && Number(b.value || 0) === 0;
-                const w = isLaborZero
-                  ? 0
-                  : monthlyAnalysis.costProfitMax > 0
-                  ? Math.max(4, Math.round((Number(b.value || 0) / monthlyAnalysis.costProfitMax) * 100))
-                  : 4;
-                return (
-                  <div key={b.key} style={{ display:"grid", gridTemplateColumns:"110px 1fr auto", alignItems:"center", gap:".45rem" }}>
-                    <div style={{ fontSize:".74rem", color:"rgba(240,232,208,0.74)" }}>
-                      {b.label}
-                      {b.note ? (
-                        <span style={{ marginLeft: ".28rem", fontSize: ".6rem", color: "rgba(240,232,208,0.52)" }}>
-                          {b.note}
-                        </span>
-                      ) : null}
-                    </div>
-                    <div style={{ height:10, borderRadius:999, background:"rgba(240,232,208,0.1)", border:"1px solid rgba(201,168,76,0.18)", overflow:"hidden" }}>
-                      {!isLaborZero ? <div style={{ height:"100%", width:`${w}%`, background:b.tone }} /> : null}
-                    </div>
-                    <div style={{ fontSize:".74rem", color:"#f0e8d0" }}>
-                      {isLaborZero ? "¥0 / 翌月反映" : yen(b.value)}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <div style={{ marginTop: ".55rem", paddingTop: ".5rem", borderTop: "1px dashed rgba(201,168,76,0.2)" }}>
-              <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.78)" }}>
-                参考：バンドギャラ <strong>{yen(monthlyAnalysis.bandGuaranteeSum)}</strong>
-              </div>
-              <div style={{ fontSize: ".64rem", color: "rgba(240,232,208,0.54)", marginTop: ".12rem" }}>
-                ※経費には含めていません
-              </div>
-            </div>
           </div>
 
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))", gap:".65rem" }}>
