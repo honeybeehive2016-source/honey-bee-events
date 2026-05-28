@@ -122,12 +122,57 @@ function compactYen(v) {
 }
 const VENUE_SALES_KEYS = ["venueFee", "venueSales"];
 const RENTAL_SALES_KEYS = ["hallRentalSales", "rentalSales", "hallRentalFee", "rentalFee"];
+const SALES_COMPOSITION_COLORS = {
+  drink: "linear-gradient(90deg, rgba(86,156,255,0.95), rgba(86,156,255,0.62))",
+  food: "linear-gradient(90deg, rgba(102,197,124,0.95), rgba(102,197,124,0.62))",
+  venue: "linear-gradient(90deg, rgba(222,181,78,0.95), rgba(222,181,78,0.6))",
+  rental: "linear-gradient(90deg, rgba(167,126,255,0.95), rgba(167,126,255,0.62))",
+  other: "linear-gradient(90deg, rgba(143,96,88,0.95), rgba(143,96,88,0.6))",
+};
+const SALES_COMPOSITION_CHIP_COLORS = {
+  drink: "rgba(86,156,255,0.95)",
+  food: "rgba(102,197,124,0.95)",
+  venue: "rgba(222,181,78,0.95)",
+  rental: "rgba(167,126,255,0.95)",
+  other: "rgba(143,96,88,0.95)",
+};
 function pickMetricValue(metrics, keys) {
   const m = metrics || {};
   for (const key of keys) {
     if (m[key] != null && !Number.isNaN(Number(m[key]))) return Number(m[key] || 0);
   }
   return 0;
+}
+function trendToneByAchievement(achievementRate, targetSales) {
+  if (!(Number(targetSales || 0) > 0) || achievementRate == null) {
+    return {
+      label: "目標未設定",
+      tone: "linear-gradient(180deg, rgba(132,132,132,0.95), rgba(132,132,132,0.55))",
+    };
+  }
+  const r = Number(achievementRate || 0);
+  if (r >= 100) {
+    return {
+      label: "目標達成",
+      tone: "linear-gradient(180deg, rgba(102,197,124,0.95), rgba(102,197,124,0.58))",
+    };
+  }
+  if (r >= 70) {
+    return {
+      label: "未達 70%以上",
+      tone: "linear-gradient(180deg, rgba(222,181,78,0.95), rgba(222,181,78,0.58))",
+    };
+  }
+  if (r >= 50) {
+    return {
+      label: "未達 50%以上",
+      tone: "linear-gradient(180deg, rgba(223,137,79,0.95), rgba(223,137,79,0.58))",
+    };
+  }
+  return {
+    label: "未達 50%未満",
+    tone: "linear-gradient(180deg, rgba(166,74,84,0.95), rgba(166,74,84,0.58))",
+  };
 }
 
 function getCurrentBusinessDateForSales() {
@@ -405,11 +450,7 @@ export default function SalesModule({ events = [], navigateBack }) {
         const targetSales = Number(r?.metrics?.targetSales || 0);
         const achievementRate = calcRate(totalSales, targetSales);
         const eventName = resolveEventNameForAdmin(r, r.resolvedEventNames) || "イベント未登録";
-        const tone = targetSales > 0
-          ? (achievementRate != null && achievementRate >= 100
-            ? "linear-gradient(180deg, rgba(126,200,126,0.95), rgba(126,200,126,0.55))"
-            : "linear-gradient(180deg, rgba(205,134,74,0.95), rgba(205,134,74,0.55))")
-          : "linear-gradient(180deg, rgba(130,130,130,0.9), rgba(130,130,130,0.5))";
+        const trendTone = trendToneByAchievement(achievementRate, targetSales);
         return {
           key: `${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}_trend`,
           rowKey: `${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}`,
@@ -420,7 +461,8 @@ export default function SalesModule({ events = [], navigateBack }) {
           totalSales,
           targetSales,
           achievementRate,
-          tone,
+          tone: trendTone.tone,
+          trendLabel: trendTone.label,
           foodDrinkSales: r?.metrics?.foodDrinkSales != null ? Number(r.metrics.foodDrinkSales) : null,
           drinkSales: r?.metrics?.drinkSales != null ? Number(r.metrics.drinkSales) : null,
           foodSales: r?.metrics?.foodSales != null ? Number(r.metrics.foodSales) : null,
@@ -759,6 +801,13 @@ export default function SalesModule({ events = [], navigateBack }) {
 
           <div style={{ ...S.card }}>
             <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>日別売上推移</div>
+            <div style={{ display:"flex", gap:".7rem", flexWrap:"wrap", marginBottom:".45rem", fontSize:".72rem", color:"rgba(240,232,208,0.8)" }}>
+              <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".32rem", borderRadius:2, background:"rgba(102,197,124,0.95)" }} />目標達成</span>
+              <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".32rem", borderRadius:2, background:"rgba(222,181,78,0.95)" }} />未達 70%以上</span>
+              <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".32rem", borderRadius:2, background:"rgba(223,137,79,0.95)" }} />未達 50%以上</span>
+              <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".32rem", borderRadius:2, background:"rgba(166,74,84,0.95)" }} />未達 50%未満</span>
+              <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".32rem", borderRadius:2, background:"rgba(132,132,132,0.95)" }} />目標未設定</span>
+            </div>
             {monthlyAnalysis.dailyTrendRows.length === 0 ? (
               <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.45)" }}>データなし</div>
             ) : (
@@ -772,7 +821,7 @@ export default function SalesModule({ events = [], navigateBack }) {
                       <div
                         key={r.key}
                         style={{ flex: "0 0 28px", minWidth: 28, textAlign:"center", display:"flex", flexDirection:"column", height:"100%", cursor:"pointer", opacity: selectedTrendRowKey && selectedTrendRowKey !== r.rowKey ? 0.78 : 1 }}
-                        title={`${r.businessDate} / ${r.eventName} / 売上 ${yen(r.totalSales)} / 目標 ${yen(r.targetSales)} / 達成率 ${pct(r.achievementRate)}`}
+                        title={`${r.businessDate} / ${r.eventName} / 売上 ${yen(r.totalSales)} / 目標 ${yen(r.targetSales)} / 達成率 ${pct(r.achievementRate)} / ${r.trendLabel}`}
                         onClick={() => setSelectedTrendRowKey(r.rowKey)}
                       >
                         <div style={{ fontSize:".52rem", color:"rgba(240,232,208,0.68)", marginBottom:".18rem", whiteSpace:"nowrap" }}>
@@ -823,6 +872,21 @@ export default function SalesModule({ events = [], navigateBack }) {
                       <div>フード売上: <strong style={{ fontSize: ".94rem" }}>{yen(selectedTrendRow.foodSales)}</strong></div>
                       <div>飲食単価: <strong style={{ fontSize: ".94rem" }}>{num(selectedTrendRow.foodDrinkUnitPrice)}</strong></div>
                     </div>
+                    <div style={{ marginTop: ".4rem", fontSize: ".66rem", color: "rgba(240,232,208,0.72)" }}>売上構成</div>
+                    <div style={{ display:"flex", gap:".7rem", flexWrap:"wrap", margin:".2rem 0 .26rem", fontSize:".72rem", color:"rgba(240,232,208,0.82)" }}>
+                      <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".32rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.drink }} />ドリンク</span>
+                      <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".32rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.food }} />フード</span>
+                      <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".32rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.venue }} />会場費</span>
+                      <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".32rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.rental }} />レンタル</span>
+                      <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".32rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.other }} />その他</span>
+                    </div>
+                    <div style={{ position:"relative", width:"100%", height:12, borderRadius:999, overflow:"hidden", background:"rgba(240,232,208,0.1)", border:"1px solid rgba(201,168,76,0.22)" }}>
+                      <div style={{ position:"absolute", left:0, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(calcRate(selectedTrendRow.drinkSales, selectedTrendRow.totalSales) || 0)))}%`, background:SALES_COMPOSITION_COLORS.drink }} />
+                      <div style={{ position:"absolute", left:`${Math.max(0, Math.min(100, Number(calcRate(selectedTrendRow.drinkSales, selectedTrendRow.totalSales) || 0)))}%`, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(calcRate(selectedTrendRow.foodSales, selectedTrendRow.totalSales) || 0)))}%`, background:SALES_COMPOSITION_COLORS.food }} />
+                      <div style={{ position:"absolute", left:`${Math.max(0, Math.min(100, Number(calcRate(selectedTrendRow.drinkSales, selectedTrendRow.totalSales) || 0) + Number(calcRate(selectedTrendRow.foodSales, selectedTrendRow.totalSales) || 0)))}%`, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(calcRate(pickMetricValue(selectedTrendRow, VENUE_SALES_KEYS), selectedTrendRow.totalSales) || 0)))}%`, background:SALES_COMPOSITION_COLORS.venue }} />
+                      <div style={{ position:"absolute", left:`${Math.max(0, Math.min(100, Number(calcRate(selectedTrendRow.drinkSales, selectedTrendRow.totalSales) || 0) + Number(calcRate(selectedTrendRow.foodSales, selectedTrendRow.totalSales) || 0) + Number(calcRate(pickMetricValue(selectedTrendRow, VENUE_SALES_KEYS), selectedTrendRow.totalSales) || 0)))}%`, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(calcRate(pickMetricValue(selectedTrendRow, RENTAL_SALES_KEYS), selectedTrendRow.totalSales) || 0)))}%`, background:SALES_COMPOSITION_COLORS.rental }} />
+                      <div style={{ position:"absolute", right:0, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(calcRate(Math.max(0, Number(selectedTrendRow.totalSales || 0) - Number(selectedTrendRow.drinkSales || 0) - Number(selectedTrendRow.foodSales || 0) - pickMetricValue(selectedTrendRow, VENUE_SALES_KEYS) - pickMetricValue(selectedTrendRow, RENTAL_SALES_KEYS)), selectedTrendRow.totalSales) || 0)))}%`, background:SALES_COMPOSITION_COLORS.other }} />
+                    </div>
                   </div>
 
                   <div style={{ marginBottom: ".55rem" }}>
@@ -861,19 +925,19 @@ export default function SalesModule({ events = [], navigateBack }) {
 
           <div style={{ ...S.card }}>
             <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>売上構成</div>
-            <div style={{ display:"flex", gap:".8rem", flexWrap:"wrap", marginBottom:".4rem", fontSize:".72rem", color:"rgba(240,232,208,0.74)" }}>
-              <span><span style={{ display:"inline-block", width:10, height:10, marginRight:".3rem", borderRadius:2, background:"rgba(126,200,126,0.9)" }} />ドリンク</span>
-              <span><span style={{ display:"inline-block", width:10, height:10, marginRight:".3rem", borderRadius:2, background:"rgba(201,168,76,0.9)" }} />フード</span>
-              <span><span style={{ display:"inline-block", width:10, height:10, marginRight:".3rem", borderRadius:2, background:"rgba(74,144,226,0.9)" }} />会場費</span>
-              <span><span style={{ display:"inline-block", width:10, height:10, marginRight:".3rem", borderRadius:2, background:"rgba(145,124,89,0.9)" }} />レンタル</span>
-              <span><span style={{ display:"inline-block", width:10, height:10, marginRight:".3rem", borderRadius:2, background:"rgba(155,84,94,0.9)" }} />その他</span>
+            <div style={{ display:"flex", gap:".9rem", flexWrap:"wrap", marginBottom:".42rem", fontSize:".78rem", color:"rgba(240,232,208,0.84)" }}>
+              <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".34rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.drink }} />ドリンク</span>
+              <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".34rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.food }} />フード</span>
+              <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".34rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.venue }} />会場費</span>
+              <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".34rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.rental }} />レンタル</span>
+              <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".34rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.other }} />その他</span>
             </div>
             <div style={{ position:"relative", width:"100%", height:16, borderRadius:999, overflow:"hidden", background:"rgba(240,232,208,0.1)", border:"1px solid rgba(201,168,76,0.22)", marginBottom:".45rem" }}>
-              <div style={{ position:"absolute", left:0, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.drinkRate || 0)))}%`, background:"linear-gradient(90deg, rgba(126,200,126,0.9), rgba(126,200,126,0.55))" }} />
-              <div style={{ position:"absolute", left:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.drinkRate || 0)))}%`, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.foodRate || 0)))}%`, background:"linear-gradient(90deg, rgba(201,168,76,0.9), rgba(201,168,76,0.55))" }} />
-              <div style={{ position:"absolute", left:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.drinkRate || 0) + Number(monthlyAnalysis.salesComposition.foodRate || 0)))}%`, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.venueRate || 0)))}%`, background:"linear-gradient(90deg, rgba(74,144,226,0.9), rgba(74,144,226,0.55))" }} />
-              <div style={{ position:"absolute", left:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.drinkRate || 0) + Number(monthlyAnalysis.salesComposition.foodRate || 0) + Number(monthlyAnalysis.salesComposition.venueRate || 0)))}%`, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.rentalRate || 0)))}%`, background:"linear-gradient(90deg, rgba(145,124,89,0.9), rgba(145,124,89,0.55))" }} />
-              <div style={{ position:"absolute", right:0, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.otherRate || 0)))}%`, background:"linear-gradient(90deg, rgba(155,84,94,0.9), rgba(155,84,94,0.55))" }} />
+              <div style={{ position:"absolute", left:0, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.drinkRate || 0)))}%`, background:SALES_COMPOSITION_COLORS.drink }} />
+              <div style={{ position:"absolute", left:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.drinkRate || 0)))}%`, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.foodRate || 0)))}%`, background:SALES_COMPOSITION_COLORS.food }} />
+              <div style={{ position:"absolute", left:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.drinkRate || 0) + Number(monthlyAnalysis.salesComposition.foodRate || 0)))}%`, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.venueRate || 0)))}%`, background:SALES_COMPOSITION_COLORS.venue }} />
+              <div style={{ position:"absolute", left:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.drinkRate || 0) + Number(monthlyAnalysis.salesComposition.foodRate || 0) + Number(monthlyAnalysis.salesComposition.venueRate || 0)))}%`, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.rentalRate || 0)))}%`, background:SALES_COMPOSITION_COLORS.rental }} />
+              <div style={{ position:"absolute", right:0, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.otherRate || 0)))}%`, background:SALES_COMPOSITION_COLORS.other }} />
             </div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:".35rem .8rem", fontSize:".76rem" }}>
               <div>ドリンク: <strong>{yen(monthlyAnalysis.drinkSalesSum)}</strong>（{pct(monthlyAnalysis.salesComposition.drinkRate)}）</div>
