@@ -45,7 +45,6 @@ export default function SalesModule({ events = [], navigateBack }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [records, setRecords] = useState([]);
-  const [warnings, setWarnings] = useState([]);
   const [roleMode, setRoleMode] = useState("staff"); // staff | admin
   const [updatedAt, setUpdatedAt] = useState("");
 
@@ -70,11 +69,9 @@ export default function SalesModule({ events = [], navigateBack }) {
       }
       if (!json || !Array.isArray(json.records)) throw new Error("JSON形式が不正です");
       setRecords(json.records);
-      setWarnings(Array.isArray(json?.meta?.warnings) ? json.meta.warnings : []);
       setUpdatedAt(json?.meta?.generatedAt || "");
     } catch (e) {
       setRecords([]);
-      setWarnings([]);
       setUpdatedAt("");
       setError(e?.message || "取得に失敗しました");
     } finally {
@@ -117,15 +114,6 @@ export default function SalesModule({ events = [], navigateBack }) {
         </div>
       )}
 
-      {warnings.length > 0 && (
-        <div style={{ ...S.card, marginBottom:".75rem", border:"1px solid rgba(244,162,97,0.35)", background:"rgba(244,162,97,0.08)" }}>
-          <div style={{ ...S.secTitle, marginBottom:".45rem", borderBottom:"none", paddingBottom:0, color:"#f4a261" }}>warnings</div>
-          <ul style={{ margin:0, paddingLeft:"1rem", color:"#f4c18a", fontSize:".74rem", lineHeight:1.5 }}>
-            {warnings.map((w, i) => <li key={i}>{w}</li>)}
-          </ul>
-        </div>
-      )}
-
       {error && (
         <div style={{ ...S.card, marginBottom:".75rem", border:"1px solid rgba(226,75,74,0.4)", background:"rgba(226,75,74,0.08)", color:"#ff9999", fontSize:".82rem" }}>
           ⚠️ 取得失敗: {error}
@@ -149,13 +137,17 @@ export default function SalesModule({ events = [], navigateBack }) {
           {rows.map((r) => {
             const m = r.metrics || {};
             const hasEvents = r.resolvedEventNames.length > 0;
+            const isDup = !!r.flags?.isDuplicateBusinessDate;
+            const primaryName = isDup
+              ? (r.sheetEventName || (hasEvents ? r.resolvedEventNames[0] : ""))
+              : (hasEvents ? r.resolvedEventNames.join(" / ") : (r.sheetEventName || ""));
             return (
               <div key={`${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}`} style={S.card}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:".75rem", flexWrap:"wrap", marginBottom:".5rem" }}>
                   <div style={{ display:"flex", alignItems:"baseline", gap:".6rem", flexWrap:"wrap" }}>
                     <span style={{ fontFamily:"Georgia,serif", color:"#c9a84c", fontSize:".95rem" }}>{r.businessDate || "—"}</span>
                     <span style={{ fontSize:".75rem", color:"rgba(240,232,208,0.68)" }}>{r.weekday || "—"}</span>
-                    {r.flags?.isDuplicateBusinessDate && (
+                    {isDup && (
                       <span style={{ fontSize:".58rem", padding:".08rem .42rem", borderRadius:3, border:"1px solid rgba(244,162,97,0.35)", color:"#f4a261" }}>
                         同日複数
                       </span>
@@ -167,10 +159,15 @@ export default function SalesModule({ events = [], navigateBack }) {
                 </div>
 
                 <div style={{ marginBottom:".55rem", fontSize:".78rem", lineHeight:1.5 }}>
-                  {hasEvents ? (
+                  {primaryName ? (
                     <div>
                       <span style={{ color:"rgba(201,168,76,0.7)" }}>イベント名: </span>
-                      <span style={{ color:"#f0e8d0" }}>{r.resolvedEventNames.join(" / ")}</span>
+                      <span style={{ color:"#f0e8d0" }}>{primaryName}</span>
+                      {isDup && hasEvents && (
+                        <div style={{ fontSize:".66rem", color:"rgba(240,232,208,0.5)" }}>
+                          イベント管理候補: {r.resolvedEventNames.join(" / ")}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div>
