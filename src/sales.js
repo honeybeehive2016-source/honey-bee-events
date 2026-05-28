@@ -228,11 +228,11 @@ export default function SalesModule({ events = [], navigateBack }) {
 
       {roleMode === "staff" && !loading && !error && (
         <>
-        <div style={{ ...S.card, marginBottom: ".75rem", border: "2px solid rgba(201,168,76,0.34)", background: "linear-gradient(180deg, rgba(46,36,20,0.42), rgba(17,17,17,0.95))", padding: "1.2rem 1.25rem" }}>
+        <div style={{ ...S.card, marginBottom: ".8rem", border: "2px solid rgba(108,148,202,0.48)", background: "linear-gradient(180deg, rgba(22,34,54,0.94), rgba(14,24,39,0.96))", boxShadow: "0 8px 26px rgba(15,28,50,0.35), inset 0 1px 0 rgba(154,186,231,0.08)", padding: "1.28rem 1.35rem" }}>
           <div style={{ ...S.secTitle, marginBottom: ".55rem" }}>今月の進捗</div>
 
           <div style={{ display:"flex", alignItems:"baseline", gap:".55rem", flexWrap:"wrap", marginBottom:".28rem" }}>
-            <div style={{ fontFamily:"Georgia,serif", fontSize:"2.35rem", lineHeight:1, color:"#f0e8d0", letterSpacing:".02em" }}>
+            <div style={{ fontFamily:"Georgia,serif", fontSize:"2.7rem", lineHeight:1, color:"#f3ead2", letterSpacing:".02em", textShadow:"0 0 16px rgba(201,168,76,0.18)" }}>
               {pct(staffProgress.achievementRate)}
             </div>
             <span style={{ fontSize: ".74rem", fontWeight: 600, padding: ".16rem .58rem", borderRadius: 999, background: monthTone.chipBg, border: "1px solid " + monthTone.chipBd, color: monthTone.chipTx }}>
@@ -240,17 +240,17 @@ export default function SalesModule({ events = [], navigateBack }) {
             </span>
           </div>
 
-          <div style={{ marginBottom: ".6rem", fontSize: ".88rem", color: "rgba(240,232,208,0.92)", fontWeight: 500 }}>
+          <div style={{ marginBottom: ".72rem", fontSize: ".92rem", color: "rgba(240,232,208,0.95)", fontWeight: 600 }}>
             {staffProgress.remaining > 0
               ? `あと ${yen(staffProgress.remaining)} で目標達成`
               : `月間目標達成 +${yen(Math.abs(staffProgress.remaining))}`}
           </div>
 
-          <div style={{ marginBottom: ".7rem" }}>
-            <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.8)", marginBottom: ".3rem" }}>
+          <div style={{ marginBottom: ".85rem" }}>
+            <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.86)", marginBottom: ".36rem" }}>
               目標達成までの進捗 {pct1(staffProgress.achievementRate)}
             </div>
-            <div style={{ position: "relative", width: "100%", height: 14, borderRadius: 999, background: "rgba(201,168,76,0.15)", overflow: "hidden" }}>
+            <div style={{ position: "relative", width: "100%", height: 16, borderRadius: 999, background: "rgba(107,138,180,0.2)", overflow: "hidden", border: "1px solid rgba(125,160,207,0.3)" }}>
               <div
                 style={{
                   height: "100%",
@@ -262,10 +262,10 @@ export default function SalesModule({ events = [], navigateBack }) {
             </div>
           </div>
 
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:".45rem .8rem", fontSize:".74rem", color:"rgba(240,232,208,0.72)", borderTop:"1px dashed rgba(201,168,76,0.24)", paddingTop:".58rem" }}>
-            <div>今月売上: <strong style={{ color:"#f0e8d0" }}>{yen(staffProgress.salesSum)}</strong></div>
-            <div>今月目標: <strong style={{ color:"#f0e8d0" }}>{yen(staffProgress.targetSum)}</strong></div>
-            <div>本日目標: <strong style={{ color:"#f0e8d0" }}>{yen(staffProgress.todayTargetSum)}</strong></div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(185px,1fr))", gap:".5rem .8rem", fontSize:".74rem", color:"rgba(220,233,255,0.75)", borderTop:"1px dashed rgba(128,164,212,0.34)", paddingTop:".62rem" }}>
+            <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(131,166,212,0.2)", borderRadius:6, padding:".45rem .55rem" }}>今月売上: <strong style={{ color:"#f3ead2" }}>{yen(staffProgress.salesSum)}</strong></div>
+            <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(131,166,212,0.2)", borderRadius:6, padding:".45rem .55rem" }}>今月目標: <strong style={{ color:"#f3ead2" }}>{yen(staffProgress.targetSum)}</strong></div>
+            <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(131,166,212,0.2)", borderRadius:6, padding:".45rem .55rem" }}>本日目標: <strong style={{ color:"#f3ead2" }}>{yen(staffProgress.todayTargetSum)}</strong></div>
           </div>
         </div>
         <div style={{ ...S.card, marginBottom: ".75rem", padding: "1rem 1.1rem" }}>
