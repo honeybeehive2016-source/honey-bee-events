@@ -35,6 +35,58 @@ function pct1(v) {
   if (v == null || Number.isNaN(Number(v))) return "—";
   return Number(v).toFixed(1) + "%";
 }
+function yenCompact(v) {
+  if (v == null || Number.isNaN(Number(v))) return "—";
+  const n = Number(v);
+  if (Math.abs(n) >= 1000) return "¥" + Math.round(n / 1000) + "k";
+  return "¥" + n.toLocaleString("ja-JP");
+}
+function achievementTone(rate, hasTarget = true) {
+  if (!hasTarget) {
+    return {
+      label: "目標未設定",
+      bar: "linear-gradient(90deg,#6f6f6f,#8a8a8a)",
+      chipBg: "rgba(120,120,120,0.2)",
+      chipBd: "rgba(140,140,140,0.35)",
+      chipTx: "#cfcfcf",
+    };
+  }
+  const r = Number(rate || 0);
+  if (r >= 100) {
+    return {
+      label: "達成",
+      bar: "linear-gradient(90deg,#6e9b78,#88b693)",
+      chipBg: "rgba(110,155,120,0.2)",
+      chipBd: "rgba(136,182,147,0.35)",
+      chipTx: "#a9d1b1",
+    };
+  }
+  if (r >= 90) {
+    return {
+      label: "あと少し",
+      bar: "linear-gradient(90deg,#b79543,#d0b05c)",
+      chipBg: "rgba(201,168,76,0.2)",
+      chipBd: "rgba(201,168,76,0.38)",
+      chipTx: "#dfc06a",
+    };
+  }
+  if (r >= 70) {
+    return {
+      label: "注意",
+      bar: "linear-gradient(90deg,#b7773f,#cf9156)",
+      chipBg: "rgba(205,134,74,0.2)",
+      chipBd: "rgba(205,134,74,0.35)",
+      chipTx: "#dca06a",
+    };
+  }
+  return {
+    label: "要確認",
+    bar: "linear-gradient(90deg,#7f3d45,#9b545e)",
+    chipBg: "rgba(127,61,69,0.22)",
+    chipBd: "rgba(155,84,94,0.35)",
+    chipTx: "#c8848e",
+  };
+}
 
 function normalizeMonth(value) {
   if (value && /^\d{4}-\d{2}$/.test(value)) return value;
@@ -133,11 +185,18 @@ export default function SalesModule({ events = [], navigateBack }) {
     const maxSales = last7.reduce((m, r) => Math.max(m, Number(r?.metrics?.totalSales || 0)), 0);
     const graphBars = last7.map((r) => {
       const sales = Number(r?.metrics?.totalSales || 0);
+      const target = Number(r?.metrics?.targetSales || 0);
+      const hasTarget = target > 0;
+      const rate = hasTarget ? (sales / target) * 100 : null;
+      const tone = achievementTone(rate, hasTarget);
       const h = maxSales > 0 ? Math.max(10, Math.round((sales / maxSales) * 100)) : 10;
       return {
         key: `${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}`,
         date: r.businessDate,
         sales,
+        target,
+        rate,
+        tone,
         heightPct: h,
       };
     });
@@ -151,6 +210,8 @@ export default function SalesModule({ events = [], navigateBack }) {
       graphBars,
     };
   }, [rows, targetMonth, currentBusinessDate]);
+
+  const monthTone = achievementTone(staffProgress.achievementRate, staffProgress.targetSum > 0);
 
   return (
     <div style={{ padding:"1.5rem 2rem", maxWidth:1180, margin:"0 auto" }} className="hb-view">
@@ -186,7 +247,12 @@ export default function SalesModule({ events = [], navigateBack }) {
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))", gap:".4rem .8rem", fontSize:".78rem", marginBottom:".6rem" }}>
             <div>今月売上合計: <strong>{yen(staffProgress.salesSum)}</strong></div>
             <div>今月目標合計: <strong>{yen(staffProgress.targetSum)}</strong></div>
-            <div>月間達成率: <strong>{pct(staffProgress.achievementRate)}</strong></div>
+            <div>
+              月間達成率: <strong>{pct(staffProgress.achievementRate)}</strong>
+              <span style={{ marginLeft: ".4rem", fontSize: ".62rem", padding: ".08rem .38rem", borderRadius: 999, background: monthTone.chipBg, border: "1px solid " + monthTone.chipBd, color: monthTone.chipTx }}>
+                {monthTone.label}
+              </span>
+            </div>
             <div>目標まであと: <strong>{yen(staffProgress.remaining)}</strong></div>
             <div>本日目標: <strong>{yen(staffProgress.todayTargetSum)}</strong></div>
           </div>
@@ -200,12 +266,7 @@ export default function SalesModule({ events = [], navigateBack }) {
                 style={{
                   height: "100%",
                   width: `${Math.max(0, Math.min(100, Number(staffProgress.achievementRate || 0)))}%`,
-                  background:
-                    (staffProgress.achievementRate || 0) >= 100
-                      ? "linear-gradient(90deg,#7ec87e,#a7d8a7)"
-                      : (staffProgress.achievementRate || 0) >= 70
-                      ? "linear-gradient(90deg,#c9a84c,#dfc06a)"
-                      : "linear-gradient(90deg,#f4a261,#e58d4e)",
+                  background: monthTone.bar,
                   transition: "width .2s ease",
                 }}
               />
@@ -217,10 +278,17 @@ export default function SalesModule({ events = [], navigateBack }) {
             {staffProgress.graphBars.length === 0 ? (
               <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.45)" }}>実績データがまだありません</div>
             ) : (
-              <div style={{ display: "flex", alignItems: "flex-end", gap: ".35rem", height: 84 }}>
+              <div style={{ display: "flex", alignItems: "flex-end", gap: ".35rem", height: 108 }}>
                 {staffProgress.graphBars.map((b) => (
-                  <div key={b.key} style={{ flex: 1, minWidth: 0, textAlign: "center" }} title={`${b.date} / ${yen(b.sales)}`}>
-                    <div style={{ height: `${b.heightPct}%`, minHeight: 6, borderRadius: "3px 3px 0 0", background: "linear-gradient(180deg, rgba(201,168,76,0.95), rgba(201,168,76,0.55))" }} />
+                  <div
+                    key={b.key}
+                    style={{ flex: 1, minWidth: 0, textAlign: "center" }}
+                    title={`${b.date} / 売上 ${yen(b.sales)} / 達成率 ${pct(b.rate)}`}
+                  >
+                    <div style={{ fontSize: ".55rem", color: "rgba(240,232,208,0.55)", marginBottom: ".12rem", lineHeight: 1 }}>
+                      {yenCompact(b.sales)}
+                    </div>
+                    <div style={{ height: `${b.heightPct}%`, minHeight: 10, borderRadius: "4px 4px 0 0", background: b.tone.bar }} />
                     <div style={{ marginTop: ".2rem", fontSize: ".58rem", color: "rgba(240,232,208,0.55)" }}>{(b.date || "").slice(5)}</div>
                   </div>
                 ))}
