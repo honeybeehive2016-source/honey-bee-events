@@ -350,6 +350,117 @@ function eventNamesForDate(events, businessDate) {
   const list = (events || []).filter((e) => e.date === businessDate);
   return list.map((e) => e.name).filter(Boolean);
 }
+function eventsForDate(events, businessDate) {
+  return (events || []).filter((e) => e.date === businessDate);
+}
+function isRentalLikeEvent(ev) {
+  const name = String(ev?.name || "");
+  const genre = String(ev?.genre || "");
+  return /貸切|貸し切り/.test(name) || normText(genre) === "貸切";
+}
+function extractCustomerNameFromEventName(name) {
+  if (!name) return "";
+  let n = name;
+  n = n.replace(/[\[（(](昼|夜|深夜|朝|午前|午後)[\]）)]/g, "");
+  n = n.replace(/^[\s　]*(昼|夜|深夜|朝|午前|午後)[\s　]+/, "");
+  n = n.replace(/貸し切り|貸切/g, "");
+  n = n.replace(/様/g, "");
+  n = n.replace(/[\s　]+/g, " ").trim();
+  return n;
+}
+function pickEventText(ev, keys) {
+  for (const key of keys) {
+    const v = String(ev?.[key] ?? "").trim();
+    if (v) return v;
+  }
+  return "";
+}
+function normalizePerformText(s) {
+  return String(s || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\s*\n+\s*/g, " / ")
+    .replace(/\s*[/／、，,]+\s*/g, " / ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+function joinPerformParts(parts) {
+  const seen = new Set();
+  const out = [];
+  for (const p of parts) {
+    const t = normalizePerformText(p);
+    if (!t) continue;
+    const key = normText(t);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
+  }
+  return out.join(" / ");
+}
+function matchEventForRecord(record, dateEvents) {
+  const list = Array.isArray(dateEvents) ? dateEvents : [];
+  if (list.length === 0) return null;
+  const sheetName = String(record?.sheetEventName || "").trim();
+  const sheetNorm = normText(sheetName);
+  if (sheetNorm) {
+    const exact = list.find((e) => normText(e?.name) === sheetNorm);
+    if (exact) return exact;
+    const partial = list.find((e) => {
+      const nn = normText(e?.name);
+      return nn.includes(sheetNorm) || sheetNorm.includes(nn);
+    });
+    if (partial) return partial;
+  }
+  if (list.length === 1 && !record?.flags?.isDuplicateBusinessDate) return list[0];
+  return null;
+}
+function formatEventPerformContent(ev) {
+  if (!ev) return null;
+  const PERFORM_KEYS = ["perf", "performers", "artistName", "artistNames", "artists", "performerName", "cast", "members", "bandName"];
+  const CONTENT_KEYS = ["desc", "description", "subtitle"];
+  const RENTAL_NAME_KEYS = [
+    "rentalName", "rentalTitle", "rentalContent", "privateEventName", "privateEventTitle",
+    "organizerName", "customerName", "companyName", "groupName", "partyName",
+    "customerCompany", "contactName",
+  ];
+  const RENTAL_PURPOSE_KEYS = ["purpose", "usagePurpose", "rentalContent"];
+  const NOTE_KEYS = ["notes", "remark", "galleryNote", "memo"];
+
+  if (isRentalLikeEvent(ev)) {
+    const parts = [];
+    const customer = extractCustomerNameFromEventName(ev.name);
+    if (customer) parts.push(customer);
+    const organizer = pickEventText(ev, RENTAL_NAME_KEYS);
+    if (organizer && normText(organizer) !== normText(customer)) parts.push(organizer);
+    const purpose = pickEventText(ev, RENTAL_PURPOSE_KEYS);
+    if (purpose) parts.push(purpose);
+    const perf = pickEventText(ev, PERFORM_KEYS);
+    if (perf) parts.push(perf);
+    const desc = pickEventText(ev, CONTENT_KEYS);
+    if (desc) parts.push(desc);
+    const cap = String(ev?.cap ?? "").trim();
+    if (cap) parts.push(`定員 ${cap}名`);
+    const memo = pickEventText(ev, NOTE_KEYS);
+    if (memo) parts.push(memo.length > 80 ? `${memo.slice(0, 80)}…` : memo);
+    const text = joinPerformParts(parts);
+    return text || null;
+  }
+
+  const parts = [];
+  const perf = pickEventText(ev, PERFORM_KEYS);
+  if (perf) parts.push(perf);
+  const desc = pickEventText(ev, CONTENT_KEYS);
+  if (desc && normText(desc) !== normText(ev.name)) parts.push(desc);
+  const genre = String(ev?.genre ?? "").trim();
+  if (genre && normText(genre) !== "ライブ" && normText(genre) !== normText(ev.name)) parts.push(genre);
+  const text = joinPerformParts(parts);
+  return text || null;
+}
+function formatPerformDisplay(text, maxLen = 140) {
+  const full = normalizePerformText(text);
+  if (!full) return { display: null, full: null };
+  if (full.length <= maxLen) return { display: full, full };
+  return { display: `${full.slice(0, maxLen)}…`, full };
+}
 function calcRate(numer, denom) {
   const n = Number(numer || 0);
   const d = Number(denom || 0);
@@ -621,6 +732,9 @@ export default function SalesModule({ events = [], navigateBack }) {
         const targetSales = Number(r?.metrics?.targetSales || 0);
         const achievementRate = calcRate(totalSales, targetSales);
         const eventName = resolveEventNameForAdmin(r, r.resolvedEventNames) || "イベント未登録";
+        const matchedEvent = matchEventForRecord(r, eventsForDate(events, r.businessDate));
+        const performRaw = formatEventPerformContent(matchedEvent);
+        const performFormatted = formatPerformDisplay(performRaw);
         const trendTone = trendToneByAchievement(achievementRate, targetSales);
         return {
           key: `${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}_trend`,
@@ -628,6 +742,8 @@ export default function SalesModule({ events = [], navigateBack }) {
           businessDate: r.businessDate,
           weekday: r.weekday || "—",
           eventName,
+          eventPerformContent: performFormatted.display,
+          eventPerformContentFull: performFormatted.full,
           isDuplicateBusinessDate: !!r?.flags?.isDuplicateBusinessDate,
           totalSales,
           targetSales,
@@ -744,7 +860,7 @@ export default function SalesModule({ events = [], navigateBack }) {
       drinkRankingTop10,
       foodRankingTop10,
     };
-  }, [rows, targetMonth, currentBusinessDate]);
+  }, [rows, events, targetMonth, currentBusinessDate]);
   useEffect(() => {
     if (!monthlyAnalysis.dailyTrendRows.length) {
       setSelectedTrendRowKey("");
@@ -1087,13 +1203,39 @@ export default function SalesModule({ events = [], navigateBack }) {
 
                   <div style={{ marginBottom: ".55rem" }}>
                     <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>A. 基本情報</div>
-                    <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:".34rem .7rem", fontSize:".8rem" }}>
-                      <div>日付: <strong style={{ fontSize: ".95rem" }}>{selectedTrendRow.businessDate || "—"}</strong></div>
-                      <div>曜日: <strong style={{ fontSize: ".95rem" }}>{selectedTrendRow.weekday || "—"}</strong></div>
-                      <div>
-                        イベント名: <strong style={{ fontSize: ".95rem" }}>{selectedTrendRow.eventName || "イベント未登録"}</strong>
-                        {selectedTrendRow.isDuplicateBusinessDate ? <span style={{ marginLeft: ".35rem", fontSize: ".6rem", padding: ".08rem .42rem", borderRadius: 3, border: "1px solid rgba(244,162,97,0.35)", color: "#f4a261" }}>同日複数</span> : null}
+                    <div style={{ display:"grid", gap:".38rem", fontSize:".8rem" }}>
+                      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))", gap:".34rem .7rem" }}>
+                        <div>日付: <strong style={{ fontSize: ".95rem" }}>{selectedTrendRow.businessDate || "—"}</strong></div>
+                        <div>曜日: <strong style={{ fontSize: ".95rem" }}>{selectedTrendRow.weekday || "—"}</strong></div>
                       </div>
+                      <div>
+                        イベント名:{" "}
+                        <strong style={{ fontSize: ".95rem" }}>{selectedTrendRow.eventName || "イベント未登録"}</strong>
+                        {selectedTrendRow.isDuplicateBusinessDate ? (
+                          <span style={{ marginLeft: ".35rem", fontSize: ".6rem", padding: ".08rem .42rem", borderRadius: 3, border: "1px solid rgba(244,162,97,0.35)", color: "#f4a261" }}>同日複数</span>
+                        ) : null}
+                      </div>
+                      {selectedTrendRow.eventPerformContent ? (
+                        <div
+                          title={selectedTrendRow.eventPerformContentFull || selectedTrendRow.eventPerformContent}
+                          style={{ lineHeight: 1.45 }}
+                        >
+                          出演・内容:{" "}
+                          <strong
+                            style={{
+                              fontSize: ".92rem",
+                              color: "#e8dcc0",
+                              display: "-webkit-box",
+                              WebkitLineClamp: 2,
+                              WebkitBoxOrient: "vertical",
+                              overflow: "hidden",
+                              wordBreak: "break-word",
+                            }}
+                          >
+                            {selectedTrendRow.eventPerformContent}
+                          </strong>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
 
