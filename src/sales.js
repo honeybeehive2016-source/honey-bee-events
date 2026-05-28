@@ -210,8 +210,119 @@ function analysisRowBorder(variant) {
   const v = ANALYSIS_CARD[variant] || ANALYSIS_CARD.trend;
   return v.rowBorder;
 }
-function analysisNote(extra = {}) {
-  return { ...ANALYSIS_NOTE, ...extra };
+function analysisNote(extra = {}, narrow = false) {
+  const base = narrow ? { ...ANALYSIS_NOTE, fontSize: ".68rem" } : ANALYSIS_NOTE;
+  return { ...base, ...extra };
+}
+function useSalesViewport() {
+  const [vp, setVp] = useState(() => {
+    if (typeof window === "undefined") return { narrow: false, mobile: false };
+    return {
+      narrow: window.matchMedia("(max-width: 768px)").matches,
+      mobile: window.matchMedia("(max-width: 480px)").matches,
+    };
+  });
+  useEffect(() => {
+    const mq768 = window.matchMedia("(max-width: 768px)");
+    const mq480 = window.matchMedia("(max-width: 480px)");
+    const sync = () => setVp({ narrow: mq768.matches, mobile: mq480.matches });
+    sync();
+    mq768.addEventListener("change", sync);
+    mq480.addEventListener("change", sync);
+    return () => {
+      mq768.removeEventListener("change", sync);
+      mq480.removeEventListener("change", sync);
+    };
+  }, []);
+  return vp;
+}
+function rGridCols(narrow, minPx = 170) {
+  return narrow ? "1fr" : `repeat(auto-fit,minmax(${minPx}px,1fr))`;
+}
+function touchBtnExtra(narrow) {
+  return narrow ? { minHeight: 44, fontSize: ".85rem", padding: ".48rem .85rem" } : {};
+}
+function analysisMetricHero(narrow, mobile) {
+  return {
+    ...ANALYSIS_METRIC_HERO,
+    fontSize: mobile ? "2rem" : narrow ? "2.15rem" : ANALYSIS_METRIC_HERO.fontSize,
+  };
+}
+function analysisMetricStrong(narrow) {
+  return { ...ANALYSIS_METRIC_STRONG, fontSize: narrow ? "1.12rem" : ANALYSIS_METRIC_STRONG.fontSize };
+}
+function analysisMetricMid(narrow) {
+  return { ...ANALYSIS_METRIC_MID, fontSize: narrow ? "1rem" : ANALYSIS_METRIC_MID.fontSize };
+}
+function AnalysisStackedRow({ label, value, valueStyle, narrow, border = true }) {
+  if (!narrow) {
+    return (
+      <div>
+        {label} <strong style={valueStyle}>{value}</strong>
+      </div>
+    );
+  }
+  return (
+    <div
+      style={{
+        padding: ".38rem 0",
+        borderBottom: border ? "1px solid rgba(132,158,205,0.14)" : "none",
+      }}
+    >
+      <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.62)", marginBottom: ".14rem", lineHeight: 1.35 }}>{label}</div>
+      <div style={{ fontSize: "1.1rem", fontWeight: 600, color: "#f3ead2", lineHeight: 1.3, wordBreak: "break-word", ...valueStyle }}>{value}</div>
+    </div>
+  );
+}
+function SalesCompositionBreakdown({ items, narrow }) {
+  const rowStyle = narrow
+    ? {
+        display: "flex",
+        alignItems: "flex-start",
+        gap: ".45rem",
+        padding: ".38rem .5rem",
+        borderRadius: 4,
+        border: "1px solid rgba(88,128,178,0.16)",
+        background: "rgba(0,0,0,0.15)",
+        fontSize: ".88rem",
+        lineHeight: 1.45,
+      }
+    : null;
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: rGridCols(narrow, narrow ? 9999 : 170), gap: narrow ? ".4rem" : ".35rem .8rem", fontSize: narrow ? ".88rem" : ".76rem" }}>
+      {items.map((item) => (
+        <div key={item.key} style={rowStyle || undefined}>
+          {narrow ? (
+            <>
+              <span
+                style={{
+                  display: "inline-block",
+                  width: 12,
+                  height: 12,
+                  marginTop: ".22rem",
+                  flexShrink: 0,
+                  borderRadius: 2,
+                  background: item.chipColor,
+                }}
+              />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ color: "rgba(240,232,208,0.72)", marginBottom: ".1rem" }}>{item.label}</div>
+                <div style={{ fontWeight: 600, color: "#f0e8d0", wordBreak: "break-word" }}>
+                  {item.amount} <span style={{ fontWeight: 500, color: "rgba(240,232,208,0.55)", fontSize: ".82rem" }}>({item.rate})</span>
+                </div>
+                {item.extra ? <div style={{ marginTop: ".14rem", fontSize: ".78rem", color: "rgba(240,232,208,0.58)", paddingLeft: ".1rem" }}>{item.extra}</div> : null}
+              </div>
+            </>
+          ) : (
+            <>
+              {item.label}: <strong>{item.amount}</strong>（{item.rate}）
+              {item.extra ? <span style={{ display: "block", marginTop: ".12rem", paddingLeft: ".5rem", fontSize: ".7rem", color: "rgba(240,232,208,0.68)" }}>{item.extra}</span> : null}
+            </>
+          )}
+        </div>
+      ))}
+    </div>
+  );
 }
 function yearlyTableRowOpacity_(m) {
   if (m.status === "取得失敗") return 0.55;
@@ -879,7 +990,7 @@ function YearlyYoYBarChart({ rows, onMonthClick }) {
 }
 function YearlyRankList({ title, variant, items, valueLabel, formatValue }) {
   return (
-    <div style={analysisCard(variant)}>
+    <div style={{ ...analysisCard(variant), width: "100%", minWidth: 0, boxSizing: "border-box" }}>
       <div style={analysisSecTitle(variant, ".5rem")}>{title}</div>
       {items.length === 0 ? (
         <div style={{ fontSize: ".7rem", color: "rgba(240,232,208,0.42)" }}>データなし</div>
@@ -964,9 +1075,9 @@ function compositionRatesFromParts(parts, total) {
   const otherRate = calcRate(parts.other, totalN);
   return { drinkRate, foodRate, bandFoodDrinkRate, venueRate, rentalRate, otherRate };
 }
-function SalesCompositionLegend() {
+function SalesCompositionLegend({ narrow }) {
   return (
-    <div style={{ display:"flex", gap:".85rem", flexWrap:"wrap", marginBottom:".42rem", fontSize:".78rem", color:"rgba(240,232,208,0.86)" }}>
+    <div style={{ display:"flex", gap: narrow ? ".5rem .65rem" : ".85rem", flexWrap:"wrap", marginBottom:".42rem", fontSize: narrow ? ".82rem" : ".78rem", color:"rgba(240,232,208,0.86)" }}>
       <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".34rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.drink }} />ドリンク</span>
       <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".34rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.food }} />フード</span>
       <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".34rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.bandFoodDrink }} />バンド飲食代</span>
@@ -1293,10 +1404,71 @@ function YearlyTableNumberCell({ m, value, kind = "yen", width, taxMode }) {
 const PURCHASE_BREAKDOWN_NOTE =
   "※ドリンク仕入れ・フード仕入れは仕入れ合計の内訳です。月合計欄の値を優先しています。";
 
-function CostProfitBarRow({ bar, maxValue, isChild, taxMode }) {
+function CostProfitBarRow({ bar, maxValue, isChild, taxMode, narrow }) {
   const isLaborZero = bar.key === "labor" && Number(bar.value || 0) === 0;
   const scaleMax = maxValue > 0 ? maxValue : 1;
   const w = isLaborZero ? 0 : Math.max(isChild ? 3 : 4, Math.round((Number(bar.value || 0) / scaleMax) * 100));
+  const amountText = isLaborZero ? "¥0 / 翌月反映" : formatDisplayYen(bar.value, taxMode);
+  const labelBlock = (
+    <div
+      style={{
+        fontSize: narrow ? (isChild ? ".72rem" : ".78rem") : isChild ? ".68rem" : ".74rem",
+        color: isChild ? "rgba(240,232,208,0.58)" : "rgba(240,232,208,0.74)",
+        lineHeight: 1.4,
+      }}
+    >
+      {isChild ? `内訳：${bar.label}` : bar.label}
+      {!isChild && bar.note ? (
+        <span style={{ display: narrow ? "block" : "inline", marginLeft: narrow ? 0 : ".28rem", marginTop: narrow ? ".08rem" : 0, fontSize: ".64rem", color: "rgba(240,232,208,0.52)" }}>{bar.note}</span>
+      ) : null}
+    </div>
+  );
+  const barBlock = (
+    <div
+      style={{
+        height: isChild ? 7 : narrow ? 9 : 10,
+        borderRadius: 999,
+        background: isChild ? "rgba(240,232,208,0.06)" : "rgba(240,232,208,0.1)",
+        border: isChild ? "1px solid rgba(201,168,76,0.12)" : "1px solid rgba(201,168,76,0.18)",
+        overflow: "hidden",
+        width: "100%",
+        minWidth: 0,
+      }}
+    >
+      {!isLaborZero ? (
+        <div
+          style={{
+            height: "100%",
+            width: `${w}%`,
+            background: bar.tone,
+            opacity: isChild ? 0.72 : 1,
+          }}
+        />
+      ) : null}
+    </div>
+  );
+  const amountBlock = (
+    <div style={{ fontSize: narrow ? ".92rem" : isChild ? ".7rem" : ".74rem", fontWeight: narrow ? 600 : 400, color: isChild ? "rgba(240,232,208,0.82)" : "#f0e8d0" }}>
+      {amountText}
+    </div>
+  );
+  if (narrow) {
+    return (
+      <div
+        style={{
+          marginLeft: isChild ? ".2rem" : 0,
+          paddingLeft: isChild ? ".55rem" : 0,
+          borderLeft: isChild ? "2px solid rgba(205,134,74,0.22)" : "none",
+          paddingBottom: ".28rem",
+          borderBottom: "1px solid rgba(201,168,76,0.08)",
+        }}
+      >
+        {labelBlock}
+        <div style={{ margin: ".28rem 0 .22rem" }}>{barBlock}</div>
+        {amountBlock}
+      </div>
+    );
+  }
   return (
     <div
       style={{
@@ -1309,60 +1481,227 @@ function CostProfitBarRow({ bar, maxValue, isChild, taxMode }) {
         borderLeft: isChild ? "2px solid rgba(205,134,74,0.22)" : "none",
       }}
     >
-      <div
-        style={{
-          fontSize: isChild ? ".68rem" : ".74rem",
-          color: isChild ? "rgba(240,232,208,0.58)" : "rgba(240,232,208,0.74)",
-          lineHeight: 1.4,
-        }}
-      >
-        {isChild ? `内訳：${bar.label}` : bar.label}
-        {!isChild && bar.note ? (
-          <span style={{ marginLeft: ".28rem", fontSize: ".6rem", color: "rgba(240,232,208,0.52)" }}>{bar.note}</span>
-        ) : null}
-      </div>
-      <div
-        style={{
-          height: isChild ? 7 : 10,
-          borderRadius: 999,
-          background: isChild ? "rgba(240,232,208,0.06)" : "rgba(240,232,208,0.1)",
-          border: isChild ? "1px solid rgba(201,168,76,0.12)" : "1px solid rgba(201,168,76,0.18)",
-          overflow: "hidden",
-        }}
-      >
-        {!isLaborZero ? (
-          <div
-            style={{
-              height: "100%",
-              width: `${w}%`,
-              background: bar.tone,
-              opacity: isChild ? 0.72 : 1,
-            }}
-          />
-        ) : null}
-      </div>
-      <div style={{ fontSize: isChild ? ".7rem" : ".74rem", color: isChild ? "rgba(240,232,208,0.82)" : "#f0e8d0" }}>
-        {isLaborZero ? "¥0 / 翌月反映" : formatDisplayYen(bar.value, taxMode)}
-      </div>
+      {labelBlock}
+      {barBlock}
+      {amountBlock}
     </div>
   );
 }
 
-function CostProfitBarList({ bars, maxValue, taxMode }) {
+function CostProfitBarList({ bars, maxValue, taxMode, narrow }) {
   const hasPurchaseChildren = bars.some((b) => b.isPurchaseChild);
   return (
     <>
       <div style={{ display: "grid", gap: ".4rem" }}>
         {bars.map((b) => (
-          <CostProfitBarRow key={b.key} bar={b} maxValue={maxValue} isChild={!!b.isPurchaseChild} taxMode={taxMode} />
+          <CostProfitBarRow key={b.key} bar={b} maxValue={maxValue} isChild={!!b.isPurchaseChild} taxMode={taxMode} narrow={narrow} />
         ))}
       </div>
       {hasPurchaseChildren ? (
-        <div style={{ fontSize: ".62rem", color: "rgba(240,232,208,0.52)", marginTop: ".32rem", lineHeight: 1.5 }}>
+        <div style={{ fontSize: narrow ? ".68rem" : ".62rem", color: "rgba(240,232,208,0.52)", marginTop: ".32rem", lineHeight: 1.5 }}>
           {PURCHASE_BREAKDOWN_NOTE}
         </div>
       ) : null}
     </>
+  );
+}
+
+function YearlyCardMetricRow({ label, value, muted, valueStyle }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "baseline",
+        gap: ".5rem",
+        padding: ".2rem 0",
+        fontSize: ".88rem",
+        flexWrap: "wrap",
+      }}
+    >
+      <span style={{ color: "rgba(240,232,208,0.62)", flex: "1 1 40%" }}>{label}</span>
+      <span
+        style={{
+          fontFamily: YEARLY_TABLE_NUMBER_FONT,
+          color: muted ? "rgba(240,232,208,0.42)" : "#f0e8d0",
+          textAlign: "right",
+          wordBreak: "break-word",
+          ...valueStyle,
+        }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+function YearlyMonthStatusBadge({ m }) {
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        fontSize: ".58rem",
+        fontWeight: 500,
+        lineHeight: 1.25,
+        padding: ".05rem .26rem",
+        borderRadius: 2,
+        border:
+          m.status === "取得失敗"
+            ? "1px solid rgba(200,90,90,0.28)"
+            : m.status === "集計済み"
+            ? "1px solid rgba(126,200,126,0.24)"
+            : m.status === "予定あり"
+            ? "1px solid rgba(201,168,76,0.24)"
+            : "1px solid rgba(140,140,140,0.22)",
+        color:
+          m.status === "取得失敗"
+            ? "rgba(232,160,160,0.75)"
+            : m.status === "集計済み"
+            ? "rgba(158,201,168,0.88)"
+            : m.status === "予定あり"
+            ? "rgba(200,180,120,0.62)"
+            : "rgba(200,195,175,0.5)",
+        opacity: m.status === "未入力" || m.status === "予定あり" ? 0.85 : 1,
+      }}
+    >
+      {m.status}
+    </span>
+  );
+}
+function YearlyMonthCardsBasic({ monthRows, onMonthClick, taxMode, dy }) {
+  return (
+    <div style={{ display: "grid", gap: ".55rem" }}>
+      {monthRows.map((m) => {
+        const salesCell = yearlyTableYenCell_(m, m.totalSalesSum, taxMode);
+        const targetCell = yearlyTableYenCell_(m, m.targetSalesSum, taxMode);
+        const foodCell = yearlyTableYenCell_(m, m.foodDrinkSalesIncludingBandSum, taxMode);
+        const profitCell = yearlyTableYenCell_(m, m.operatingProfitSum, taxMode);
+        const laborCell = yearlyTableYenCell_(m, m.laborCostSum, taxMode);
+        const progressCell = yearlyTablePctCell_(m, m.progressRate);
+        return (
+          <div
+            key={`${m.targetMonth}_card_basic`}
+            role="button"
+            tabIndex={0}
+            onClick={() => onMonthClick(m.targetMonth)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onMonthClick(m.targetMonth);
+              }
+            }}
+            style={{
+              opacity: yearlyTableRowOpacity_(m),
+              cursor: "pointer",
+              padding: ".7rem .8rem",
+              borderRadius: 6,
+              border: "1px solid rgba(88,128,178,0.28)",
+              background: "rgba(0,0,0,0.22)",
+            }}
+            {...yearlyRowHoverHandlers_()}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: ".42rem", gap: ".5rem" }}>
+              <div style={{ fontSize: ".95rem", fontWeight: 700, color: "#c9a84c" }}>{m.monthLabel}</div>
+              <YearlyMonthStatusBadge m={m} />
+            </div>
+            <YearlyCardMetricRow label="売上" value={salesCell.text} muted={salesCell.muted} />
+            <YearlyCardMetricRow label="目標" value={targetCell.text} muted={targetCell.muted} />
+            <YearlyCardMetricRow label="進捗率" value={progressCell.text} muted={progressCell.muted} />
+            <YearlyCardMetricRow label="飲食" value={foodCell.text} muted={foodCell.muted} />
+            <YearlyCardMetricRow label="営業利益" value={profitCell.text} muted={profitCell.muted} />
+            <YearlyCardMetricRow label="人件費" value={laborCell.text} muted={laborCell.muted} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+function YearlyMonthCardsPurchase({ monthRows, onMonthClick, taxMode }) {
+  return (
+    <div style={{ display: "grid", gap: ".55rem" }}>
+      {monthRows.map((m) => {
+        const purchaseCell = yearlyTableYenCell_(m, m.purchaseTotalSum, taxMode);
+        const drinkCell = yearlyTableYenCell_(m, m.drinkPurchaseSum, taxMode);
+        const foodCell = yearlyTableYenCell_(m, m.foodPurchaseSum, taxMode);
+        const totalRate = yearlyTablePctCell_(m, m.purchaseCostRates?.totalPurchaseRate);
+        const drinkRate = yearlyTablePctCell_(m, m.purchaseCostRates?.drinkCostRate);
+        const foodRate = yearlyTablePctCell_(m, m.purchaseCostRates?.foodCostRate);
+        return (
+          <div
+            key={`${m.targetMonth}_card_purchase`}
+            role="button"
+            tabIndex={0}
+            onClick={() => onMonthClick(m.targetMonth)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onMonthClick(m.targetMonth);
+              }
+            }}
+            style={{
+              opacity: yearlyTableRowOpacity_(m),
+              cursor: "pointer",
+              padding: ".7rem .8rem",
+              borderRadius: 6,
+              border: "1px solid rgba(88,128,178,0.28)",
+              background: "rgba(0,0,0,0.22)",
+            }}
+            {...yearlyRowHoverHandlers_()}
+          >
+            <div style={{ fontSize: ".95rem", fontWeight: 700, color: "#c9a84c", marginBottom: ".42rem" }}>{m.monthLabel}</div>
+            <YearlyCardMetricRow label="仕入れ合計" value={purchaseCell.text} muted={purchaseCell.muted} />
+            <YearlyCardMetricRow label="ドリンク仕入れ" value={drinkCell.text} muted={drinkCell.muted} />
+            <YearlyCardMetricRow label="フード仕入れ" value={foodCell.text} muted={foodCell.muted} />
+            <YearlyCardMetricRow label="総仕入率" value={totalRate.text} muted={totalRate.muted} />
+            <YearlyCardMetricRow label="ドリンク原価率" value={drinkRate.text} muted={drinkRate.muted} />
+            <YearlyCardMetricRow label="フード原価率" value={foodRate.text} muted={foodRate.muted} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+function YearlyYoYMonthCards({ rows, onMonthClick, dy, pct1, signedDy }) {
+  return (
+    <div style={{ display: "grid", gap: ".55rem" }}>
+      {rows.map((r) => {
+        const diffMuted = r.currentSales === 0 && r.prevSales === 0;
+        const diffColor = r.diff > 0 ? "#9ec9a8" : r.diff < 0 ? "#dca06a" : undefined;
+        return (
+          <div
+            key={`${r.targetMonth}_card_yoy`}
+            role="button"
+            tabIndex={0}
+            onClick={() => onMonthClick(r.targetMonth)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onMonthClick(r.targetMonth);
+              }
+            }}
+            style={{
+              opacity: yearlyYoYRowOpacity_(r),
+              cursor: "pointer",
+              padding: ".7rem .8rem",
+              borderRadius: 6,
+              border: "1px solid rgba(88,128,178,0.28)",
+              background: "rgba(0,0,0,0.22)",
+            }}
+            {...yearlyRowHoverHandlers_()}
+          >
+            <div style={{ fontSize: ".95rem", fontWeight: 700, color: "#c9a84c", marginBottom: ".42rem" }}>{r.monthLabel}</div>
+            <YearlyCardMetricRow label="今年売上" value={dy(r.currentSales)} muted={r.currentSales === 0} />
+            <YearlyCardMetricRow label="前年売上" value={dy(r.prevSales)} muted={false} />
+            <YearlyCardMetricRow label="差額" value={signedDy(r.diff)} muted={diffMuted} valueStyle={diffColor ? { color: diffColor } : undefined} />
+            <div style={{ display: "flex", justifyContent: "space-between", gap: ".5rem", padding: ".2rem 0", fontSize: ".88rem" }}>
+              <span style={{ color: "rgba(240,232,208,0.62)" }}>前年比</span>
+              <span style={{ fontFamily: YEARLY_TABLE_NUMBER_FONT, color: diffColor || (r.yoyRate == null ? "rgba(240,232,208,0.42)" : "#f0e8d0") }}>
+                {r.yoyRate != null ? pct1(r.yoyRate) : "—"}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1460,6 +1799,7 @@ export default function SalesModule({ events = [], navigateBack }) {
   const [selectedTrendRowKey, setSelectedTrendRowKey] = useState("");
   const [updatedAt, setUpdatedAt] = useState("");
   const currentBusinessDate = getCurrentBusinessDateForSales();
+  const vp = useSalesViewport();
 
   const loadSales = async (monthArg) => {
     const month = normalizeMonth(monthArg || targetMonth);
@@ -2094,18 +2434,45 @@ export default function SalesModule({ events = [], navigateBack }) {
   }, [yearlyAnalysis, taxMode]);
 
   return (
-    <div style={{ padding:"1.5rem 2rem", maxWidth:1180, margin:"0 auto" }} className="hb-view">
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"1rem", flexWrap:"wrap", gap:".5rem" }}>
-        <h2 style={{ fontFamily:"Georgia,serif", fontSize:"1.2rem", color:"#c9a84c", letterSpacing:".15em", margin:0 }}>📈 売上管理</h2>
-        <div style={{ display:"flex", gap:".45rem", flexWrap:"wrap", alignItems:"center" }}>
-          <button type="button" style={S.btn(roleMode === "staff" ? "gold" : "ghost")} onClick={() => setRoleMode("staff")}>現場表示</button>
-          <button type="button" style={S.btn(roleMode === "admin" ? "gold" : "ghost")} onClick={() => setRoleMode("admin")}>管理表示</button>
-          <span style={{ display:"inline-flex", gap:".2rem", alignItems:"center", padding:".12rem .2rem", borderRadius:4, border:"1px solid rgba(201,168,76,0.22)", background:"rgba(0,0,0,0.2)" }}>
-            <button type="button" style={S.btn(taxMode === "gross" ? "gold" : "ghost")} onClick={() => setTaxMode("gross")}>税込</button>
-            <button type="button" style={S.btn(taxMode === "net" ? "gold" : "ghost")} onClick={() => setTaxMode("net")}>税抜</button>
+    <div
+      style={{
+        padding: vp.narrow ? (vp.mobile ? "1rem .65rem" : "1.25rem .85rem") : "1.5rem 2rem",
+        maxWidth: vp.narrow ? "100%" : 1180,
+        width: "100%",
+        margin: "0 auto",
+        boxSizing: "border-box",
+        overflowX: "hidden",
+      }}
+      className="hb-view"
+    >
+      <div
+        style={{
+          display: "flex",
+          flexDirection: vp.narrow ? "column" : "row",
+          alignItems: vp.narrow ? "stretch" : "center",
+          justifyContent: "space-between",
+          marginBottom: "1rem",
+          gap: vp.narrow ? ".65rem" : ".5rem",
+        }}
+      >
+        <h2 style={{ fontFamily:"Georgia,serif", fontSize: vp.narrow ? "1.05rem" : "1.2rem", color:"#c9a84c", letterSpacing:".15em", margin:0 }}>📈 売上管理</h2>
+        <div
+          style={{
+            display: "flex",
+            gap: ".45rem",
+            flexWrap: "wrap",
+            alignItems: "center",
+            width: vp.narrow ? "100%" : "auto",
+          }}
+        >
+          <button type="button" style={{ ...S.btn(roleMode === "staff" ? "gold" : "ghost"), ...touchBtnExtra(vp.narrow) }} onClick={() => setRoleMode("staff")}>現場表示</button>
+          <button type="button" style={{ ...S.btn(roleMode === "admin" ? "gold" : "ghost"), ...touchBtnExtra(vp.narrow) }} onClick={() => setRoleMode("admin")}>管理表示</button>
+          <span style={{ display:"inline-flex", gap:".2rem", alignItems:"center", padding:".12rem .2rem", borderRadius:4, border:"1px solid rgba(201,168,76,0.22)", background:"rgba(0,0,0,0.2)", flexWrap:"wrap" }}>
+            <button type="button" style={{ ...S.btn(taxMode === "gross" ? "gold" : "ghost"), ...touchBtnExtra(vp.narrow) }} onClick={() => setTaxMode("gross")}>税込</button>
+            <button type="button" style={{ ...S.btn(taxMode === "net" ? "gold" : "ghost"), ...touchBtnExtra(vp.narrow) }} onClick={() => setTaxMode("net")}>税抜</button>
           </span>
           <select
-            style={S.inp}
+            style={{ ...S.inp, ...(vp.narrow ? { width: "100%", flex: "1 1 100%", minHeight: 44, fontSize: ".88rem" } : {}) }}
             value={targetMonth}
             onChange={(e) => setTargetMonth(normalizeMonth(e.target.value))}
           >
@@ -2113,8 +2480,8 @@ export default function SalesModule({ events = [], navigateBack }) {
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
-          <button type="button" style={S.btn("sm")} onClick={() => loadSales(targetMonth)} disabled={loading}>{loading ? "読込中..." : "🔄 再読込"}</button>
-          {navigateBack && <button type="button" style={S.btn("sm")} onClick={navigateBack}>← 戻る</button>}
+          <button type="button" style={{ ...S.btn("sm"), ...touchBtnExtra(vp.narrow), ...(vp.narrow ? { flex: "1 1 auto" } : {}) }} onClick={() => loadSales(targetMonth)} disabled={loading}>{loading ? "読込中..." : "🔄 再読込"}</button>
+          {navigateBack && <button type="button" style={{ ...S.btn("sm"), ...touchBtnExtra(vp.narrow), ...(vp.narrow ? { flex: "1 1 auto" } : {}) }} onClick={navigateBack}>← 戻る</button>}
         </div>
       </div>
 
@@ -2125,20 +2492,29 @@ export default function SalesModule({ events = [], navigateBack }) {
         </span>
       </div>
       {taxMode === "net" && (
-        <div style={{ ...analysisNote(), marginBottom: ".65rem" }}>
+        <div style={{ ...analysisNote({}, vp.narrow), marginBottom: ".65rem" }}>
           ※税抜表示は税込金額を10%で概算換算しています。
         </div>
       )}
 
       {roleMode === "admin" && (
-        <div style={{ display:"flex", gap:".4rem", marginBottom:".75rem", flexWrap:"wrap" }}>
-          <button type="button" style={S.btn(adminTab === "daily" ? "gold" : "ghost")} onClick={() => setAdminTab("daily")}>
+        <div
+          style={{
+            display: vp.narrow ? "grid" : "flex",
+            gridTemplateColumns: vp.narrow ? "repeat(3, minmax(0, 1fr))" : undefined,
+            gap: ".4rem",
+            marginBottom: ".75rem",
+            flexWrap: "wrap",
+            width: "100%",
+          }}
+        >
+          <button type="button" style={{ ...S.btn(adminTab === "daily" ? "gold" : "ghost"), ...touchBtnExtra(vp.narrow), ...(vp.narrow ? { width: "100%" } : {}) }} onClick={() => setAdminTab("daily")}>
             日別一覧
           </button>
-          <button type="button" style={S.btn(adminTab === "analysis" ? "gold" : "ghost")} onClick={() => setAdminTab("analysis")}>
+          <button type="button" style={{ ...S.btn(adminTab === "analysis" ? "gold" : "ghost"), ...touchBtnExtra(vp.narrow), ...(vp.narrow ? { width: "100%" } : {}) }} onClick={() => setAdminTab("analysis")}>
             月次分析
           </button>
-          <button type="button" style={S.btn(adminTab === "yearly" ? "gold" : "ghost")} onClick={() => setAdminTab("yearly")}>
+          <button type="button" style={{ ...S.btn(adminTab === "yearly" ? "gold" : "ghost"), ...touchBtnExtra(vp.narrow), ...(vp.narrow ? { width: "100%" } : {}) }} onClick={() => setAdminTab("yearly")}>
             年次分析
           </button>
         </div>
@@ -2269,38 +2645,67 @@ export default function SalesModule({ events = [], navigateBack }) {
             <div style={analysisSecTitle("summary", ".55rem")}>月次サマリー</div>
             <div style={{ display:"grid", gap:".52rem" }}>
               <div style={{ display:"flex", alignItems:"baseline", gap:".45rem", flexWrap:"wrap" }}>
-                <div style={ANALYSIS_METRIC_HERO}>{pct(monthlyAnalysis.monthlyProgressRate)}</div>
-                <span style={{ fontSize: ".76rem", fontWeight: 700, padding: ".16rem .58rem", borderRadius: 999, background: achievementTone(monthlyAnalysis.monthlyProgressRate, monthlyAnalysis.fullMonthTargetSalesSum > 0).chipBg, border: "1px solid " + achievementTone(monthlyAnalysis.monthlyProgressRate, monthlyAnalysis.fullMonthTargetSalesSum > 0).chipBd, color: achievementTone(monthlyAnalysis.monthlyProgressRate, monthlyAnalysis.fullMonthTargetSalesSum > 0).chipTx }}>
+                <div style={analysisMetricHero(vp.narrow, vp.mobile)}>{pct(monthlyAnalysis.monthlyProgressRate)}</div>
+                <span style={{ fontSize: vp.narrow ? ".8rem" : ".76rem", fontWeight: 700, padding: ".16rem .58rem", borderRadius: 999, background: achievementTone(monthlyAnalysis.monthlyProgressRate, monthlyAnalysis.fullMonthTargetSalesSum > 0).chipBg, border: "1px solid " + achievementTone(monthlyAnalysis.monthlyProgressRate, monthlyAnalysis.fullMonthTargetSalesSum > 0).chipBd, color: achievementTone(monthlyAnalysis.monthlyProgressRate, monthlyAnalysis.fullMonthTargetSalesSum > 0).chipTx }}>
                   {achievementTone(monthlyAnalysis.monthlyProgressRate, monthlyAnalysis.fullMonthTargetSalesSum > 0).label}
                 </span>
               </div>
-              <div style={{ fontSize: ".94rem", color: "rgba(240,232,208,0.95)", fontWeight: 700 }}>
-                {monthlyAnalysis.fullMonthTargetSalesSum > 0 && monthlyAnalysis.totalSalesSum >= monthlyAnalysis.fullMonthTargetSalesSum
-                  ? `月間目標達成 +${dy(Math.abs(monthlyAnalysis.totalSalesSum - monthlyAnalysis.fullMonthTargetSalesSum))}`
-                  : `あと ${dy(Math.max(0, monthlyAnalysis.fullMonthTargetSalesSum - monthlyAnalysis.totalSalesSum))}`}
-              </div>
-              <div style={{ fontSize: ".88rem" }}>
-                月間進捗率 <strong style={ANALYSIS_METRIC_MID}>{pct(monthlyAnalysis.monthlyProgressRate)}</strong>
-              </div>
-              <div style={{ fontSize: ".88rem" }}>
-                月間売上 <strong style={ANALYSIS_METRIC_STRONG}>{dy(monthlyAnalysis.totalSalesSum)}</strong> / 月間目標 <strong style={ANALYSIS_METRIC_STRONG}>{dy(monthlyAnalysis.fullMonthTargetSalesSum)}</strong>
-              </div>
-              <div style={{ fontSize: ".82rem", color:"rgba(240,232,208,0.72)" }}>
-                実績日達成率: <strong style={ANALYSIS_METRIC_SUB}>{pct(monthlyAnalysis.actualAchievementRate)}</strong>
-                <span style={{ marginLeft: ".35rem", fontWeight: 400 }}>（実績日ベース目標 {dy(monthlyAnalysis.actualTargetSalesSum)}）</span>
-              </div>
-              <div style={analysisNote()}>※終了済み営業日の目標に対する達成率</div>
-              <div style={{ fontSize: ".88rem" }}>
-                営業粗利 <strong style={ANALYSIS_METRIC_STRONG}>{monthlyAnalysis.totalSalesSum > 0 ? dy(monthlyAnalysis.operatingGrossProfitSum) : "—"}</strong> / 営業粗利率 <strong style={ANALYSIS_METRIC_MID}>{monthlyAnalysis.operatingGrossProfitRate != null ? pct1(monthlyAnalysis.operatingGrossProfitRate) : "—"}</strong>
-              </div>
-              <div style={{ fontSize: ".88rem" }}>
-                営業利益 <strong style={ANALYSIS_METRIC_MID}>{dy(monthlyAnalysis.operatingProfitSum)}</strong> / 営業利益率 <strong style={ANALYSIS_METRIC_SUB}>{pct(monthlyAnalysis.operatingProfitRate)}</strong>
-              </div>
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:".35rem .8rem", fontSize:".84rem", color:"rgba(240,232,208,0.85)" }}>
-                <div>実績日数 <strong>{num(monthlyAnalysis.actualDayCount)}日</strong></div>
-                <div>本日以降の予定 <strong>{num(monthlyAnalysis.futureDayCount)}件</strong></div>
-                <div>1日平均売上 <strong>{dy(monthlyAnalysis.avgDailySales)}</strong></div>
-              </div>
+              {vp.narrow ? (
+                <>
+                  <AnalysisStackedRow
+                    narrow
+                    label={monthlyAnalysis.fullMonthTargetSalesSum > 0 && monthlyAnalysis.totalSalesSum >= monthlyAnalysis.fullMonthTargetSalesSum ? "月間目標達成" : "あといくら"}
+                    value={
+                      monthlyAnalysis.fullMonthTargetSalesSum > 0 && monthlyAnalysis.totalSalesSum >= monthlyAnalysis.fullMonthTargetSalesSum
+                        ? `+${dy(Math.abs(monthlyAnalysis.totalSalesSum - monthlyAnalysis.fullMonthTargetSalesSum))}`
+                        : dy(Math.max(0, monthlyAnalysis.fullMonthTargetSalesSum - monthlyAnalysis.totalSalesSum))
+                    }
+                    valueStyle={{ fontSize: "1.15rem" }}
+                  />
+                  <AnalysisStackedRow narrow label="月間進捗率" value={pct(monthlyAnalysis.monthlyProgressRate)} valueStyle={analysisMetricMid(vp.narrow)} />
+                  <AnalysisStackedRow narrow label="月間売上" value={dy(monthlyAnalysis.totalSalesSum)} valueStyle={analysisMetricStrong(vp.narrow)} />
+                  <AnalysisStackedRow narrow label="月間目標" value={dy(monthlyAnalysis.fullMonthTargetSalesSum)} valueStyle={analysisMetricStrong(vp.narrow)} />
+                  <AnalysisStackedRow narrow label="実績日達成率" value={pct(monthlyAnalysis.actualAchievementRate)} valueStyle={analysisMetricMid(vp.narrow)} />
+                  <div style={analysisNote({}, vp.narrow)}>※終了済み営業日の目標に対する達成率（実績日ベース目標 {dy(monthlyAnalysis.actualTargetSalesSum)}）</div>
+                  <AnalysisStackedRow narrow label="営業粗利" value={monthlyAnalysis.totalSalesSum > 0 ? dy(monthlyAnalysis.operatingGrossProfitSum) : "—"} valueStyle={analysisMetricStrong(vp.narrow)} />
+                  <AnalysisStackedRow narrow label="営業粗利率" value={monthlyAnalysis.operatingGrossProfitRate != null ? pct1(monthlyAnalysis.operatingGrossProfitRate) : "—"} valueStyle={analysisMetricMid(vp.narrow)} />
+                  <AnalysisStackedRow narrow label="営業利益" value={dy(monthlyAnalysis.operatingProfitSum)} valueStyle={analysisMetricMid(vp.narrow)} />
+                  <AnalysisStackedRow narrow label="営業利益率" value={pct(monthlyAnalysis.operatingProfitRate)} border={false} />
+                  <AnalysisStackedRow narrow label="実績日数" value={`${num(monthlyAnalysis.actualDayCount)}日`} />
+                  <AnalysisStackedRow narrow label="本日以降の予定" value={`${num(monthlyAnalysis.futureDayCount)}件`} />
+                  <AnalysisStackedRow narrow label="1日平均売上" value={dy(monthlyAnalysis.avgDailySales)} border={false} />
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: ".94rem", color: "rgba(240,232,208,0.95)", fontWeight: 700 }}>
+                    {monthlyAnalysis.fullMonthTargetSalesSum > 0 && monthlyAnalysis.totalSalesSum >= monthlyAnalysis.fullMonthTargetSalesSum
+                      ? `月間目標達成 +${dy(Math.abs(monthlyAnalysis.totalSalesSum - monthlyAnalysis.fullMonthTargetSalesSum))}`
+                      : `あと ${dy(Math.max(0, monthlyAnalysis.fullMonthTargetSalesSum - monthlyAnalysis.totalSalesSum))}`}
+                  </div>
+                  <div style={{ fontSize: ".88rem" }}>
+                    月間進捗率 <strong style={ANALYSIS_METRIC_MID}>{pct(monthlyAnalysis.monthlyProgressRate)}</strong>
+                  </div>
+                  <div style={{ fontSize: ".88rem" }}>
+                    月間売上 <strong style={ANALYSIS_METRIC_STRONG}>{dy(monthlyAnalysis.totalSalesSum)}</strong> / 月間目標 <strong style={ANALYSIS_METRIC_STRONG}>{dy(monthlyAnalysis.fullMonthTargetSalesSum)}</strong>
+                  </div>
+                  <div style={{ fontSize: ".82rem", color:"rgba(240,232,208,0.72)" }}>
+                    実績日達成率: <strong style={ANALYSIS_METRIC_SUB}>{pct(monthlyAnalysis.actualAchievementRate)}</strong>
+                    <span style={{ marginLeft: ".35rem", fontWeight: 400 }}>（実績日ベース目標 {dy(monthlyAnalysis.actualTargetSalesSum)}）</span>
+                  </div>
+                  <div style={analysisNote()}>※終了済み営業日の目標に対する達成率</div>
+                  <div style={{ fontSize: ".88rem" }}>
+                    営業粗利 <strong style={ANALYSIS_METRIC_STRONG}>{monthlyAnalysis.totalSalesSum > 0 ? dy(monthlyAnalysis.operatingGrossProfitSum) : "—"}</strong> / 営業粗利率 <strong style={ANALYSIS_METRIC_MID}>{monthlyAnalysis.operatingGrossProfitRate != null ? pct1(monthlyAnalysis.operatingGrossProfitRate) : "—"}</strong>
+                  </div>
+                  <div style={{ fontSize: ".88rem" }}>
+                    営業利益 <strong style={ANALYSIS_METRIC_MID}>{dy(monthlyAnalysis.operatingProfitSum)}</strong> / 営業利益率 <strong style={ANALYSIS_METRIC_SUB}>{pct(monthlyAnalysis.operatingProfitRate)}</strong>
+                  </div>
+                  <div style={{ display:"grid", gridTemplateColumns:rGridCols(vp.narrow, 180), gap:".35rem .8rem", fontSize:".84rem", color:"rgba(240,232,208,0.85)" }}>
+                    <div>実績日数 <strong>{num(monthlyAnalysis.actualDayCount)}日</strong></div>
+                    <div>本日以降の予定 <strong>{num(monthlyAnalysis.futureDayCount)}件</strong></div>
+                    <div>1日平均売上 <strong>{dy(monthlyAnalysis.avgDailySales)}</strong></div>
+                  </div>
+                </>
+              )}
               <div
                 style={{
                   marginTop: ".55rem",
@@ -2310,39 +2715,61 @@ export default function SalesModule({ events = [], navigateBack }) {
                   color: "rgba(240,232,208,0.68)",
                 }}
               >
-                <div style={{ ...analysisNote(), color: "rgba(201,168,76,0.62)", marginBottom: ".28rem" }}>前年同月比較（2025年固定）</div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: ".28rem .65rem" }}>
-                  <div>
-                    前年同月売上{" "}
-                    <strong style={{ color: "rgba(240,232,208,0.88)" }}>
-                      {monthlyAnalysis.priorYearMonth.prevMonthSales != null ? dy(monthlyAnalysis.priorYearMonth.prevMonthSales) : "—"}
-                    </strong>
-                  </div>
-                  <div>
-                    前年同月差額{" "}
-                    <strong
-                      style={{
-                        color:
-                          monthlyAnalysis.priorYearMonth.prevMonthDiff != null
-                            ? monthlyAnalysis.priorYearMonth.prevMonthDiff >= 0
-                              ? "#9ec9a8"
-                              : "#dca06a"
-                            : undefined,
-                      }}
-                    >
-                      {monthlyAnalysis.priorYearMonth.prevMonthDiff != null
-                        ? signedDy(monthlyAnalysis.priorYearMonth.prevMonthDiff)
-                        : "—"}
-                    </strong>
-                  </div>
-                  <div>
-                    前年同月比{" "}
-                    <strong style={{ color: "rgba(240,232,208,0.88)" }}>
-                      {monthlyAnalysis.priorYearMonth.prevMonthRate != null
-                        ? pct1(monthlyAnalysis.priorYearMonth.prevMonthRate)
-                        : "—"}
-                    </strong>
-                  </div>
+                <div style={{ ...analysisNote({ color: "rgba(201,168,76,0.62)", marginBottom: ".28rem" }, vp.narrow) }}>前年同月比較（2025年固定）</div>
+                <div style={{ display: "grid", gridTemplateColumns: rGridCols(vp.narrow, 160), gap: ".28rem .65rem" }}>
+                  {vp.narrow ? (
+                    <>
+                      <AnalysisStackedRow narrow label="前年同月売上" value={monthlyAnalysis.priorYearMonth.prevMonthSales != null ? dy(monthlyAnalysis.priorYearMonth.prevMonthSales) : "—"} />
+                      <AnalysisStackedRow
+                        narrow
+                        label="前年同月差額"
+                        value={monthlyAnalysis.priorYearMonth.prevMonthDiff != null ? signedDy(monthlyAnalysis.priorYearMonth.prevMonthDiff) : "—"}
+                        valueStyle={{
+                          color:
+                            monthlyAnalysis.priorYearMonth.prevMonthDiff != null
+                              ? monthlyAnalysis.priorYearMonth.prevMonthDiff >= 0
+                                ? "#9ec9a8"
+                                : "#dca06a"
+                              : undefined,
+                        }}
+                      />
+                      <AnalysisStackedRow narrow label="前年同月比" value={monthlyAnalysis.priorYearMonth.prevMonthRate != null ? pct1(monthlyAnalysis.priorYearMonth.prevMonthRate) : "—"} border={false} />
+                    </>
+                  ) : (
+                    <>
+                      <div>
+                        前年同月売上{" "}
+                        <strong style={{ color: "rgba(240,232,208,0.88)" }}>
+                          {monthlyAnalysis.priorYearMonth.prevMonthSales != null ? dy(monthlyAnalysis.priorYearMonth.prevMonthSales) : "—"}
+                        </strong>
+                      </div>
+                      <div>
+                        前年同月差額{" "}
+                        <strong
+                          style={{
+                            color:
+                              monthlyAnalysis.priorYearMonth.prevMonthDiff != null
+                                ? monthlyAnalysis.priorYearMonth.prevMonthDiff >= 0
+                                  ? "#9ec9a8"
+                                  : "#dca06a"
+                                : undefined,
+                          }}
+                        >
+                          {monthlyAnalysis.priorYearMonth.prevMonthDiff != null
+                            ? signedDy(monthlyAnalysis.priorYearMonth.prevMonthDiff)
+                            : "—"}
+                        </strong>
+                      </div>
+                      <div>
+                        前年同月比{" "}
+                        <strong style={{ color: "rgba(240,232,208,0.88)" }}>
+                          {monthlyAnalysis.priorYearMonth.prevMonthRate != null
+                            ? pct1(monthlyAnalysis.priorYearMonth.prevMonthRate)
+                            : "—"}
+                        </strong>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -2350,33 +2777,36 @@ export default function SalesModule({ events = [], navigateBack }) {
 
           <div style={analysisCard("composition")}>
             <div style={analysisSecTitle("composition", ".5rem")}>売上構成</div>
-            <SalesCompositionLegend />
-            <SalesCompositionBar rates={monthlyAnalysis.salesComposition} />
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))", gap:".35rem .8rem", fontSize:".76rem" }}>
-              <div>ドリンク: <strong>{dy(monthlyAnalysis.drinkSalesSum)}</strong>（{pct(monthlyAnalysis.salesComposition.drinkRate)}）</div>
-              <div>フード: <strong>{dy(monthlyAnalysis.foodSalesSum)}</strong>（{pct(monthlyAnalysis.salesComposition.foodRate)}）</div>
-              <div>
-                バンド飲食代: <strong>{dy(monthlyAnalysis.bandFoodDrinkSalesSum)}</strong>（{pct(monthlyAnalysis.salesComposition.bandFoodDrinkRate)}）
-                {monthlyAnalysis.hasBandDrinkBreakdown ? (
-                  <span style={{ display:"block", marginTop:".12rem", paddingLeft:".5rem", fontSize:".7rem", color:"rgba(240,232,208,0.68)" }}>
-                    うちバンドドリンク {dy(monthlyAnalysis.bandDrinkSalesSum)}
-                  </span>
-                ) : null}
-                {monthlyAnalysis.hasBandFoodBreakdown ? (
-                  <span style={{ display:"block", marginTop:".12rem", paddingLeft:".5rem", fontSize:".7rem", color:"rgba(240,232,208,0.68)" }}>
-                    うちバンドフード {dy(monthlyAnalysis.bandFoodSalesSum)}
-                  </span>
-                ) : null}
-              </div>
-              <div>会場費: <strong>{dy(monthlyAnalysis.venueFeeSum)}</strong>（{pct(monthlyAnalysis.salesComposition.venueRate)}）</div>
-              <div>レンタル: <strong>{dy(monthlyAnalysis.rentalSalesSum)}</strong>（{pct(monthlyAnalysis.salesComposition.rentalRate)}）</div>
-              <div>その他: <strong>{dy(monthlyAnalysis.otherSalesSum)}</strong>（{pct(monthlyAnalysis.salesComposition.otherRate)}）</div>
+            <SalesCompositionLegend narrow={vp.narrow} />
+            <div style={{ width: "100%", maxWidth: "100%", overflow: "hidden" }}>
+              <SalesCompositionBar rates={monthlyAnalysis.salesComposition} />
             </div>
+            <SalesCompositionBreakdown
+              narrow={vp.narrow}
+              items={[
+                { key: "drink", label: "ドリンク", chipColor: SALES_COMPOSITION_CHIP_COLORS.drink, amount: dy(monthlyAnalysis.drinkSalesSum), rate: pct(monthlyAnalysis.salesComposition.drinkRate) },
+                { key: "food", label: "フード", chipColor: SALES_COMPOSITION_CHIP_COLORS.food, amount: dy(monthlyAnalysis.foodSalesSum), rate: pct(monthlyAnalysis.salesComposition.foodRate) },
+                {
+                  key: "band",
+                  label: "バンド飲食代",
+                  chipColor: SALES_COMPOSITION_CHIP_COLORS.bandFoodDrink,
+                  amount: dy(monthlyAnalysis.bandFoodDrinkSalesSum),
+                  rate: pct(monthlyAnalysis.salesComposition.bandFoodDrinkRate),
+                  extra: [
+                    monthlyAnalysis.hasBandDrinkBreakdown ? `うちバンドドリンク ${dy(monthlyAnalysis.bandDrinkSalesSum)}` : null,
+                    monthlyAnalysis.hasBandFoodBreakdown ? `うちバンドフード ${dy(monthlyAnalysis.bandFoodSalesSum)}` : null,
+                  ].filter(Boolean).join(" / ") || null,
+                },
+                { key: "venue", label: "会場費", chipColor: SALES_COMPOSITION_CHIP_COLORS.venue, amount: dy(monthlyAnalysis.venueFeeSum), rate: pct(monthlyAnalysis.salesComposition.venueRate) },
+                { key: "rental", label: "レンタル", chipColor: SALES_COMPOSITION_CHIP_COLORS.rental, amount: dy(monthlyAnalysis.rentalSalesSum), rate: pct(monthlyAnalysis.salesComposition.rentalRate) },
+                { key: "other", label: "その他", chipColor: SALES_COMPOSITION_CHIP_COLORS.other, amount: dy(monthlyAnalysis.otherSalesSum), rate: pct(monthlyAnalysis.salesComposition.otherRate) },
+              ]}
+            />
           </div>
 
           <div style={analysisCard("costProfit")}>
             <div style={analysisSecTitle("costProfit", ".35rem")}>コスト・利益比較（暫定）</div>
-            <div style={{ ...analysisNote(), marginBottom: ".45rem" }}>
+            <div style={{ ...analysisNote({}, vp.narrow), marginBottom: ".45rem" }}>
               ※人件費は翌月まとめて反映されます。仕入・経費は月末に売掛分が加算されるため、月中は暫定値です。
               {monthlyAnalysis.hasMonthlyCostSummary ? (
                 <span style={{ display: "block", marginTop: ".18rem", color: "rgba(201,168,76,0.55)" }}>
@@ -2384,10 +2814,10 @@ export default function SalesModule({ events = [], navigateBack }) {
                 </span>
               ) : null}
             </div>
-            <CostProfitBarList bars={monthlyAnalysis.costProfitBars} maxValue={monthlyAnalysis.costProfitMax} taxMode={taxMode} />
+            <CostProfitBarList bars={monthlyAnalysis.costProfitBars} maxValue={monthlyAnalysis.costProfitMax} taxMode={taxMode} narrow={vp.narrow} />
             <div style={{ marginTop: ".55rem", paddingTop: ".5rem", borderTop: "1px dashed rgba(201,168,76,0.2)" }}>
               <div style={{ fontSize: ".66rem", color: "rgba(201,168,76,0.85)", marginBottom: ".32rem" }}>営業粗利</div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: ".32rem .55rem", fontSize: ".74rem", color: "rgba(240,232,208,0.82)" }}>
+              <div style={{ display: "grid", gridTemplateColumns: rGridCols(vp.narrow, 150), gap: ".32rem .55rem", fontSize: vp.narrow ? ".88rem" : ".74rem", color: "rgba(240,232,208,0.82)" }}>
                 <div>
                   営業粗利{" "}
                   <span style={{ color: "#f0e8d0" }}>
@@ -2401,11 +2831,11 @@ export default function SalesModule({ events = [], navigateBack }) {
                   </span>
                 </div>
               </div>
-              <div style={analysisNote({ marginTop: ".2rem" })}>※売上 − 仕入れ合計 − 経費（人件費・営業利益の追加差引は含みません）</div>
+              <div style={analysisNote({ marginTop: ".2rem" }, vp.narrow)}>※売上 − 仕入れ合計 − 経費（人件費・営業利益の追加差引は含みません）</div>
             </div>
             <div style={{ marginTop: ".55rem", paddingTop: ".5rem", borderTop: "1px dashed rgba(201,168,76,0.2)" }}>
               <div style={{ fontSize: ".66rem", color: "rgba(201,168,76,0.85)", marginBottom: ".32rem" }}>原価率</div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: ".32rem .55rem", fontSize: ".74rem", color: "rgba(240,232,208,0.82)" }}>
+              <div style={{ display: "grid", gridTemplateColumns: rGridCols(vp.narrow, 150), gap: ".32rem .55rem", fontSize: vp.narrow ? ".88rem" : ".74rem", color: "rgba(240,232,208,0.82)" }}>
                 <div>総仕入率 <span style={{ color: "#f0e8d0" }}>{pct1(monthlyAnalysis.purchaseCostRates.totalPurchaseRate)}</span></div>
                 <div>ドリンク原価率 <span style={{ color: "#f0e8d0" }}>{pct1(monthlyAnalysis.purchaseCostRates.drinkCostRate)}</span></div>
                 <div>フード原価率 <span style={{ color: "#f0e8d0" }}>{pct1(monthlyAnalysis.purchaseCostRates.foodCostRate)}</span></div>
@@ -2415,13 +2845,13 @@ export default function SalesModule({ events = [], navigateBack }) {
               <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.78)" }}>
                 参考：バンドギャラ <span style={{ color: "#f0e8d0" }}>{dy(monthlyAnalysis.bandGuaranteeSum)}</span>
               </div>
-              <div style={analysisNote({ marginTop: ".1rem" })}>※経費には含めていません</div>
+              <div style={analysisNote({ marginTop: ".1rem" }, vp.narrow)}>※経費には含めていません</div>
             </div>
           </div>
 
           <div style={analysisCard("trend")}>
             <div style={analysisSecTitle("trend", ".5rem")}>日別売上推移</div>
-            <div style={{ display:"flex", gap:".7rem", flexWrap:"wrap", marginBottom:".45rem", fontSize:".72rem", color:"rgba(240,232,208,0.8)" }}>
+            <div style={{ display:"flex", gap: vp.narrow ? ".45rem .55rem" : ".7rem", flexWrap:"wrap", marginBottom:".45rem", fontSize: vp.narrow ? ".76rem" : ".72rem", color:"rgba(240,232,208,0.8)" }}>
               <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".32rem", borderRadius:2, background:"rgba(102,197,124,0.95)" }} />目標達成</span>
               <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".32rem", borderRadius:2, background:"rgba(222,181,78,0.95)" }} />未達 70%以上</span>
               <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".32rem", borderRadius:2, background:"rgba(223,137,79,0.95)" }} />未達 50%以上</span>
@@ -2431,8 +2861,16 @@ export default function SalesModule({ events = [], navigateBack }) {
             {monthlyAnalysis.dailyTrendRows.length === 0 ? (
               <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.45)" }}>データなし</div>
             ) : (
-              <div style={{ overflowX: "auto", paddingBottom: ".1rem" }}>
-                <div style={{ display:"flex", alignItems:"flex-end", gap:".38rem", height:220, minWidth:"100%" }}>
+              <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", paddingBottom: ".1rem", maxWidth: "100%" }}>
+                <div
+                  style={{
+                    display:"flex",
+                    alignItems:"flex-end",
+                    gap:".38rem",
+                    height:220,
+                    minWidth: vp.narrow ? `${Math.max(100, monthlyAnalysis.dailyTrendRows.length * 34)}px` : "100%",
+                  }}
+                >
                   {monthlyAnalysis.dailyTrendRows.map((r) => {
                     const h = monthlyAnalysis.trendMaxSales > 0
                       ? Math.max(2, Math.round((Number(r.totalSales || 0) / monthlyAnalysis.trendMaxSales) * 100))
@@ -2465,9 +2903,9 @@ export default function SalesModule({ events = [], navigateBack }) {
                   <div style={{ marginBottom: ".55rem" }}>
                     <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>A. 基本情報</div>
                     <div style={{ display:"grid", gap:".38rem", fontSize:".8rem" }}>
-                      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))", gap:".34rem .7rem" }}>
-                        <div>日付: <strong style={{ fontSize: ".95rem" }}>{selectedTrendRow.businessDate || "—"}</strong></div>
-                        <div>曜日: <strong style={{ fontSize: ".95rem" }}>{selectedTrendRow.weekday || "—"}</strong></div>
+                      <div style={{ display:"grid", gridTemplateColumns: rGridCols(vp.narrow, 140), gap:".34rem .7rem" }}>
+                        <div>日付: <strong style={{ fontSize: vp.narrow ? "1rem" : ".95rem" }}>{selectedTrendRow.businessDate || "—"}</strong></div>
+                        <div>曜日: <strong style={{ fontSize: vp.narrow ? "1rem" : ".95rem" }}>{selectedTrendRow.weekday || "—"}</strong></div>
                       </div>
                       <div>
                         イベント名:{" "}
@@ -2502,8 +2940,8 @@ export default function SalesModule({ events = [], navigateBack }) {
 
                   <div style={{ marginBottom: ".55rem" }}>
                     <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>B. 売上・目標</div>
-                    <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:".34rem .7rem", fontSize:".8rem" }}>
-                      <div>売上合計: <strong style={{ fontSize: "1rem", color: "#f3ead2" }}>{dy(selectedTrendRow.totalSales)}</strong></div>
+                    <div style={{ display:"grid", gridTemplateColumns: rGridCols(vp.narrow, 160), gap:".34rem .7rem", fontSize: vp.narrow ? ".88rem" : ".8rem" }}>
+                      <div>売上合計: <strong style={{ fontSize: vp.narrow ? "1.12rem" : "1rem", color: "#f3ead2" }}>{dy(selectedTrendRow.totalSales)}</strong></div>
                       <div>目標: <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.targetSales)}</strong></div>
                       <div>達成率: <strong style={{ fontSize: "1rem", color: "#f3ead2" }}>{pct(selectedTrendRow.achievementRate)}</strong></div>
                       <div>客単価: <strong style={{ fontSize: ".94rem" }}>{num(selectedTrendRow.customerUnitPrice)}</strong></div>
@@ -2512,7 +2950,7 @@ export default function SalesModule({ events = [], navigateBack }) {
 
                   <div style={{ marginBottom: ".55rem" }}>
                     <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>C. 飲食内訳</div>
-                    <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:".34rem .7rem", fontSize:".8rem" }}>
+                    <div style={{ display:"grid", gridTemplateColumns: rGridCols(vp.narrow, 160), gap:".34rem .7rem", fontSize: vp.narrow ? ".88rem" : ".8rem" }}>
                       <div>飲食売上: <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.foodDrinkSalesIncludingBand)}</strong></div>
                       <div>通常飲食売上: <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.foodDrinkSalesBase)}</strong></div>
                       {selectedTrendRow.bandFoodDrinkSales != null && Number(selectedTrendRow.bandFoodDrinkSales) > 0 ? (
@@ -2530,7 +2968,8 @@ export default function SalesModule({ events = [], navigateBack }) {
                       ) : null}
                     </div>
                     <div style={{ marginTop: ".4rem", fontSize: ".66rem", color: "rgba(240,232,208,0.72)" }}>売上構成</div>
-                    <SalesCompositionLegend />
+                    <SalesCompositionLegend narrow={vp.narrow} />
+                    <div style={{ width: "100%", maxWidth: "100%", overflow: "hidden" }}>
                     <SalesCompositionBar
                       rates={compositionRatesFromParts({
                         drink: Number(selectedTrendRow.drinkSales || 0),
@@ -2542,11 +2981,12 @@ export default function SalesModule({ events = [], navigateBack }) {
                       }, selectedTrendRow.totalSales)}
                       barHeight={12}
                     />
+                    </div>
                   </div>
 
                   <div style={{ marginBottom: ".55rem" }}>
                     <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>D. 決済・入金</div>
-                    <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:".34rem .7rem", fontSize:".8rem" }}>
+                    <div style={{ display:"grid", gridTemplateColumns: rGridCols(vp.narrow, 160), gap:".34rem .7rem", fontSize: vp.narrow ? ".88rem" : ".8rem" }}>
                       <div>現金: <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.cash)}</strong></div>
                       <div>クレジット: <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.creditCardSales)}</strong></div>
                       <div>PayPay: <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.paypaySales)}</strong></div>
@@ -2556,8 +2996,8 @@ export default function SalesModule({ events = [], navigateBack }) {
 
                   <div style={{ marginBottom: ".55rem" }}>
                     <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>E. コスト・利益</div>
-                    <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:".34rem .7rem", fontSize:".8rem" }}>
-                      <div>営業利益: <strong style={{ fontSize: "1rem", color: "#f3ead2" }}>{dy(selectedTrendRow.operatingProfit)}</strong></div>
+                    <div style={{ display:"grid", gridTemplateColumns: rGridCols(vp.narrow, 160), gap:".34rem .7rem", fontSize: vp.narrow ? ".88rem" : ".8rem" }}>
+                      <div>営業利益: <strong style={{ fontSize: vp.narrow ? "1.12rem" : "1rem", color: "#f3ead2" }}>{dy(selectedTrendRow.operatingProfit)}</strong></div>
                       <div>仕入れ合計: <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.purchaseTotal)}</strong></div>
                       <div>ドリンク仕入れ: <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.drinkPurchase)}</strong></div>
                       <div>フード仕入れ: <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.foodPurchase)}</strong></div>
@@ -2571,7 +3011,7 @@ export default function SalesModule({ events = [], navigateBack }) {
 
                   <div>
                     <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>F. 参考情報</div>
-                    <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:".34rem .7rem", fontSize:".8rem" }}>
+                    <div style={{ display:"grid", gridTemplateColumns: rGridCols(vp.narrow, 180), gap:".34rem .7rem", fontSize: vp.narrow ? ".88rem" : ".8rem" }}>
                       <div>参考：バンドギャラ <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.bandGuarantee)}</strong></div>
                     </div>
                     <div style={{ fontSize: ".64rem", color: "rgba(240,232,208,0.55)", marginTop: ".2rem" }}>※経費には含めていません</div>
@@ -2581,44 +3021,44 @@ export default function SalesModule({ events = [], navigateBack }) {
             )}
           </div>
 
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))", gap:".65rem" }}>
-            <div style={analysisCard("rankSales")}>
+          <div style={{ display:"grid", gridTemplateColumns: rGridCols(vp.narrow, 280), gap:".65rem" }}>
+            <div style={{ ...analysisCard("rankSales"), width: "100%", minWidth: 0, boxSizing: "border-box" }}>
               <div style={analysisSecTitle("rankSales", ".5rem")}>月間売上TOP5</div>
               {monthlyAnalysis.salesRankingTop5.length === 0 ? (
                 <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.45)" }}>データなし</div>
               ) : monthlyAnalysis.salesRankingTop5.map((r, i) => (
                 <div key={r.key} style={{ padding: ".3rem 0", borderBottom: `1px solid ${analysisRowBorder("rankSales")}` }}>
                   <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)" }}>{i + 1}. {r.businessDate}</div>
-                  <div style={{ fontSize: ".78rem", color: "#f0e8d0" }}>{r.eventName || "イベント未登録"}</div>
+                  <div style={{ fontSize: ".78rem", color: "#f0e8d0", wordBreak: "break-word", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{r.eventName || "イベント未登録"}</div>
                   <div style={{ fontSize: ".76rem" }}><strong style={{ fontSize: ".84rem", fontWeight: 600 }}>{dy(r.totalSales)}</strong>{r.achievementRate != null ? <span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.48)", fontSize: ".62rem" }}>達成率 {pct(r.achievementRate)}</span> : null}</div>
                 </div>
               ))}
             </div>
 
-            <div style={analysisCard("rankUnder")}>
+            <div style={{ ...analysisCard("rankUnder"), width: "100%", minWidth: 0, boxSizing: "border-box" }}>
               <div style={analysisSecTitle("rankUnder", ".5rem")}>月間目標未達ワースト5</div>
               {monthlyAnalysis.underTargetWorst5.length === 0 ? (
                 <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.45)" }}>未達データなし</div>
               ) : monthlyAnalysis.underTargetWorst5.map((r, i) => (
                 <div key={r.key} style={{ padding: ".3rem 0", borderBottom: `1px solid ${analysisRowBorder("rankUnder")}` }}>
                   <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)" }}>{i + 1}. {r.businessDate}</div>
-                  <div style={{ fontSize: ".78rem", color: "#f0e8d0" }}>{r.eventName || "イベント未登録"}</div>
-                  <div style={{ fontSize: ".76rem" }}>売上 <strong style={{ fontSize: ".84rem" }}>{dy(r.totalSales)}</strong> / 達成率 <strong style={{ fontSize: ".82rem" }}>{pct(r.achievementRate)}</strong> / 不足 <strong style={{ fontSize: ".84rem" }}>{dy(r.shortfall)}</strong></div>
+                  <div style={{ fontSize: ".78rem", color: "#f0e8d0", wordBreak: "break-word", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{r.eventName || "イベント未登録"}</div>
+                  <div style={{ fontSize: ".76rem", lineHeight: 1.45 }}>売上 <strong style={{ fontSize: ".84rem" }}>{dy(r.totalSales)}</strong> / 達成率 <strong style={{ fontSize: ".82rem" }}>{pct(r.achievementRate)}</strong> / 不足 <strong style={{ fontSize: ".84rem" }}>{dy(r.shortfall)}</strong></div>
                 </div>
               ))}
             </div>
           </div>
 
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))", gap:".65rem" }}>
-            <div style={analysisCard("rankFoodDrink")}>
+          <div style={{ display:"grid", gridTemplateColumns: rGridCols(vp.narrow, 260), gap:".65rem" }}>
+            <div style={{ ...analysisCard("rankFoodDrink"), width: "100%", minWidth: 0, boxSizing: "border-box" }}>
               <div style={analysisSecTitle("rankFoodDrink", ".5rem")}>月間飲食売上TOP10</div>
               {monthlyAnalysis.foodDrinkRankingTop10.length === 0 ? (
                 <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.45)" }}>データなし</div>
               ) : monthlyAnalysis.foodDrinkRankingTop10.map((r, i) => (
                 <div key={r.key} style={{ padding: ".3rem 0", borderBottom: `1px solid ${analysisRowBorder("rankFoodDrink")}` }}>
                   <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)" }}>{i + 1}. {r.businessDate}</div>
-                  <div style={{ fontSize: ".78rem", color: "#f0e8d0" }}>{r.eventName || "イベント未登録"}</div>
-                  <div style={{ fontSize: ".82rem" }}>
+                  <div style={{ fontSize: ".78rem", color: "#f0e8d0", wordBreak: "break-word", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{r.eventName || "イベント未登録"}</div>
+                  <div style={{ fontSize: ".82rem", lineHeight: 1.45 }}>
                     <strong style={{ fontSize: ".84rem", fontWeight: 600 }}>{dy(r.foodDrinkSalesIncludingBand)}</strong>
                     {r.bandFoodDrinkSales != null && r.bandFoodDrinkSales > 0 ? (
                       <span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.55)", fontSize: ".68rem" }}>
@@ -2632,15 +3072,15 @@ export default function SalesModule({ events = [], navigateBack }) {
                 </div>
               ))}
             </div>
-            <div style={analysisCard("rankDrink")}>
+            <div style={{ ...analysisCard("rankDrink"), width: "100%", minWidth: 0, boxSizing: "border-box" }}>
               <div style={analysisSecTitle("rankDrink", ".5rem")}>月間ドリンク売上TOP10</div>
               {monthlyAnalysis.drinkRankingTop10.length === 0 ? (
                 <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.45)" }}>データなし</div>
               ) : monthlyAnalysis.drinkRankingTop10.map((r, i) => (
                 <div key={r.key} style={{ padding: ".3rem 0", borderBottom: `1px solid ${analysisRowBorder("rankDrink")}` }}>
                   <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)" }}>{i + 1}. {r.businessDate}</div>
-                  <div style={{ fontSize: ".78rem", color: "#f0e8d0" }}>{r.eventName || "イベント未登録"}</div>
-                  <div style={{ fontSize: ".82rem" }}>
+                  <div style={{ fontSize: ".78rem", color: "#f0e8d0", wordBreak: "break-word", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{r.eventName || "イベント未登録"}</div>
+                  <div style={{ fontSize: ".82rem", lineHeight: 1.45 }}>
                     <strong style={{ fontSize: ".84rem", fontWeight: 600 }}>{dy(r.drinkSales)}</strong>
                     <span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.55)", fontSize: ".68rem" }}>
                       飲食比率 {pct(r.drinkInFoodDrinkRate)}
@@ -2652,15 +3092,15 @@ export default function SalesModule({ events = [], navigateBack }) {
                 </div>
               ))}
             </div>
-            <div style={analysisCard("rankFood")}>
+            <div style={{ ...analysisCard("rankFood"), width: "100%", minWidth: 0, boxSizing: "border-box" }}>
               <div style={analysisSecTitle("rankFood", ".5rem")}>月間フード売上TOP10</div>
               {monthlyAnalysis.foodRankingTop10.length === 0 ? (
                 <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.45)" }}>データなし</div>
               ) : monthlyAnalysis.foodRankingTop10.map((r, i) => (
                 <div key={r.key} style={{ padding: ".3rem 0", borderBottom: `1px solid ${analysisRowBorder("rankFood")}` }}>
                   <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)" }}>{i + 1}. {r.businessDate}</div>
-                  <div style={{ fontSize: ".78rem", color: "#f0e8d0" }}>{r.eventName || "イベント未登録"}</div>
-                  <div style={{ fontSize: ".82rem" }}>
+                  <div style={{ fontSize: ".78rem", color: "#f0e8d0", wordBreak: "break-word", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{r.eventName || "イベント未登録"}</div>
+                  <div style={{ fontSize: ".82rem", lineHeight: 1.45 }}>
                     <strong style={{ fontSize: ".84rem", fontWeight: 600 }}>{dy(r.foodSales)}</strong>
                     <span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.55)", fontSize: ".68rem" }}>
                       飲食比率 {pct(r.foodInFoodDrinkRate)}
@@ -2678,10 +3118,10 @@ export default function SalesModule({ events = [], navigateBack }) {
 
       {roleMode === "admin" && adminTab === "yearly" && (
         <div style={{ display: "grid", gap: ".75rem", marginBottom: ".75rem" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: ".5rem", flexWrap: "wrap", marginBottom: ".15rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: ".5rem", flexWrap: "wrap", marginBottom: ".15rem", width: "100%" }}>
             <span style={{ fontSize: ".72rem", color: "rgba(201,168,76,0.85)" }}>対象年</span>
             <select
-              style={{ ...S.inp, width: "auto", minWidth: 100 }}
+              style={{ ...S.inp, width: vp.narrow ? "100%" : "auto", minWidth: vp.narrow ? undefined : 100, minHeight: vp.narrow ? 44 : undefined, fontSize: vp.narrow ? ".88rem" : undefined }}
               value={String(targetYear)}
               onChange={(e) => setTargetYear(Number(e.target.value) || 2026)}
             >
@@ -2700,14 +3140,14 @@ export default function SalesModule({ events = [], navigateBack }) {
               <div style={analysisCard("summary")}>
                 <div style={analysisSecTitle("summary", ".55rem")}>{targetYear}年 年次サマリー</div>
                 <div style={{ display: "flex", alignItems: "baseline", gap: ".45rem", flexWrap: "wrap", marginBottom: ".4rem" }}>
-                  <div style={{ ...ANALYSIS_METRIC_HERO, fontSize: "2.1rem" }}>
+                  <div style={{ ...analysisMetricHero(vp.narrow, vp.mobile), fontSize: vp.narrow ? "2rem" : "2.1rem" }}>
                     {pct(yearlyAnalysis.yearlyProgressRate)}
                   </div>
-                  <span style={{ fontSize: ".76rem", color: "rgba(240,232,208,0.72)" }}>
+                  <span style={{ fontSize: vp.narrow ? ".82rem" : ".76rem", color: "rgba(240,232,208,0.72)" }}>
                     {yearlyAnalysis.hasFullYearTarget ? "年間進捗率" : "入力済み目標進捗率"}
                   </span>
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: ".35rem .8rem", fontSize: ".84rem", color: "rgba(240,232,208,0.88)" }}>
+                <div style={{ display: "grid", gridTemplateColumns: rGridCols(vp.narrow, 170), gap: ".35rem .8rem", fontSize: vp.narrow ? ".9rem" : ".84rem", color: "rgba(240,232,208,0.88)" }}>
                   <div>年間売上 <strong style={ANALYSIS_METRIC_STRONG}>{dy(yearlyAnalysis.yearlyTotalSales)}</strong></div>
                   {yearlyAnalysis.hasFullYearTarget ? (
                     <div>年間目標 <strong style={ANALYSIS_METRIC_STRONG}>{dy(yearlyAnalysis.fullYearTargetSum)}</strong></div>
@@ -2767,11 +3207,11 @@ export default function SalesModule({ events = [], navigateBack }) {
                     }}
                   >
                     <div style={analysisSecTitle("forecast", ".5rem")}>着地予測</div>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: ".35rem .8rem", fontSize: ".82rem", color: "rgba(240,232,208,0.88)" }}>
-                      <div>現在までの実績売上 <strong style={{ ...ANALYSIS_METRIC_STRONG, color: landingAccent }}>{dy(landing?.performanceSalesSum)}</strong></div>
+                    <div style={{ display: "grid", gridTemplateColumns: rGridCols(vp.narrow, 200), gap: ".35rem .8rem", fontSize: vp.narrow ? ".9rem" : ".82rem", color: "rgba(240,232,208,0.88)" }}>
+                      <div>現在までの実績売上 <strong style={{ ...analysisMetricStrong(vp.narrow), color: landingAccent }}>{dy(landing?.performanceSalesSum)}</strong></div>
                       <div>
                         実績月平均売上{" "}
-                        <strong style={{ ...ANALYSIS_METRIC_STRONG, color: landingAccent }}>
+                        <strong style={{ ...analysisMetricStrong(vp.narrow), color: landingAccent }}>
                           {landing?.avgMonthlySalesFromYearlyTotal != null ? dy(landing.avgMonthlySalesFromYearlyTotal) : "—"}
                         </strong>
                       </div>
@@ -2793,10 +3233,10 @@ export default function SalesModule({ events = [], navigateBack }) {
                           </div>
                           <div>
                             現在ペースでの年間着地予測{" "}
-                            <strong style={{ ...ANALYSIS_METRIC_STRONG, color: landingAccent }}>{landing?.paceForecast != null ? dy(landing.paceForecast) : "—"}</strong>
+                            <strong style={{ ...analysisMetricStrong(vp.narrow), color: landingAccent }}>{landing?.paceForecast != null ? dy(landing.paceForecast) : "—"}</strong>
                           </div>
                           {landing?.avgMonthlySalesFromYearlyTotal != null && landing?.paceForecast != null ? (
-                            <div style={{ ...analysisNote(), gridColumn: "1 / -1" }}>
+                            <div style={{ ...analysisNote({}, vp.narrow), gridColumn: vp.narrow ? undefined : "1 / -1" }}>
                               実績月平均 {dy(landing.avgMonthlySalesFromYearlyTotal)} × 12ヶ月 ≒ 着地予測の目安
                             </div>
                           ) : null}
@@ -2818,17 +3258,17 @@ export default function SalesModule({ events = [], navigateBack }) {
                           </div>
                           <div>
                             現在ペースでの年間着地予測{" "}
-                            <strong style={{ ...ANALYSIS_METRIC_STRONG, color: landingAccent }}>{landing?.paceForecast != null ? dy(landing.paceForecast) : "—"}</strong>
+                            <strong style={{ ...analysisMetricStrong(vp.narrow), color: landingAccent }}>{landing?.paceForecast != null ? dy(landing.paceForecast) : "—"}</strong>
                           </div>
                           {landing?.avgMonthlySalesFromYearlyTotal != null && landing?.paceForecast != null ? (
-                            <div style={{ ...analysisNote(), gridColumn: "1 / -1" }}>
+                            <div style={{ ...analysisNote({}, vp.narrow), gridColumn: vp.narrow ? undefined : "1 / -1" }}>
                               実績月平均 {dy(landing.avgMonthlySalesFromYearlyTotal)} × 12ヶ月 ≒ 着地予測の目安
                             </div>
                           ) : null}
                         </>
                       )}
                     </div>
-                    <div style={{ ...analysisNote(), marginTop: ".42rem" }}>
+                    <div style={{ ...analysisNote({}, vp.narrow), marginTop: ".42rem" }}>
                       ※実績月平均売上は年間売上合計 ÷ 実績月数（売上が1円以上の月）です。着地予測は実績月の平均売上から年間12ヶ月分を試算しています（{num(landing?.performanceMonthCount)}ヶ月ベース）。
                       {!hasFullYearTarget ? (
                         <span style={{ display: "block", marginTop: ".2rem" }}>
@@ -2858,8 +3298,8 @@ export default function SalesModule({ events = [], navigateBack }) {
                           lineHeight: 1.45,
                         }}
                       >
-                        <span style={{ color: "rgba(212,168,138,0.92)", fontWeight: 600 }}>{a.title}</span>
-                        <span style={{ color: "rgba(240,232,208,0.62)", marginLeft: ".4rem" }}>{a.detail}</span>
+                        <span style={{ color: "rgba(212,168,138,0.92)", fontWeight: 600, display: "block", marginBottom: ".12rem" }}>{a.title}</span>
+                        <span style={{ color: "rgba(240,232,208,0.62)", display: "block", lineHeight: 1.45 }}>{a.detail}</span>
                       </div>
                     ))}
                   </div>
@@ -2872,7 +3312,7 @@ export default function SalesModule({ events = [], navigateBack }) {
                   <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.62)", marginBottom: ".45rem" }}>
                     {yearlyAnalysis.momComparison.latest.monthLabel} vs {yearlyAnalysis.momComparison.prev.monthLabel}
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: ".35rem .8rem", fontSize: ".82rem" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: rGridCols(vp.narrow, 190), gap: ".35rem .8rem", fontSize: vp.narrow ? ".9rem" : ".82rem" }}>
                     <div>
                       前月売上差額{" "}
                       <strong style={{ color: yearlyAnalysis.momComparison.salesDiff >= 0 ? "#9ec9a8" : "#dca06a" }}>
@@ -2925,9 +3365,9 @@ export default function SalesModule({ events = [], navigateBack }) {
 
               <div style={analysisCard("yoyCompare")}>
                 <div style={analysisSecTitle("yoyCompare", ".5rem")}>前年比較（2025年固定データ）</div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: ".35rem .8rem", fontSize: ".84rem", color: "rgba(240,232,208,0.88)" }}>
-                  <div>今年売上合計 <strong style={{ fontSize: "1rem" }}>{dy(yearlyAnalysis.yearlyTotalSales)}</strong></div>
-                  <div>前年売上合計 <strong style={{ fontSize: "1rem" }}>{dy(yearlyAnalysis.previousYearTotal)}</strong></div>
+                <div style={{ display: "grid", gridTemplateColumns: rGridCols(vp.narrow, 180), gap: ".35rem .8rem", fontSize: vp.narrow ? ".9rem" : ".84rem", color: "rgba(240,232,208,0.88)" }}>
+                  <div>今年売上合計 <strong style={{ fontSize: vp.narrow ? "1.12rem" : "1rem" }}>{dy(yearlyAnalysis.yearlyTotalSales)}</strong></div>
+                  <div>前年売上合計 <strong style={{ fontSize: vp.narrow ? "1.12rem" : "1rem" }}>{dy(yearlyAnalysis.previousYearTotal)}</strong></div>
                   <div>
                     前年差額{" "}
                     <strong style={{ color: yearlyAnalysis.yoyDiff >= 0 ? "#9ec9a8" : "#dca06a" }}>
@@ -2938,7 +3378,7 @@ export default function SalesModule({ events = [], navigateBack }) {
                     前年比 <strong>{yearlyAnalysis.yoyRate != null ? pct1(yearlyAnalysis.yoyRate) : "—"}</strong>
                   </div>
                 </div>
-                <div style={{ ...analysisNote(), marginTop: ".32rem" }}>
+                <div style={{ ...analysisNote({}, vp.narrow), marginTop: ".32rem" }}>
                   ※2025年はスプレッドシート構造差のためAPI未取得。上記は税込固定値（合計 {dy(PREVIOUS_YEAR_SALES_2025_TOTAL)}）との比較です。
                 </div>
               </div>
@@ -2947,77 +3387,85 @@ export default function SalesModule({ events = [], navigateBack }) {
                 <div style={analysisSecTitle("composition", ".5rem")}>月別一覧</div>
                 <div style={{ fontSize: ".62rem", color: "rgba(240,232,208,0.5)", marginBottom: ".35rem" }}>月をクリックすると月次分析へ移動します</div>
                 <div style={{ fontSize: ".64rem", color: "rgba(201,168,76,0.72)", marginBottom: ".35rem" }}>売上・利益</div>
-                <div style={YEARLY_TABLE_WRAP}>
-                  <table style={YEARLY_TABLE_STYLE}>
-                    <thead>
-                      <tr>
-                        <th style={yearlyThStyle_(YEARLY_BASIC_COL.month, "left")}>月</th>
-                        <th style={yearlyThStyle_(YEARLY_BASIC_COL.yen)}>売上</th>
-                        <th style={yearlyThStyle_(YEARLY_BASIC_COL.yen)}>目標</th>
-                        <th style={yearlyThStyle_(YEARLY_BASIC_COL.pct)}>進捗率</th>
-                        <th style={yearlyThStyle_(YEARLY_BASIC_COL.yen)}>飲食</th>
-                        <th style={yearlyThStyle_(YEARLY_BASIC_COL.yen)}>営業利益</th>
-                        <th style={yearlyThStyle_(YEARLY_BASIC_COL.yen)}>人件費</th>
-                        <th style={yearlyThStyle_(YEARLY_BASIC_COL.status, "center")}>状態</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {yearlyAnalysis.monthRows.map((m) => (
-                        <tr
-                          key={`${m.targetMonth}_basic`}
-                          style={{ ...YEARLY_TABLE_ROW, opacity: yearlyTableRowOpacity_(m), cursor: "pointer" }}
-                          onClick={() => navigateToMonthAnalysis(m.targetMonth)}
-                          {...yearlyRowHoverHandlers_()}
-                        >
-                          <td style={yearlyMonthTdStyle_(YEARLY_BASIC_COL.month)}>{m.monthLabel}</td>
-                          <YearlyTableNumberCell m={m} value={m.totalSalesSum} width={YEARLY_BASIC_COL.yen} taxMode={taxMode} />
-                          <YearlyTableNumberCell m={m} value={m.targetSalesSum} width={YEARLY_BASIC_COL.yen} taxMode={taxMode} />
-                          <YearlyTableNumberCell m={m} value={m.progressRate} kind="pct" width={YEARLY_BASIC_COL.pct} />
-                          <YearlyTableNumberCell m={m} value={m.foodDrinkSalesIncludingBandSum} width={YEARLY_BASIC_COL.yen} taxMode={taxMode} />
-                          <YearlyTableNumberCell m={m} value={m.operatingProfitSum} width={YEARLY_BASIC_COL.yen} taxMode={taxMode} />
-                          <YearlyTableNumberCell m={m} value={m.laborCostSum} width={YEARLY_BASIC_COL.yen} taxMode={taxMode} />
-                          <YearlyTableStatusCell m={m} width={YEARLY_BASIC_COL.status} />
+                {vp.narrow ? (
+                  <YearlyMonthCardsBasic monthRows={yearlyAnalysis.monthRows} onMonthClick={navigateToMonthAnalysis} taxMode={taxMode} dy={dy} />
+                ) : (
+                  <div style={YEARLY_TABLE_WRAP}>
+                    <table style={YEARLY_TABLE_STYLE}>
+                      <thead>
+                        <tr>
+                          <th style={yearlyThStyle_(YEARLY_BASIC_COL.month, "left")}>月</th>
+                          <th style={yearlyThStyle_(YEARLY_BASIC_COL.yen)}>売上</th>
+                          <th style={yearlyThStyle_(YEARLY_BASIC_COL.yen)}>目標</th>
+                          <th style={yearlyThStyle_(YEARLY_BASIC_COL.pct)}>進捗率</th>
+                          <th style={yearlyThStyle_(YEARLY_BASIC_COL.yen)}>飲食</th>
+                          <th style={yearlyThStyle_(YEARLY_BASIC_COL.yen)}>営業利益</th>
+                          <th style={yearlyThStyle_(YEARLY_BASIC_COL.yen)}>人件費</th>
+                          <th style={yearlyThStyle_(YEARLY_BASIC_COL.status, "center")}>状態</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {yearlyAnalysis.monthRows.map((m) => (
+                          <tr
+                            key={`${m.targetMonth}_basic`}
+                            style={{ ...YEARLY_TABLE_ROW, opacity: yearlyTableRowOpacity_(m), cursor: "pointer" }}
+                            onClick={() => navigateToMonthAnalysis(m.targetMonth)}
+                            {...yearlyRowHoverHandlers_()}
+                          >
+                            <td style={yearlyMonthTdStyle_(YEARLY_BASIC_COL.month)}>{m.monthLabel}</td>
+                            <YearlyTableNumberCell m={m} value={m.totalSalesSum} width={YEARLY_BASIC_COL.yen} taxMode={taxMode} />
+                            <YearlyTableNumberCell m={m} value={m.targetSalesSum} width={YEARLY_BASIC_COL.yen} taxMode={taxMode} />
+                            <YearlyTableNumberCell m={m} value={m.progressRate} kind="pct" width={YEARLY_BASIC_COL.pct} />
+                            <YearlyTableNumberCell m={m} value={m.foodDrinkSalesIncludingBandSum} width={YEARLY_BASIC_COL.yen} taxMode={taxMode} />
+                            <YearlyTableNumberCell m={m} value={m.operatingProfitSum} width={YEARLY_BASIC_COL.yen} taxMode={taxMode} />
+                            <YearlyTableNumberCell m={m} value={m.laborCostSum} width={YEARLY_BASIC_COL.yen} taxMode={taxMode} />
+                            <YearlyTableStatusCell m={m} width={YEARLY_BASIC_COL.status} />
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
 
                 <div style={{ fontSize: ".66rem", color: "rgba(201,168,76,0.82)", margin: ".65rem 0 .35rem" }}>仕入・原価率</div>
-                <div style={YEARLY_TABLE_WRAP}>
-                  <table style={YEARLY_TABLE_STYLE}>
-                    <thead>
-                      <tr>
-                        <th style={yearlyThStyle_(YEARLY_PURCHASE_COL.month, "left")}>月</th>
-                        <th style={yearlyThStyle_(YEARLY_PURCHASE_COL.yen)}>仕入れ合計</th>
-                        <th style={yearlyThStyle_(YEARLY_PURCHASE_COL.yen)}>ドリンク仕入れ</th>
-                        <th style={yearlyThStyle_(YEARLY_PURCHASE_COL.yen)}>フード仕入れ</th>
-                        <th style={yearlyThStyle_(YEARLY_PURCHASE_COL.rate)}>総仕入率</th>
-                        <th style={yearlyThStyle_(YEARLY_PURCHASE_COL.rateWide)}>ドリンク原価率</th>
-                        <th style={yearlyThStyle_(YEARLY_PURCHASE_COL.rateWide)}>フード原価率</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {yearlyAnalysis.monthRows.map((m) => (
-                        <tr
-                          key={`${m.targetMonth}_purchase`}
-                          style={{ ...YEARLY_TABLE_ROW, opacity: yearlyTableRowOpacity_(m), cursor: "pointer" }}
-                          onClick={() => navigateToMonthAnalysis(m.targetMonth)}
-                          {...yearlyRowHoverHandlers_()}
-                        >
-                          <td style={yearlyMonthTdStyle_(YEARLY_PURCHASE_COL.month)}>{m.monthLabel}</td>
-                          <YearlyTableNumberCell m={m} value={m.purchaseTotalSum} width={YEARLY_PURCHASE_COL.yen} taxMode={taxMode} />
-                          <YearlyTableNumberCell m={m} value={m.drinkPurchaseSum} width={YEARLY_PURCHASE_COL.yen} taxMode={taxMode} />
-                          <YearlyTableNumberCell m={m} value={m.foodPurchaseSum} width={YEARLY_PURCHASE_COL.yen} taxMode={taxMode} />
-                          <YearlyTableNumberCell m={m} value={m.purchaseCostRates?.totalPurchaseRate} kind="pct" width={YEARLY_PURCHASE_COL.rate} />
-                          <YearlyTableNumberCell m={m} value={m.purchaseCostRates?.drinkCostRate} kind="pct" width={YEARLY_PURCHASE_COL.rateWide} />
-                          <YearlyTableNumberCell m={m} value={m.purchaseCostRates?.foodCostRate} kind="pct" width={YEARLY_PURCHASE_COL.rateWide} />
+                {vp.narrow ? (
+                  <YearlyMonthCardsPurchase monthRows={yearlyAnalysis.monthRows} onMonthClick={navigateToMonthAnalysis} taxMode={taxMode} />
+                ) : (
+                  <div style={YEARLY_TABLE_WRAP}>
+                    <table style={YEARLY_TABLE_STYLE}>
+                      <thead>
+                        <tr>
+                          <th style={yearlyThStyle_(YEARLY_PURCHASE_COL.month, "left")}>月</th>
+                          <th style={yearlyThStyle_(YEARLY_PURCHASE_COL.yen)}>仕入れ合計</th>
+                          <th style={yearlyThStyle_(YEARLY_PURCHASE_COL.yen)}>ドリンク仕入れ</th>
+                          <th style={yearlyThStyle_(YEARLY_PURCHASE_COL.yen)}>フード仕入れ</th>
+                          <th style={yearlyThStyle_(YEARLY_PURCHASE_COL.rate)}>総仕入率</th>
+                          <th style={yearlyThStyle_(YEARLY_PURCHASE_COL.rateWide)}>ドリンク原価率</th>
+                          <th style={yearlyThStyle_(YEARLY_PURCHASE_COL.rateWide)}>フード原価率</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div style={{ ...analysisNote(), marginTop: ".32rem" }}>
+                      </thead>
+                      <tbody>
+                        {yearlyAnalysis.monthRows.map((m) => (
+                          <tr
+                            key={`${m.targetMonth}_purchase`}
+                            style={{ ...YEARLY_TABLE_ROW, opacity: yearlyTableRowOpacity_(m), cursor: "pointer" }}
+                            onClick={() => navigateToMonthAnalysis(m.targetMonth)}
+                            {...yearlyRowHoverHandlers_()}
+                          >
+                            <td style={yearlyMonthTdStyle_(YEARLY_PURCHASE_COL.month)}>{m.monthLabel}</td>
+                            <YearlyTableNumberCell m={m} value={m.purchaseTotalSum} width={YEARLY_PURCHASE_COL.yen} taxMode={taxMode} />
+                            <YearlyTableNumberCell m={m} value={m.drinkPurchaseSum} width={YEARLY_PURCHASE_COL.yen} taxMode={taxMode} />
+                            <YearlyTableNumberCell m={m} value={m.foodPurchaseSum} width={YEARLY_PURCHASE_COL.yen} taxMode={taxMode} />
+                            <YearlyTableNumberCell m={m} value={m.purchaseCostRates?.totalPurchaseRate} kind="pct" width={YEARLY_PURCHASE_COL.rate} />
+                            <YearlyTableNumberCell m={m} value={m.purchaseCostRates?.drinkCostRate} kind="pct" width={YEARLY_PURCHASE_COL.rateWide} />
+                            <YearlyTableNumberCell m={m} value={m.purchaseCostRates?.foodCostRate} kind="pct" width={YEARLY_PURCHASE_COL.rateWide} />
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                <div style={{ ...analysisNote({}, vp.narrow), marginTop: ".32rem" }}>
                   ※総仕入率はバンド飲食代を含む飲食売上で計算しています。ドリンク/フード原価率は、バンド飲食代の内訳がある月のみ個別反映します。
                 </div>
               </div>
@@ -3025,57 +3473,61 @@ export default function SalesModule({ events = [], navigateBack }) {
               <div style={analysisCard("composition")}>
                 <div style={analysisSecTitle("composition", ".5rem")}>月別前年比較</div>
                 <div style={{ fontSize: ".62rem", color: "rgba(240,232,208,0.5)", marginBottom: ".35rem" }}>月をクリックすると月次分析へ移動します</div>
-                <div style={YEARLY_TABLE_WRAP}>
-                  <table style={YEARLY_TABLE_STYLE}>
-                    <thead>
-                      <tr>
-                        <th style={yearlyThStyle_(YEARLY_YOY_COL.month, "left")}>月</th>
-                        <th style={yearlyThStyle_(YEARLY_YOY_COL.yen)}>今年売上</th>
-                        <th style={yearlyThStyle_(YEARLY_YOY_COL.yen)}>前年売上</th>
-                        <th style={yearlyThStyle_(YEARLY_YOY_COL.yen)}>差額</th>
-                        <th style={yearlyThStyle_(YEARLY_YOY_COL.pct)}>前年比</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {yearlyAnalysis.monthlyYoYRows.map((r) => {
-                        const diffMuted = r.currentSales === 0 && r.prevSales === 0;
-                        return (
-                          <tr
-                            key={`${r.targetMonth}_yoy`}
-                            style={{ ...YEARLY_TABLE_ROW, opacity: yearlyYoYRowOpacity_(r), cursor: "pointer" }}
-                            onClick={() => navigateToMonthAnalysis(r.targetMonth)}
-                            {...yearlyRowHoverHandlers_()}
-                          >
-                            <td style={yearlyMonthTdStyle_(YEARLY_YOY_COL.month)}>{r.monthLabel}</td>
-                            <td style={yearlyNumTdStyle_(YEARLY_YOY_COL.yen, r.currentSales === 0)}>{dy(r.currentSales)}</td>
-                            <td style={yearlyNumTdStyle_(YEARLY_YOY_COL.yen, false)}>{dy(r.prevSales)}</td>
-                            <td
-                              style={{
-                                ...yearlyNumTdStyle_(YEARLY_YOY_COL.yen, diffMuted),
-                                color: r.diff > 0 ? "#9ec9a8" : r.diff < 0 ? "#dca06a" : undefined,
-                              }}
+                {vp.narrow ? (
+                  <YearlyYoYMonthCards rows={yearlyAnalysis.monthlyYoYRows} onMonthClick={navigateToMonthAnalysis} dy={dy} pct1={pct1} signedDy={signedDy} />
+                ) : (
+                  <div style={YEARLY_TABLE_WRAP}>
+                    <table style={YEARLY_TABLE_STYLE}>
+                      <thead>
+                        <tr>
+                          <th style={yearlyThStyle_(YEARLY_YOY_COL.month, "left")}>月</th>
+                          <th style={yearlyThStyle_(YEARLY_YOY_COL.yen)}>今年売上</th>
+                          <th style={yearlyThStyle_(YEARLY_YOY_COL.yen)}>前年売上</th>
+                          <th style={yearlyThStyle_(YEARLY_YOY_COL.yen)}>差額</th>
+                          <th style={yearlyThStyle_(YEARLY_YOY_COL.pct)}>前年比</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {yearlyAnalysis.monthlyYoYRows.map((r) => {
+                          const diffMuted = r.currentSales === 0 && r.prevSales === 0;
+                          return (
+                            <tr
+                              key={`${r.targetMonth}_yoy`}
+                              style={{ ...YEARLY_TABLE_ROW, opacity: yearlyYoYRowOpacity_(r), cursor: "pointer" }}
+                              onClick={() => navigateToMonthAnalysis(r.targetMonth)}
+                              {...yearlyRowHoverHandlers_()}
                             >
-                              {signedDy(r.diff)}
-                            </td>
-                            <td style={yearlyNumTdStyle_(YEARLY_YOY_COL.pct, r.yoyRate == null)}>{r.yoyRate != null ? pct1(r.yoyRate) : "—"}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                              <td style={yearlyMonthTdStyle_(YEARLY_YOY_COL.month)}>{r.monthLabel}</td>
+                              <td style={yearlyNumTdStyle_(YEARLY_YOY_COL.yen, r.currentSales === 0)}>{dy(r.currentSales)}</td>
+                              <td style={yearlyNumTdStyle_(YEARLY_YOY_COL.yen, false)}>{dy(r.prevSales)}</td>
+                              <td
+                                style={{
+                                  ...yearlyNumTdStyle_(YEARLY_YOY_COL.yen, diffMuted),
+                                  color: r.diff > 0 ? "#9ec9a8" : r.diff < 0 ? "#dca06a" : undefined,
+                                }}
+                              >
+                                {signedDy(r.diff)}
+                              </td>
+                              <td style={yearlyNumTdStyle_(YEARLY_YOY_COL.pct, r.yoyRate == null)}>{r.yoyRate != null ? pct1(r.yoyRate) : "—"}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
 
               <YearlyYoYBarChart rows={yearlyAnalysis.monthlyYoYRows} onMonthClick={navigateToMonthAnalysis} />
 
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: ".65rem" }}>
+              <div style={{ display: "grid", gridTemplateColumns: rGridCols(vp.narrow, 280), gap: ".65rem" }}>
                 <YearlyMonthBarChart title="月別売上推移" rows={yearlyAnalysis.monthRows} valueKey="totalSalesSum" barTone="linear-gradient(180deg, rgba(201,168,76,0.95), rgba(201,168,76,0.55))" taxMode={taxMode} onMonthClick={navigateToMonthAnalysis} />
                 <YearlyMonthBarChart title="月別目標達成率" rows={yearlyAnalysis.monthRows} valueKey="progressRate" barTone="linear-gradient(180deg, rgba(102,197,124,0.95), rgba(102,197,124,0.55))" formatTop={(r) => (r.progressRate != null ? pct(r.progressRate) : "—")} taxMode={taxMode} onMonthClick={navigateToMonthAnalysis} />
                 <YearlyMonthBarChart title="月別飲食売上" rows={yearlyAnalysis.monthRows} valueKey="foodDrinkSalesIncludingBandSum" barTone="linear-gradient(180deg, rgba(102,197,124,0.9), rgba(102,197,124,0.5))" taxMode={taxMode} onMonthClick={navigateToMonthAnalysis} />
                 <YearlyMonthBarChart title="月別営業利益" rows={yearlyAnalysis.monthRows} valueKey="operatingProfitSum" barTone="linear-gradient(180deg, rgba(126,200,126,0.95), rgba(126,200,126,0.55))" taxMode={taxMode} onMonthClick={navigateToMonthAnalysis} />
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: ".65rem" }}>
+              <div style={{ display: "grid", gridTemplateColumns: rGridCols(vp.narrow, 220), gap: ".65rem" }}>
                 <YearlyRankList title="月間売上TOP月" variant="rankSales" items={yearlyAnalysis.salesTop3} valueLabel="年間月次売上" formatValue={(r) => dy(r.totalSalesSum)} />
                 <YearlyRankList title="月間未達ワースト月" variant="rankUnder" items={yearlyAnalysis.underWorst3} valueLabel="進捗率" formatValue={(r) => pct(r.progressRate)} />
                 <YearlyRankList title="月間飲食売上TOP月" variant="rankFoodDrink" items={yearlyAnalysis.foodDrinkTop3} valueLabel="飲食売上" formatValue={(r) => dy(r.foodDrinkSalesIncludingBandSum)} />
@@ -3085,7 +3537,7 @@ export default function SalesModule({ events = [], navigateBack }) {
 
               <div style={analysisCard("costProfit")}>
                 <div style={analysisSecTitle("costProfit", ".35rem")}>年間コスト状況（暫定）</div>
-                <div style={{ ...analysisNote(), marginBottom: ".45rem" }}>
+                <div style={{ ...analysisNote({}, vp.narrow), marginBottom: ".45rem" }}>
                   ※人件費は翌月まとめて反映されます。仕入・経費は月末に売掛分が加算されるため、月中は暫定値です。
                   {yearlyAnalysis.monthRows.some((m) => m.hasMonthlyCostSummary) ? (
                     <span style={{ display: "block", marginTop: ".18rem", color: "rgba(201,168,76,0.55)" }}>
@@ -3094,11 +3546,11 @@ export default function SalesModule({ events = [], navigateBack }) {
                   ) : null}
                 </div>
                 <div style={{ marginBottom: ".65rem" }}>
-                  <CostProfitBarList bars={yearlyAnalysis.yearlyCostBars} maxValue={yearlyAnalysis.costProfitMax} taxMode={taxMode} />
+                  <CostProfitBarList bars={yearlyAnalysis.yearlyCostBars} maxValue={yearlyAnalysis.costProfitMax} taxMode={taxMode} narrow={vp.narrow} />
                 </div>
                 <div style={{ marginTop: ".55rem", paddingTop: ".5rem", borderTop: "1px dashed rgba(201,168,76,0.2)" }}>
                   <div style={{ fontSize: ".66rem", color: "rgba(201,168,76,0.85)", marginBottom: ".32rem" }}>営業粗利</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: ".32rem .55rem", fontSize: ".78rem", color: "rgba(240,232,208,0.85)" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: rGridCols(vp.narrow, 170), gap: ".32rem .55rem", fontSize: vp.narrow ? ".88rem" : ".78rem", color: "rgba(240,232,208,0.85)" }}>
                     <div>
                       営業粗利{" "}
                       <span style={{ color: "#f0e8d0" }}>
@@ -3114,11 +3566,11 @@ export default function SalesModule({ events = [], navigateBack }) {
                       </span>
                     </div>
                   </div>
-                  <div style={analysisNote({ marginTop: ".18rem" })}>※売上 − 仕入れ合計 − 経費。営業利益（既存値）は人件費等を含む別指標です。</div>
+                  <div style={analysisNote({ marginTop: ".18rem" }, vp.narrow)}>※売上 − 仕入れ合計 − 経費。営業利益（既存値）は人件費等を含む別指標です。</div>
                 </div>
                 <div style={{ marginTop: ".55rem", paddingTop: ".5rem", borderTop: "1px dashed rgba(201,168,76,0.2)" }}>
                   <div style={{ fontSize: ".66rem", color: "rgba(201,168,76,0.85)", marginBottom: ".32rem" }}>飲食粗利</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: ".32rem .55rem", fontSize: ".78rem", color: "rgba(240,232,208,0.85)" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: rGridCols(vp.narrow, 170), gap: ".32rem .55rem", fontSize: vp.narrow ? ".88rem" : ".78rem", color: "rgba(240,232,208,0.85)" }}>
                     <div>
                       飲食粗利{" "}
                       <span style={{ color: "#f0e8d0" }}>
@@ -3134,11 +3586,11 @@ export default function SalesModule({ events = [], navigateBack }) {
                       </span>
                     </div>
                   </div>
-                  <div style={analysisNote({ marginTop: ".18rem" })}>※飲食売上（バンド飲食代含む）− 仕入れ合計。仕入は月合計欄を優先しています。</div>
+                  <div style={analysisNote({ marginTop: ".18rem" }, vp.narrow)}>※飲食売上（バンド飲食代含む）− 仕入れ合計。仕入は月合計欄を優先しています。</div>
                 </div>
                 <div style={{ marginTop: ".55rem", paddingTop: ".5rem", borderTop: "1px dashed rgba(201,168,76,0.2)" }}>
                   <div style={{ fontSize: ".66rem", color: "rgba(201,168,76,0.85)", marginBottom: ".32rem" }}>年間原価率</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: ".32rem .55rem", fontSize: ".74rem", color: "rgba(240,232,208,0.82)" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: rGridCols(vp.narrow, 150), gap: ".32rem .55rem", fontSize: vp.narrow ? ".88rem" : ".74rem", color: "rgba(240,232,208,0.82)" }}>
                     <div>総仕入率 <span style={{ color: "#f0e8d0" }}>{pct1(yearlyAnalysis.yearlyPurchaseCostRates.totalPurchaseRate)}</span></div>
                     <div>ドリンク原価率 <span style={{ color: "#f0e8d0" }}>{pct1(yearlyAnalysis.yearlyPurchaseCostRates.drinkCostRate)}</span></div>
                     <div>フード原価率 <span style={{ color: "#f0e8d0" }}>{pct1(yearlyAnalysis.yearlyPurchaseCostRates.foodCostRate)}</span></div>
@@ -3148,7 +3600,7 @@ export default function SalesModule({ events = [], navigateBack }) {
                   <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.78)" }}>
                     参考：バンドギャラ（年間合計） <span style={{ color: "#f0e8d0" }}>{dy(yearlyAnalysis.yearlyBandGuarantee)}</span>
                   </div>
-                  <div style={analysisNote({ marginTop: ".1rem" })}>※経費には含めていません</div>
+                  <div style={analysisNote({ marginTop: ".1rem" }, vp.narrow)}>※経費には含めていません</div>
                 </div>
               </div>
             </>
