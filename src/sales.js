@@ -22,6 +22,115 @@ const S = {
   inp: { background:"#111", border:"1px solid rgba(201,168,76,0.18)", borderRadius:4, color:"#f0e8d0", fontFamily:"inherit", fontSize:".82rem", padding:".45rem .55rem", outline:"none" },
 };
 
+const ANALYSIS_CARD = {
+  summary: {
+    card: {
+      background: "linear-gradient(165deg, rgba(32,42,64,0.98) 0%, rgba(20,28,46,0.99) 55%, rgba(16,22,36,1) 100%)",
+      border: "1px solid rgba(132,158,205,0.42)",
+      boxShadow: "0 6px 22px rgba(10,18,34,0.45), inset 0 1px 0 rgba(170,192,230,0.1)",
+      padding: "1.15rem 1.2rem",
+    },
+    title: { color: "#e2d4a0", borderBottom: "1px solid rgba(132,158,205,0.32)" },
+    rowBorder: "rgba(132,158,205,0.16)",
+  },
+  composition: {
+    card: {
+      background: "linear-gradient(180deg, rgba(16,24,38,0.99), rgba(12,18,30,1))",
+      border: "1px solid rgba(88,128,178,0.34)",
+      boxShadow: "inset 0 1px 0 rgba(100,140,190,0.06)",
+    },
+    title: { color: "#9eb8e0", borderBottom: "1px solid rgba(88,128,178,0.28)" },
+    rowBorder: "rgba(88,128,178,0.14)",
+  },
+  costProfit: {
+    card: {
+      background: "linear-gradient(180deg, rgba(34,24,20,0.98), rgba(24,16,14,0.99))",
+      border: "1px solid rgba(168,118,88,0.32)",
+      boxShadow: "inset 0 1px 0 rgba(200,150,110,0.05)",
+    },
+    title: { color: "#d4a88a", borderBottom: "1px solid rgba(168,118,88,0.26)" },
+    rowBorder: "rgba(168,118,88,0.14)",
+  },
+  trend: {
+    card: {
+      background: "linear-gradient(180deg, rgba(14,14,14,0.99), rgba(8,8,8,1))",
+      border: "1px solid rgba(201,168,76,0.16)",
+      boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.35)",
+    },
+    title: { color: "#c9a84c", borderBottom: "1px solid rgba(201,168,76,0.2)" },
+    rowBorder: "rgba(201,168,76,0.14)",
+  },
+  dayReport: {
+    card: {
+      background: "linear-gradient(180deg, rgba(38,40,44,0.98), rgba(28,30,34,0.99))",
+      border: "1px solid rgba(175,180,190,0.24)",
+      borderRadius: 8,
+      boxShadow: "0 4px 16px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.05)",
+      padding: ".85rem .95rem",
+    },
+    title: { color: "#e8dcc0", borderBottom: "none", marginBottom: ".55rem", paddingBottom: 0 },
+    rowBorder: "rgba(175,180,190,0.12)",
+  },
+  rankSales: {
+    card: {
+      background: "linear-gradient(180deg, rgba(18,16,12,0.99), rgba(10,10,10,1))",
+      border: "1px solid rgba(201,168,76,0.28)",
+      boxShadow: "inset 3px 0 0 rgba(201,168,76,0.55)",
+    },
+    title: { color: "#dfc06a", borderBottom: "1px solid rgba(201,168,76,0.22)" },
+    rowBorder: "rgba(201,168,76,0.14)",
+  },
+  rankUnder: {
+    card: {
+      background: "linear-gradient(180deg, rgba(22,16,14,0.99), rgba(10,10,10,1))",
+      border: "1px solid rgba(190,120,88,0.26)",
+      boxShadow: "inset 3px 0 0 rgba(190,110,78,0.5)",
+    },
+    title: { color: "#dca06a", borderBottom: "1px solid rgba(190,120,88,0.2)" },
+    rowBorder: "rgba(190,120,88,0.14)",
+  },
+  rankFoodDrink: {
+    card: {
+      background: "linear-gradient(180deg, rgba(14,20,16,0.99), rgba(10,10,10,1))",
+      border: "1px solid rgba(110,170,120,0.24)",
+      boxShadow: "inset 3px 0 0 rgba(102,170,118,0.45)",
+    },
+    title: { color: "#9ec9a8", borderBottom: "1px solid rgba(110,170,120,0.2)" },
+    rowBorder: "rgba(110,170,120,0.14)",
+  },
+  rankDrink: {
+    card: {
+      background: "linear-gradient(180deg, rgba(14,18,24,0.99), rgba(10,10,10,1))",
+      border: "1px solid rgba(100,140,200,0.24)",
+      boxShadow: "inset 3px 0 0 rgba(86,140,220,0.45)",
+    },
+    title: { color: "#9eb8e8", borderBottom: "1px solid rgba(100,140,200,0.2)" },
+    rowBorder: "rgba(100,140,200,0.14)",
+  },
+  rankFood: {
+    card: {
+      background: "linear-gradient(180deg, rgba(18,22,14,0.99), rgba(10,10,10,1))",
+      border: "1px solid rgba(150,175,95,0.24)",
+      boxShadow: "inset 3px 0 0 rgba(160,190,90,0.42)",
+    },
+    title: { color: "#b8c98a", borderBottom: "1px solid rgba(150,175,95,0.2)" },
+    rowBorder: "rgba(150,175,95,0.14)",
+  },
+};
+
+function analysisCard(variant) {
+  const v = ANALYSIS_CARD[variant] || ANALYSIS_CARD.trend;
+  return { ...S.card, ...v.card };
+}
+function analysisSecTitle(variant, marginBottom) {
+  const v = ANALYSIS_CARD[variant] || ANALYSIS_CARD.trend;
+  return { ...S.secTitle, ...v.title, ...(marginBottom != null ? { marginBottom } : {}) };
+}
+function analysisRowBorder(variant) {
+  const v = ANALYSIS_CARD[variant] || ANALYSIS_CARD.trend;
+  return v.rowBorder;
+}
+
 function yen(v) {
   if (v == null || Number.isNaN(Number(v))) return "—";
   return "¥" + Number(v).toLocaleString("ja-JP");
@@ -102,9 +211,9 @@ function readSalesRoleMode() {
 function readSalesAdminTab() {
   try {
     const v = localStorage.getItem(SALES_ADMIN_TAB_KEY);
-    return v === "daily" || v === "analysis" ? v : "daily";
+    return v === "daily" || v === "analysis" ? v : "analysis";
   } catch {
-    return "daily";
+    return "analysis";
   }
 }
 function readSalesTargetMonth() {
@@ -826,11 +935,11 @@ export default function SalesModule({ events = [], navigateBack }) {
 
       {!loading && !error && rows.length > 0 && roleMode === "admin" && adminTab === "analysis" && (
         <div style={{ display:"grid", gap:".75rem", marginBottom:".75rem" }}>
-          <div style={{ ...S.card }}>
-            <div style={{ ...S.secTitle, marginBottom: ".55rem" }}>月次サマリー</div>
+          <div style={analysisCard("summary")}>
+            <div style={analysisSecTitle("summary", ".55rem")}>月次サマリー</div>
             <div style={{ display:"grid", gap:".52rem" }}>
               <div style={{ display:"flex", alignItems:"baseline", gap:".45rem", flexWrap:"wrap" }}>
-                <div style={{ fontFamily:"Georgia,serif", fontSize:"2.25rem", lineHeight:1, color:"#f3ead2" }}>{pct(monthlyAnalysis.monthlyProgressRate)}</div>
+                <div style={{ fontFamily:"Georgia,serif", fontSize:"2.45rem", lineHeight:1, color:"#f8efd8", textShadow:"0 0 28px rgba(201,168,76,0.22), 0 2px 4px rgba(0,0,0,0.35)" }}>{pct(monthlyAnalysis.monthlyProgressRate)}</div>
                 <span style={{ fontSize: ".76rem", fontWeight: 700, padding: ".16rem .58rem", borderRadius: 999, background: achievementTone(monthlyAnalysis.monthlyProgressRate, monthlyAnalysis.fullMonthTargetSalesSum > 0).chipBg, border: "1px solid " + achievementTone(monthlyAnalysis.monthlyProgressRate, monthlyAnalysis.fullMonthTargetSalesSum > 0).chipBd, color: achievementTone(monthlyAnalysis.monthlyProgressRate, monthlyAnalysis.fullMonthTargetSalesSum > 0).chipTx }}>
                   {achievementTone(monthlyAnalysis.monthlyProgressRate, monthlyAnalysis.fullMonthTargetSalesSum > 0).label}
                 </span>
@@ -864,8 +973,8 @@ export default function SalesModule({ events = [], navigateBack }) {
             </div>
           </div>
 
-          <div style={{ ...S.card }}>
-            <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>売上構成</div>
+          <div style={analysisCard("composition")}>
+            <div style={analysisSecTitle("composition", ".5rem")}>売上構成</div>
             <SalesCompositionLegend />
             <SalesCompositionBar rates={monthlyAnalysis.salesComposition} />
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))", gap:".35rem .8rem", fontSize:".76rem" }}>
@@ -890,8 +999,8 @@ export default function SalesModule({ events = [], navigateBack }) {
             </div>
           </div>
 
-          <div style={{ ...S.card }}>
-            <div style={{ ...S.secTitle, marginBottom: ".35rem" }}>コスト・利益比較（暫定）</div>
+          <div style={analysisCard("costProfit")}>
+            <div style={analysisSecTitle("costProfit", ".35rem")}>コスト・利益比較（暫定）</div>
             <div style={{ fontSize: ".68rem", color: "rgba(240,232,208,0.62)", marginBottom: ".5rem", lineHeight: 1.5 }}>
               ※人件費は翌月まとめて反映されます。仕入・経費は月末に売掛分が加算されるため、月中は暫定値です。
             </div>
@@ -933,8 +1042,8 @@ export default function SalesModule({ events = [], navigateBack }) {
             </div>
           </div>
 
-          <div style={{ ...S.card }}>
-            <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>日別売上推移</div>
+          <div style={analysisCard("trend")}>
+            <div style={analysisSecTitle("trend", ".5rem")}>日別売上推移</div>
             <div style={{ display:"flex", gap:".7rem", flexWrap:"wrap", marginBottom:".45rem", fontSize:".72rem", color:"rgba(240,232,208,0.8)" }}>
               <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".32rem", borderRadius:2, background:"rgba(102,197,124,0.95)" }} />目標達成</span>
               <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".32rem", borderRadius:2, background:"rgba(222,181,78,0.95)" }} />未達 70%以上</span>
@@ -972,9 +1081,9 @@ export default function SalesModule({ events = [], navigateBack }) {
               </div>
             )}
             {selectedTrendRow && (
-              <div style={{ marginTop: ".75rem", borderTop: "1px dashed rgba(201,168,76,0.22)", paddingTop: ".7rem" }}>
-                <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(201,168,76,0.2)", borderRadius: 8, padding: ".8rem .9rem" }}>
-                  <div style={{ fontSize: ".86rem", fontWeight: 700, color: "#e9dbb0", marginBottom: ".55rem" }}>選択日の営業レポート</div>
+              <div style={{ marginTop: ".75rem", borderTop: "1px dashed rgba(175,180,190,0.2)", paddingTop: ".7rem" }}>
+                <div style={analysisCard("dayReport")}>
+                  <div style={{ ...analysisSecTitle("dayReport"), fontSize: ".86rem", fontWeight: 700, letterSpacing: ".06em", textTransform: "none" }}>選択日の営業レポート</div>
 
                   <div style={{ marginBottom: ".55rem" }}>
                     <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>A. 基本情報</div>
@@ -1065,12 +1174,12 @@ export default function SalesModule({ events = [], navigateBack }) {
           </div>
 
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))", gap:".65rem" }}>
-            <div style={{ ...S.card }}>
-              <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>売上TOP5</div>
+            <div style={analysisCard("rankSales")}>
+              <div style={analysisSecTitle("rankSales", ".5rem")}>月間売上TOP5</div>
               {monthlyAnalysis.salesRankingTop5.length === 0 ? (
                 <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.45)" }}>データなし</div>
               ) : monthlyAnalysis.salesRankingTop5.map((r, i) => (
-                <div key={r.key} style={{ padding: ".3rem 0", borderBottom: "1px solid rgba(201,168,76,0.14)" }}>
+                <div key={r.key} style={{ padding: ".3rem 0", borderBottom: `1px solid ${analysisRowBorder("rankSales")}` }}>
                   <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)" }}>{i + 1}. {r.businessDate}</div>
                   <div style={{ fontSize: ".78rem", color: "#f0e8d0" }}>{r.eventName || "イベント未登録"}</div>
                   <div style={{ fontSize: ".82rem" }}><strong style={{ fontSize: ".94rem" }}>{yen(r.totalSales)}</strong>{r.achievementRate != null ? <span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.55)", fontSize: ".68rem" }}>達成率 {pct(r.achievementRate)}</span> : null}</div>
@@ -1078,12 +1187,12 @@ export default function SalesModule({ events = [], navigateBack }) {
               ))}
             </div>
 
-            <div style={{ ...S.card }}>
-              <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>目標未達ワースト5</div>
+            <div style={analysisCard("rankUnder")}>
+              <div style={analysisSecTitle("rankUnder", ".5rem")}>月間目標未達ワースト5</div>
               {monthlyAnalysis.underTargetWorst5.length === 0 ? (
                 <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.45)" }}>未達データなし</div>
               ) : monthlyAnalysis.underTargetWorst5.map((r, i) => (
-                <div key={r.key} style={{ padding: ".3rem 0", borderBottom: "1px solid rgba(201,168,76,0.14)" }}>
+                <div key={r.key} style={{ padding: ".3rem 0", borderBottom: `1px solid ${analysisRowBorder("rankUnder")}` }}>
                   <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)" }}>{i + 1}. {r.businessDate}</div>
                   <div style={{ fontSize: ".78rem", color: "#f0e8d0" }}>{r.eventName || "イベント未登録"}</div>
                   <div style={{ fontSize: ".82rem" }}>売上 <strong style={{ fontSize: ".92rem" }}>{yen(r.totalSales)}</strong> / 達成率 <strong style={{ fontSize: ".9rem" }}>{pct(r.achievementRate)}</strong> / 不足 <strong style={{ fontSize: ".94rem" }}>{yen(r.shortfall)}</strong></div>
@@ -1093,12 +1202,12 @@ export default function SalesModule({ events = [], navigateBack }) {
           </div>
 
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))", gap:".65rem" }}>
-            <div style={{ ...S.card }}>
-              <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>飲食売上TOP10</div>
+            <div style={analysisCard("rankFoodDrink")}>
+              <div style={analysisSecTitle("rankFoodDrink", ".5rem")}>月間飲食売上TOP10</div>
               {monthlyAnalysis.foodDrinkRankingTop10.length === 0 ? (
                 <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.45)" }}>データなし</div>
               ) : monthlyAnalysis.foodDrinkRankingTop10.map((r, i) => (
-                <div key={r.key} style={{ padding: ".3rem 0", borderBottom: "1px solid rgba(201,168,76,0.14)" }}>
+                <div key={r.key} style={{ padding: ".3rem 0", borderBottom: `1px solid ${analysisRowBorder("rankFoodDrink")}` }}>
                   <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)" }}>{i + 1}. {r.businessDate}</div>
                   <div style={{ fontSize: ".78rem", color: "#f0e8d0" }}>{r.eventName || "イベント未登録"}</div>
                   <div style={{ fontSize: ".82rem" }}>
@@ -1113,12 +1222,12 @@ export default function SalesModule({ events = [], navigateBack }) {
                 </div>
               ))}
             </div>
-            <div style={{ ...S.card }}>
-              <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>ドリンク売上TOP10</div>
+            <div style={analysisCard("rankDrink")}>
+              <div style={analysisSecTitle("rankDrink", ".5rem")}>月間ドリンク売上TOP10</div>
               {monthlyAnalysis.drinkRankingTop10.length === 0 ? (
                 <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.45)" }}>データなし</div>
               ) : monthlyAnalysis.drinkRankingTop10.map((r, i) => (
-                <div key={r.key} style={{ padding: ".3rem 0", borderBottom: "1px solid rgba(201,168,76,0.14)" }}>
+                <div key={r.key} style={{ padding: ".3rem 0", borderBottom: `1px solid ${analysisRowBorder("rankDrink")}` }}>
                   <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)" }}>{i + 1}. {r.businessDate}</div>
                   <div style={{ fontSize: ".78rem", color: "#f0e8d0" }}>{r.eventName || "イベント未登録"}</div>
                   <div style={{ fontSize: ".82rem" }}>
@@ -1133,12 +1242,12 @@ export default function SalesModule({ events = [], navigateBack }) {
                 </div>
               ))}
             </div>
-            <div style={{ ...S.card }}>
-              <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>フード売上TOP10</div>
+            <div style={analysisCard("rankFood")}>
+              <div style={analysisSecTitle("rankFood", ".5rem")}>月間フード売上TOP10</div>
               {monthlyAnalysis.foodRankingTop10.length === 0 ? (
                 <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.45)" }}>データなし</div>
               ) : monthlyAnalysis.foodRankingTop10.map((r, i) => (
-                <div key={r.key} style={{ padding: ".3rem 0", borderBottom: "1px solid rgba(201,168,76,0.14)" }}>
+                <div key={r.key} style={{ padding: ".3rem 0", borderBottom: `1px solid ${analysisRowBorder("rankFood")}` }}>
                   <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)" }}>{i + 1}. {r.businessDate}</div>
                   <div style={{ fontSize: ".78rem", color: "#f0e8d0" }}>{r.eventName || "イベント未登録"}</div>
                   <div style={{ fontSize: ".82rem" }}>
