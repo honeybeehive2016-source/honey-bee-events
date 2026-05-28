@@ -735,56 +735,87 @@ function buildPurchaseCostRates_(
 const TABLE_NUMBER_STYLE = {
   textAlign: "right",
   fontVariantNumeric: "tabular-nums",
-  fontSize: ".82rem",
+  fontSize: ".78rem",
   fontWeight: 500,
-  color: "#f5f0d0",
   lineHeight: 1.45,
   whiteSpace: "nowrap",
-  padding: ".5rem .44rem",
+  letterSpacing: 0,
+  padding: ".46rem .42rem",
+  color: "rgba(245,240,208,0.92)",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  boxSizing: "border-box",
 };
 const TABLE_MUTED_NUMBER_STYLE = {
   ...TABLE_NUMBER_STYLE,
-  color: "rgba(245,240,208,0.42)",
+  color: "rgba(245,240,208,0.48)",
 };
 const YEARLY_TABLE_STYLE = {
   width: "100%",
+  tableLayout: "fixed",
   borderCollapse: "collapse",
   fontVariantNumeric: "tabular-nums",
+};
+const YEARLY_TABLE_WRAP = {
+  width: "100%",
+  maxWidth: "100%",
+  overflow: "hidden",
 };
 const YEARLY_TABLE_ROW = {
   borderBottom: "1px solid rgba(201,168,76,0.08)",
 };
+const YEARLY_BASIC_COL = {
+  month: 48,
+  yen: 120,
+  pct: 80,
+  status: 80,
+};
+const YEARLY_PURCHASE_COL = {
+  month: 48,
+  yen: 120,
+  rate: 90,
+  rateWide: 100,
+};
 const YEARLY_TH = {
   textAlign: "right",
-  padding: ".42rem .44rem",
+  padding: ".4rem .42rem",
   fontWeight: 500,
-  color: "rgba(201,168,76,0.78)",
-  borderBottom: "1px solid rgba(201,168,76,0.14)",
-  fontSize: ".64rem",
-  letterSpacing: ".03em",
+  color: "rgba(201,168,76,0.76)",
+  borderBottom: "1px solid rgba(201,168,76,0.12)",
+  fontSize: ".62rem",
+  letterSpacing: ".02em",
   whiteSpace: "nowrap",
   lineHeight: 1.35,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  boxSizing: "border-box",
 };
-const YEARLY_TH_LEFT = { ...YEARLY_TH, textAlign: "left" };
-const YEARLY_TH_CENTER = { ...YEARLY_TH, textAlign: "center" };
+function yearlyThStyle_(widthPx, align = "right") {
+  return { ...YEARLY_TH, width: widthPx, minWidth: widthPx, maxWidth: widthPx, textAlign: align };
+}
 const YEARLY_TD_MONTH = {
   textAlign: "left",
-  padding: ".5rem .44rem",
-  fontSize: ".82rem",
-  fontWeight: 500,
+  fontSize: ".78rem",
+  fontWeight: 600,
   color: "#e8dcc0",
   lineHeight: 1.45,
   whiteSpace: "nowrap",
+  letterSpacing: 0,
+  padding: ".46rem .42rem",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  boxSizing: "border-box",
 };
-const YEARLY_TD_STATUS = {
-  textAlign: "center",
-  padding: ".5rem .44rem",
-  whiteSpace: "nowrap",
-  verticalAlign: "middle",
-};
+function yearlyMonthTdStyle_(widthPx) {
+  return { ...YEARLY_TD_MONTH, width: widthPx, minWidth: widthPx, maxWidth: widthPx };
+}
+function yearlyNumTdStyle_(widthPx, muted) {
+  const base = muted ? TABLE_MUTED_NUMBER_STYLE : TABLE_NUMBER_STYLE;
+  return { ...base, width: widthPx, minWidth: widthPx, maxWidth: widthPx };
+}
 function yearlyTableRowOpacity_(m) {
-  if (m.status === "取得失敗") return 0.45;
-  if (m.status === "未入力" || m.status === "予定あり") return 0.52;
+  if (m.status === "取得失敗") return 0.55;
+  if (m.status === "未入力" || m.status === "予定あり") return 0.68;
   return 1;
 }
 function yearlyTableYenCell_(m, value) {
@@ -799,9 +830,58 @@ function yearlyTablePctCell_(m, rate) {
   const muted = m.status === "未入力" || m.status === "予定あり" || rate == null;
   return { text: pct1(rate), muted };
 }
-function YearlyTableNumberCell({ m, value, kind = "yen" }) {
+function YearlyTableNumberCell({ m, value, kind = "yen", width }) {
   const cell = kind === "pct" ? yearlyTablePctCell_(m, value) : yearlyTableYenCell_(m, value);
-  return <td style={cell.muted ? TABLE_MUTED_NUMBER_STYLE : TABLE_NUMBER_STYLE}>{cell.text}</td>;
+  return <td style={yearlyNumTdStyle_(width, cell.muted)}>{cell.text}</td>;
+}
+function YearlyTableStatusCell({ m, width }) {
+  return (
+    <td
+      style={{
+        width,
+        minWidth: width,
+        maxWidth: width,
+        textAlign: "center",
+        padding: ".46rem .32rem",
+        verticalAlign: "middle",
+        boxSizing: "border-box",
+        overflow: "hidden",
+      }}
+    >
+      <span
+        style={{
+          display: "inline-block",
+          fontSize: ".54rem",
+          fontWeight: 500,
+          lineHeight: 1.25,
+          padding: ".05rem .26rem",
+          borderRadius: 2,
+          maxWidth: "100%",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          border:
+            m.status === "取得失敗"
+              ? "1px solid rgba(200,90,90,0.28)"
+              : m.status === "集計済み"
+              ? "1px solid rgba(126,200,126,0.24)"
+              : m.status === "予定あり"
+              ? "1px solid rgba(201,168,76,0.24)"
+              : "1px solid rgba(140,140,140,0.22)",
+          color:
+            m.status === "取得失敗"
+              ? "rgba(232,160,160,0.88)"
+              : m.status === "集計済み"
+              ? "rgba(158,201,168,0.88)"
+              : m.status === "予定あり"
+              ? "rgba(223,192,106,0.88)"
+              : "rgba(240,232,208,0.55)",
+        }}
+      >
+        {m.status}
+      </span>
+    </td>
+  );
 }
 function normText(s) {
   return String(s || "").trim().toLowerCase();
@@ -1998,72 +2078,66 @@ export default function SalesModule({ events = [], navigateBack }) {
               <div style={analysisCard("composition")}>
                 <div style={analysisSecTitle("composition", ".5rem")}>月別一覧</div>
                 <div style={{ fontSize: ".66rem", color: "rgba(201,168,76,0.82)", marginBottom: ".35rem" }}>基本</div>
-                <table style={YEARLY_TABLE_STYLE}>
-                  <thead>
-                    <tr>
-                      <th style={YEARLY_TH_LEFT}>月</th>
-                      <th style={YEARLY_TH}>売上</th>
-                      <th style={YEARLY_TH}>目標</th>
-                      <th style={YEARLY_TH}>進捗率</th>
-                      <th style={YEARLY_TH}>飲食</th>
-                      <th style={YEARLY_TH}>営業利益</th>
-                      <th style={YEARLY_TH}>人件費</th>
-                      <th style={YEARLY_TH_CENTER}>状態</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {yearlyAnalysis.monthRows.map((m) => (
-                      <tr key={`${m.targetMonth}_basic`} style={{ ...YEARLY_TABLE_ROW, opacity: yearlyTableRowOpacity_(m) }}>
-                        <td style={YEARLY_TD_MONTH}>{m.monthLabel}</td>
-                        <YearlyTableNumberCell m={m} value={m.totalSalesSum} />
-                        <YearlyTableNumberCell m={m} value={m.targetSalesSum} />
-                        <YearlyTableNumberCell m={m} value={m.progressRate} kind="pct" />
-                        <YearlyTableNumberCell m={m} value={m.foodDrinkSalesIncludingBandSum} />
-                        <YearlyTableNumberCell m={m} value={m.operatingProfitSum} />
-                        <YearlyTableNumberCell m={m} value={m.laborCostSum} />
-                        <td style={YEARLY_TD_STATUS}>
-                          <span style={{
-                            fontSize: ".6rem",
-                            padding: ".1rem .38rem",
-                            borderRadius: 3,
-                            border: m.status === "取得失敗" ? "1px solid rgba(200,90,90,0.35)" : m.status === "集計済み" ? "1px solid rgba(126,200,126,0.3)" : m.status === "予定あり" ? "1px solid rgba(201,168,76,0.3)" : "1px solid rgba(140,140,140,0.28)",
-                            color: m.status === "取得失敗" ? "#e8a0a0" : m.status === "集計済み" ? "#9ec9a8" : m.status === "予定あり" ? "#dfc06a" : "rgba(240,232,208,0.52)",
-                          }}>
-                            {m.status}
-                          </span>
-                        </td>
+                <div style={YEARLY_TABLE_WRAP}>
+                  <table style={YEARLY_TABLE_STYLE}>
+                    <thead>
+                      <tr>
+                        <th style={yearlyThStyle_(YEARLY_BASIC_COL.month, "left")}>月</th>
+                        <th style={yearlyThStyle_(YEARLY_BASIC_COL.yen)}>売上</th>
+                        <th style={yearlyThStyle_(YEARLY_BASIC_COL.yen)}>目標</th>
+                        <th style={yearlyThStyle_(YEARLY_BASIC_COL.pct)}>進捗率</th>
+                        <th style={yearlyThStyle_(YEARLY_BASIC_COL.yen)}>飲食</th>
+                        <th style={yearlyThStyle_(YEARLY_BASIC_COL.yen)}>営業利益</th>
+                        <th style={yearlyThStyle_(YEARLY_BASIC_COL.yen)}>人件費</th>
+                        <th style={yearlyThStyle_(YEARLY_BASIC_COL.status, "center")}>状態</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {yearlyAnalysis.monthRows.map((m) => (
+                        <tr key={`${m.targetMonth}_basic`} style={{ ...YEARLY_TABLE_ROW, opacity: yearlyTableRowOpacity_(m) }}>
+                          <td style={yearlyMonthTdStyle_(YEARLY_BASIC_COL.month)}>{m.monthLabel}</td>
+                          <YearlyTableNumberCell m={m} value={m.totalSalesSum} width={YEARLY_BASIC_COL.yen} />
+                          <YearlyTableNumberCell m={m} value={m.targetSalesSum} width={YEARLY_BASIC_COL.yen} />
+                          <YearlyTableNumberCell m={m} value={m.progressRate} kind="pct" width={YEARLY_BASIC_COL.pct} />
+                          <YearlyTableNumberCell m={m} value={m.foodDrinkSalesIncludingBandSum} width={YEARLY_BASIC_COL.yen} />
+                          <YearlyTableNumberCell m={m} value={m.operatingProfitSum} width={YEARLY_BASIC_COL.yen} />
+                          <YearlyTableNumberCell m={m} value={m.laborCostSum} width={YEARLY_BASIC_COL.yen} />
+                          <YearlyTableStatusCell m={m} width={YEARLY_BASIC_COL.status} />
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
 
                 <div style={{ fontSize: ".66rem", color: "rgba(201,168,76,0.82)", margin: ".65rem 0 .35rem" }}>仕入・原価率</div>
-                <table style={YEARLY_TABLE_STYLE}>
-                  <thead>
-                    <tr>
-                      <th style={YEARLY_TH_LEFT}>月</th>
-                      <th style={YEARLY_TH}>仕入れ合計</th>
-                      <th style={YEARLY_TH}>ドリンク仕入れ</th>
-                      <th style={YEARLY_TH}>フード仕入れ</th>
-                      <th style={YEARLY_TH}>総仕入率</th>
-                      <th style={YEARLY_TH}>ドリンク原価率</th>
-                      <th style={YEARLY_TH}>フード原価率</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {yearlyAnalysis.monthRows.map((m) => (
-                      <tr key={`${m.targetMonth}_purchase`} style={{ ...YEARLY_TABLE_ROW, opacity: yearlyTableRowOpacity_(m) }}>
-                        <td style={YEARLY_TD_MONTH}>{m.monthLabel}</td>
-                        <YearlyTableNumberCell m={m} value={m.purchaseTotalSum} />
-                        <YearlyTableNumberCell m={m} value={m.drinkPurchaseSum} />
-                        <YearlyTableNumberCell m={m} value={m.foodPurchaseSum} />
-                        <YearlyTableNumberCell m={m} value={m.purchaseCostRates?.totalPurchaseRate} kind="pct" />
-                        <YearlyTableNumberCell m={m} value={m.purchaseCostRates?.drinkCostRate} kind="pct" />
-                        <YearlyTableNumberCell m={m} value={m.purchaseCostRates?.foodCostRate} kind="pct" />
+                <div style={YEARLY_TABLE_WRAP}>
+                  <table style={YEARLY_TABLE_STYLE}>
+                    <thead>
+                      <tr>
+                        <th style={yearlyThStyle_(YEARLY_PURCHASE_COL.month, "left")}>月</th>
+                        <th style={yearlyThStyle_(YEARLY_PURCHASE_COL.yen)}>仕入れ合計</th>
+                        <th style={yearlyThStyle_(YEARLY_PURCHASE_COL.yen)}>ドリンク仕入れ</th>
+                        <th style={yearlyThStyle_(YEARLY_PURCHASE_COL.yen)}>フード仕入れ</th>
+                        <th style={yearlyThStyle_(YEARLY_PURCHASE_COL.rate)}>総仕入率</th>
+                        <th style={yearlyThStyle_(YEARLY_PURCHASE_COL.rateWide)}>ドリンク原価率</th>
+                        <th style={yearlyThStyle_(YEARLY_PURCHASE_COL.rateWide)}>フード原価率</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {yearlyAnalysis.monthRows.map((m) => (
+                        <tr key={`${m.targetMonth}_purchase`} style={{ ...YEARLY_TABLE_ROW, opacity: yearlyTableRowOpacity_(m) }}>
+                          <td style={yearlyMonthTdStyle_(YEARLY_PURCHASE_COL.month)}>{m.monthLabel}</td>
+                          <YearlyTableNumberCell m={m} value={m.purchaseTotalSum} width={YEARLY_PURCHASE_COL.yen} />
+                          <YearlyTableNumberCell m={m} value={m.drinkPurchaseSum} width={YEARLY_PURCHASE_COL.yen} />
+                          <YearlyTableNumberCell m={m} value={m.foodPurchaseSum} width={YEARLY_PURCHASE_COL.yen} />
+                          <YearlyTableNumberCell m={m} value={m.purchaseCostRates?.totalPurchaseRate} kind="pct" width={YEARLY_PURCHASE_COL.rate} />
+                          <YearlyTableNumberCell m={m} value={m.purchaseCostRates?.drinkCostRate} kind="pct" width={YEARLY_PURCHASE_COL.rateWide} />
+                          <YearlyTableNumberCell m={m} value={m.purchaseCostRates?.foodCostRate} kind="pct" width={YEARLY_PURCHASE_COL.rateWide} />
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
                 <div style={{ fontSize: ".62rem", color: "rgba(240,232,208,0.52)", marginTop: ".38rem", lineHeight: 1.55 }}>
                   ※総仕入率はバンド飲食代を含む飲食売上で計算しています。ドリンク/フード原価率は、バンド飲食代の内訳がある月のみ個別反映します。
                 </div>
