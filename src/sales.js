@@ -178,6 +178,7 @@ export default function SalesModule({ events = [], navigateBack }) {
   const [records, setRecords] = useState([]);
   const [roleMode, setRoleMode] = useState(() => readSalesRoleMode()); // staff | admin
   const [adminTab, setAdminTab] = useState(() => readSalesAdminTab()); // daily | analysis
+  const [selectedTrendRowKey, setSelectedTrendRowKey] = useState("");
   const [updatedAt, setUpdatedAt] = useState("");
   const currentBusinessDate = getCurrentBusinessDateForSales();
 
@@ -344,6 +345,40 @@ export default function SalesModule({ events = [], navigateBack }) {
           foodDrinkRate: calcRate(foodDrinkSales, totalSales),
         };
       });
+    const drinkRankingTop5 = actualRows
+      .filter((r) => r?.metrics?.drinkSales != null)
+      .sort((a, b) => Number(b?.metrics?.drinkSales || 0) - Number(a?.metrics?.drinkSales || 0))
+      .slice(0, 5)
+      .map((r) => {
+        const drinkSales = Number(r?.metrics?.drinkSales || 0);
+        const foodDrinkSales = Number(r?.metrics?.foodDrinkSales || 0);
+        const totalSales = Number(r?.metrics?.totalSales || 0);
+        return {
+          key: `${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}_drink`,
+          businessDate: r.businessDate,
+          eventName: resolveEventNameForAdmin(r, r.resolvedEventNames),
+          drinkSales,
+          drinkInFoodDrinkRate: calcRate(drinkSales, foodDrinkSales),
+          drinkInTotalRate: calcRate(drinkSales, totalSales),
+        };
+      });
+    const foodRankingTop5 = actualRows
+      .filter((r) => r?.metrics?.foodSales != null)
+      .sort((a, b) => Number(b?.metrics?.foodSales || 0) - Number(a?.metrics?.foodSales || 0))
+      .slice(0, 5)
+      .map((r) => {
+        const foodSales = Number(r?.metrics?.foodSales || 0);
+        const foodDrinkSales = Number(r?.metrics?.foodDrinkSales || 0);
+        const totalSales = Number(r?.metrics?.totalSales || 0);
+        return {
+          key: `${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}_food`,
+          businessDate: r.businessDate,
+          eventName: resolveEventNameForAdmin(r, r.resolvedEventNames),
+          foodSales,
+          foodInFoodDrinkRate: calcRate(foodSales, foodDrinkSales),
+          foodInTotalRate: calcRate(foodSales, totalSales),
+        };
+      });
 
     const dailyTrendRows = [...actualRows]
       .sort((a, b) => {
@@ -363,12 +398,20 @@ export default function SalesModule({ events = [], navigateBack }) {
           : "linear-gradient(180deg, rgba(130,130,130,0.9), rgba(130,130,130,0.5))";
         return {
           key: `${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}_trend`,
+          rowKey: `${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}`,
           businessDate: r.businessDate,
+          weekday: r.weekday || "—",
           eventName,
           totalSales,
           targetSales,
           achievementRate,
           tone,
+          foodDrinkSales: Number(r?.metrics?.foodDrinkSales || 0),
+          drinkSales: Number(r?.metrics?.drinkSales || 0),
+          foodSales: Number(r?.metrics?.foodSales || 0),
+          customerUnitPrice: r?.metrics?.customerUnitPrice != null ? Number(r.metrics.customerUnitPrice) : null,
+          foodDrinkUnitPrice: r?.metrics?.foodDrinkUnitPrice != null ? Number(r.metrics.foodDrinkUnitPrice) : null,
+          operatingProfit: Number(r?.metrics?.operatingProfit || 0),
         };
       });
     const trendMaxSales = dailyTrendRows.reduce((m, r) => Math.max(m, Number(r.totalSales || 0)), 0);
@@ -440,8 +483,24 @@ export default function SalesModule({ events = [], navigateBack }) {
       salesRankingTop5,
       underTargetWorst5,
       foodDrinkRankingTop5,
+      drinkRankingTop5,
+      foodRankingTop5,
     };
   }, [rows, targetMonth, currentBusinessDate]);
+  useEffect(() => {
+    if (!monthlyAnalysis.dailyTrendRows.length) {
+      setSelectedTrendRowKey("");
+      return;
+    }
+    const exists = monthlyAnalysis.dailyTrendRows.some((r) => r.rowKey === selectedTrendRowKey);
+    if (!exists) {
+      setSelectedTrendRowKey(monthlyAnalysis.dailyTrendRows[0].rowKey);
+    }
+  }, [monthlyAnalysis.dailyTrendRows, selectedTrendRowKey]);
+  const selectedTrendRow = useMemo(
+    () => monthlyAnalysis.dailyTrendRows.find((r) => r.rowKey === selectedTrendRowKey) || null,
+    [monthlyAnalysis.dailyTrendRows, selectedTrendRowKey]
+  );
   const staffTodayRows = useMemo(
     () => rows.filter((r) => r.businessDate === currentBusinessDate),
     [rows, currentBusinessDate]
@@ -620,21 +679,21 @@ export default function SalesModule({ events = [], navigateBack }) {
         <div style={{ display:"grid", gap:".75rem", marginBottom:".75rem" }}>
           <div style={{ ...S.card }}>
             <div style={{ ...S.secTitle, marginBottom: ".55rem" }}>月次サマリー</div>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:".45rem .8rem", fontSize:".78rem" }}>
-              <div>月間売上合計: <strong>{yen(monthlyAnalysis.totalSalesSum)}</strong></div>
-              <div>月間目標合計: <strong>{yen(monthlyAnalysis.targetSalesSum)}</strong></div>
-              <div>月間達成率: <strong>{pct(monthlyAnalysis.achievementRate)}</strong></div>
-              <div>実績日数: <strong>{num(monthlyAnalysis.actualDayCount)}</strong></div>
-              <div>本日/予定件数: <strong>{num(monthlyAnalysis.futureDayCount)}</strong></div>
-              <div>1日平均売上: <strong>{yen(monthlyAnalysis.avgDailySales)}</strong></div>
-              <div>営業利益合計: <strong>{yen(monthlyAnalysis.operatingProfitSum)}</strong></div>
-              <div>営業利益率: <strong>{pct(monthlyAnalysis.operatingProfitRate)}</strong></div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))", gap:".5rem .9rem", fontSize:".86rem" }}>
+              <div>月間売上合計: <strong style={{ fontSize: ".98rem" }}>{yen(monthlyAnalysis.totalSalesSum)}</strong></div>
+              <div>月間目標合計: <strong style={{ fontSize: ".98rem" }}>{yen(monthlyAnalysis.targetSalesSum)}</strong></div>
+              <div>月間達成率: <strong style={{ fontSize: ".98rem" }}>{pct(monthlyAnalysis.achievementRate)}</strong></div>
+              <div>実績日数: <strong style={{ fontSize: ".98rem" }}>{num(monthlyAnalysis.actualDayCount)}</strong></div>
+              <div>本日/予定件数: <strong style={{ fontSize: ".98rem" }}>{num(monthlyAnalysis.futureDayCount)}</strong></div>
+              <div>1日平均売上: <strong style={{ fontSize: ".98rem" }}>{yen(monthlyAnalysis.avgDailySales)}</strong></div>
+              <div>営業利益合計: <strong style={{ fontSize: ".98rem" }}>{yen(monthlyAnalysis.operatingProfitSum)}</strong></div>
+              <div>営業利益率: <strong style={{ fontSize: ".98rem" }}>{pct(monthlyAnalysis.operatingProfitRate)}</strong></div>
             </div>
           </div>
 
           <div style={{ ...S.card }}>
             <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>今月のポイント</div>
-            <div style={{ display:"grid", gap:".3rem", fontSize:".78rem", color:"rgba(240,232,208,0.82)" }}>
+            <div style={{ display:"grid", gap:".3rem", fontSize:".84rem", color:"rgba(240,232,208,0.82)" }}>
               {monthlyAnalysis.monthlyHighlights.map((line, i) => (
                 <div key={i}>・{line}</div>
               ))}
@@ -655,14 +714,15 @@ export default function SalesModule({ events = [], navigateBack }) {
                     return (
                       <div
                         key={r.key}
-                        style={{ flex: "0 0 28px", minWidth: 28, textAlign:"center", display:"flex", flexDirection:"column", height:"100%" }}
+                        style={{ flex: "0 0 28px", minWidth: 28, textAlign:"center", display:"flex", flexDirection:"column", height:"100%", cursor:"pointer", opacity: selectedTrendRowKey && selectedTrendRowKey !== r.rowKey ? 0.78 : 1 }}
                         title={`${r.businessDate} / ${r.eventName} / 売上 ${yen(r.totalSales)} / 目標 ${yen(r.targetSales)} / 達成率 ${pct(r.achievementRate)}`}
+                        onClick={() => setSelectedTrendRowKey(r.rowKey)}
                       >
                         <div style={{ fontSize:".52rem", color:"rgba(240,232,208,0.68)", marginBottom:".18rem", whiteSpace:"nowrap" }}>
                           {compactYen(r.totalSales)}
                         </div>
                         <div style={{ flex:1, height:170, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
-                          <div style={{ width:"100%", height:`${h}%`, minHeight:6, borderRadius:"4px 4px 0 0", background:r.tone, boxShadow:"inset 0 0 0 1px rgba(255,255,255,0.08)" }} />
+                          <div style={{ width:"100%", height:`${h}%`, minHeight:6, borderRadius:"4px 4px 0 0", background:r.tone, boxShadow: selectedTrendRowKey === r.rowKey ? "0 0 0 1px rgba(255,255,255,0.28), inset 0 0 0 1px rgba(255,255,255,0.14)" : "inset 0 0 0 1px rgba(255,255,255,0.08)" }} />
                         </div>
                         <div style={{ marginTop:".22rem", fontSize:".58rem", color:"rgba(240,232,208,0.6)", whiteSpace:"nowrap" }}>{(r.businessDate || "").slice(5)}</div>
                       </div>
@@ -671,10 +731,34 @@ export default function SalesModule({ events = [], navigateBack }) {
                 </div>
               </div>
             )}
+            {selectedTrendRow && (
+              <div style={{ marginTop: ".65rem", borderTop: "1px dashed rgba(201,168,76,0.22)", paddingTop: ".55rem" }}>
+                <div style={{ fontSize: ".82rem", fontWeight: 700, color: "#e9dbb0", marginBottom: ".35rem" }}>選択中の売上詳細</div>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:".34rem .8rem", fontSize:".82rem" }}>
+                  <div>日付: <strong style={{ fontSize: ".92rem" }}>{selectedTrendRow.businessDate}</strong></div>
+                  <div>曜日: <strong style={{ fontSize: ".92rem" }}>{selectedTrendRow.weekday}</strong></div>
+                  <div>イベント名: <strong style={{ fontSize: ".92rem" }}>{selectedTrendRow.eventName || "イベント未登録"}</strong></div>
+                  <div>売上合計: <strong style={{ fontSize: ".92rem" }}>{yen(selectedTrendRow.totalSales)}</strong></div>
+                  <div>目標: <strong style={{ fontSize: ".92rem" }}>{yen(selectedTrendRow.targetSales)}</strong></div>
+                  <div>達成率: <strong style={{ fontSize: ".92rem" }}>{pct(selectedTrendRow.achievementRate)}</strong></div>
+                  <div>飲食売上: <strong style={{ fontSize: ".92rem" }}>{yen(selectedTrendRow.foodDrinkSales)}</strong></div>
+                  <div>ドリンク売上: <strong style={{ fontSize: ".92rem" }}>{yen(selectedTrendRow.drinkSales)}</strong></div>
+                  <div>フード売上: <strong style={{ fontSize: ".92rem" }}>{yen(selectedTrendRow.foodSales)}</strong></div>
+                  <div>客単価: <strong style={{ fontSize: ".92rem" }}>{num(selectedTrendRow.customerUnitPrice)}</strong></div>
+                  <div>飲食単価: <strong style={{ fontSize: ".92rem" }}>{num(selectedTrendRow.foodDrinkUnitPrice)}</strong></div>
+                  <div>営業利益: <strong style={{ fontSize: ".92rem" }}>{yen(selectedTrendRow.operatingProfit)}</strong></div>
+                </div>
+              </div>
+            )}
           </div>
 
           <div style={{ ...S.card }}>
             <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>売上構成</div>
+            <div style={{ display:"flex", gap:".8rem", flexWrap:"wrap", marginBottom:".4rem", fontSize:".72rem", color:"rgba(240,232,208,0.74)" }}>
+              <span><span style={{ display:"inline-block", width:10, height:10, marginRight:".3rem", borderRadius:2, background:"rgba(126,200,126,0.9)" }} />ドリンク</span>
+              <span><span style={{ display:"inline-block", width:10, height:10, marginRight:".3rem", borderRadius:2, background:"rgba(201,168,76,0.9)" }} />フード</span>
+              <span><span style={{ display:"inline-block", width:10, height:10, marginRight:".3rem", borderRadius:2, background:"rgba(155,84,94,0.9)" }} />その他</span>
+            </div>
             <div style={{ position:"relative", width:"100%", height:16, borderRadius:999, overflow:"hidden", background:"rgba(240,232,208,0.1)", border:"1px solid rgba(201,168,76,0.22)", marginBottom:".45rem" }}>
               <div style={{ position:"absolute", left:0, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.drinkRate || 0)))}%`, background:"linear-gradient(90deg, rgba(126,200,126,0.9), rgba(126,200,126,0.55))" }} />
               <div style={{ position:"absolute", left:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.drinkRate || 0)))}%`, top:0, height:"100%", width:`${Math.max(0, Math.min(100, Number(monthlyAnalysis.salesComposition.foodRate || 0)))}%`, background:"linear-gradient(90deg, rgba(201,168,76,0.9), rgba(201,168,76,0.55))" }} />
@@ -694,7 +778,10 @@ export default function SalesModule({ events = [], navigateBack }) {
             </div>
             <div style={{ display:"grid", gap:".4rem" }}>
               {monthlyAnalysis.costProfitBars.map((b) => {
-                const w = monthlyAnalysis.costProfitMax > 0
+                const isLaborZero = b.key === "labor" && Number(b.value || 0) === 0;
+                const w = isLaborZero
+                  ? 0
+                  : monthlyAnalysis.costProfitMax > 0
                   ? Math.max(4, Math.round((Number(b.value || 0) / monthlyAnalysis.costProfitMax) * 100))
                   : 4;
                 return (
@@ -708,9 +795,11 @@ export default function SalesModule({ events = [], navigateBack }) {
                       ) : null}
                     </div>
                     <div style={{ height:10, borderRadius:999, background:"rgba(240,232,208,0.1)", border:"1px solid rgba(201,168,76,0.18)", overflow:"hidden" }}>
-                      <div style={{ height:"100%", width:`${w}%`, background:b.tone }} />
+                      {!isLaborZero ? <div style={{ height:"100%", width:`${w}%`, background:b.tone }} /> : null}
                     </div>
-                    <div style={{ fontSize:".74rem", color:"#f0e8d0" }}>{yen(b.value)}</div>
+                    <div style={{ fontSize:".74rem", color:"#f0e8d0" }}>
+                      {isLaborZero ? "¥0 / 翌月反映" : yen(b.value)}
+                    </div>
                   </div>
                 );
               })}
@@ -725,7 +814,7 @@ export default function SalesModule({ events = [], navigateBack }) {
             </div>
           </div>
 
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))", gap:".65rem" }}>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))", gap:".65rem" }}>
             <div style={{ ...S.card }}>
               <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>売上TOP5</div>
               {monthlyAnalysis.salesRankingTop5.length === 0 ? (
@@ -734,7 +823,7 @@ export default function SalesModule({ events = [], navigateBack }) {
                 <div key={r.key} style={{ padding: ".3rem 0", borderBottom: "1px solid rgba(201,168,76,0.14)" }}>
                   <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)" }}>{i + 1}. {r.businessDate}</div>
                   <div style={{ fontSize: ".78rem", color: "#f0e8d0" }}>{r.eventName || "イベント未登録"}</div>
-                  <div style={{ fontSize: ".78rem" }}><strong>{yen(r.totalSales)}</strong>{r.achievementRate != null ? <span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.55)", fontSize: ".68rem" }}>達成率 {pct(r.achievementRate)}</span> : null}</div>
+                  <div style={{ fontSize: ".82rem" }}><strong style={{ fontSize: ".94rem" }}>{yen(r.totalSales)}</strong>{r.achievementRate != null ? <span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.55)", fontSize: ".68rem" }}>達成率 {pct(r.achievementRate)}</span> : null}</div>
                 </div>
               ))}
             </div>
@@ -747,11 +836,13 @@ export default function SalesModule({ events = [], navigateBack }) {
                 <div key={r.key} style={{ padding: ".3rem 0", borderBottom: "1px solid rgba(201,168,76,0.14)" }}>
                   <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)" }}>{i + 1}. {r.businessDate}</div>
                   <div style={{ fontSize: ".78rem", color: "#f0e8d0" }}>{r.eventName || "イベント未登録"}</div>
-                  <div style={{ fontSize: ".78rem" }}>達成率 <strong>{pct(r.achievementRate)}</strong> / 不足 <strong>{yen(r.shortfall)}</strong></div>
+                  <div style={{ fontSize: ".82rem" }}>達成率 <strong style={{ fontSize: ".9rem" }}>{pct(r.achievementRate)}</strong> / 不足 <strong style={{ fontSize: ".94rem" }}>{yen(r.shortfall)}</strong></div>
                 </div>
               ))}
             </div>
+          </div>
 
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))", gap:".65rem" }}>
             <div style={{ ...S.card }}>
               <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>飲食売上TOP5</div>
               {monthlyAnalysis.foodDrinkRankingTop5.length === 0 ? (
@@ -760,13 +851,53 @@ export default function SalesModule({ events = [], navigateBack }) {
                 <div key={r.key} style={{ padding: ".3rem 0", borderBottom: "1px solid rgba(201,168,76,0.14)" }}>
                   <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)" }}>{i + 1}. {r.businessDate}</div>
                   <div style={{ fontSize: ".78rem", color: "#f0e8d0" }}>{r.eventName || "イベント未登録"}</div>
-                  <div style={{ fontSize: ".78rem" }}>
-                    <strong>{yen(r.foodDrinkSales)}</strong>
+                  <div style={{ fontSize: ".82rem" }}>
+                    <strong style={{ fontSize: ".94rem" }}>{yen(r.foodDrinkSales)}</strong>
                     <span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.55)", fontSize: ".68rem" }}>
                       飲食比率 {pct(r.foodDrinkRate)}
                     </span>
                     <span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.55)", fontSize: ".68rem" }}>
                       飲食単価 {num(r.foodDrinkUnitPrice)}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ ...S.card }}>
+              <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>ドリンク売上TOP5</div>
+              {monthlyAnalysis.drinkRankingTop5.length === 0 ? (
+                <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.45)" }}>データなし</div>
+              ) : monthlyAnalysis.drinkRankingTop5.map((r, i) => (
+                <div key={r.key} style={{ padding: ".3rem 0", borderBottom: "1px solid rgba(201,168,76,0.14)" }}>
+                  <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)" }}>{i + 1}. {r.businessDate}</div>
+                  <div style={{ fontSize: ".78rem", color: "#f0e8d0" }}>{r.eventName || "イベント未登録"}</div>
+                  <div style={{ fontSize: ".82rem" }}>
+                    <strong style={{ fontSize: ".94rem" }}>{yen(r.drinkSales)}</strong>
+                    <span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.55)", fontSize: ".68rem" }}>
+                      飲食比率 {pct(r.drinkInFoodDrinkRate)}
+                    </span>
+                    <span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.55)", fontSize: ".68rem" }}>
+                      総売上比率 {pct(r.drinkInTotalRate)}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ ...S.card }}>
+              <div style={{ ...S.secTitle, marginBottom: ".5rem" }}>フード売上TOP5</div>
+              {monthlyAnalysis.foodRankingTop5.length === 0 ? (
+                <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.45)" }}>データなし</div>
+              ) : monthlyAnalysis.foodRankingTop5.map((r, i) => (
+                <div key={r.key} style={{ padding: ".3rem 0", borderBottom: "1px solid rgba(201,168,76,0.14)" }}>
+                  <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)" }}>{i + 1}. {r.businessDate}</div>
+                  <div style={{ fontSize: ".78rem", color: "#f0e8d0" }}>{r.eventName || "イベント未登録"}</div>
+                  <div style={{ fontSize: ".82rem" }}>
+                    <strong style={{ fontSize: ".94rem" }}>{yen(r.foodSales)}</strong>
+                    <span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.55)", fontSize: ".68rem" }}>
+                      飲食比率 {pct(r.foodInFoodDrinkRate)}
+                    </span>
+                    <span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.55)", fontSize: ".68rem" }}>
+                      総売上比率 {pct(r.foodInTotalRate)}
                     </span>
                   </div>
                 </div>
