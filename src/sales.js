@@ -896,6 +896,9 @@ function emptyMonthAggregate_(targetMonth, status, fetchError) {
     foodDrinkSalesIncludingBandSum: 0,
     bandFoodDrinkSalesSum: 0,
     customerCountSum: 0,
+    barTimeCustomerCountSum: 0,
+    liveTimeCustomerCountSum: null,
+    barTimeCustomerRate: null,
     avgDailyCustomerCount: null,
     customerUnitPrice: null,
     normalCustomerUnitPrice: null,
@@ -932,6 +935,9 @@ function aggregateMonthFromRecords_(records, targetMonth, currentBusinessDate, m
   const bandFoodDrinkSalesSum = actualRows.reduce((s, r) => s + bandFoodDrinkSalesFromMetrics_(r?.metrics), 0);
   const foodDrinkSalesIncludingBandSum = foodDrinkSalesSum + bandFoodDrinkSalesSum;
   const customerCountSum = actualRows.reduce((s, r) => s + pickMetricValue(r?.metrics, CUSTOMER_COUNT_KEYS), 0);
+  const barTimeCustomerCountSum = actualRows.reduce((s, r) => s + pickMetricValue(r?.metrics, BAR_TIME_CUSTOMER_COUNT_KEYS), 0);
+  const liveTimeCustomerCountSum = deriveLiveTimeCustomerCount_(customerCountSum, barTimeCustomerCountSum);
+  const barTimeCustomerRate = calcRate(barTimeCustomerCountSum, customerCountSum);
   const hasBandDrinkBreakdown = actualRows.some((r) => pickMetricNullable(r?.metrics, BAND_DRINK_SALES_KEYS) != null);
   const hasBandFoodBreakdown = actualRows.some((r) => pickMetricNullable(r?.metrics, BAND_FOOD_SALES_KEYS) != null);
   const bandDrinkSalesSum = hasBandDrinkBreakdown
@@ -964,6 +970,9 @@ function aggregateMonthFromRecords_(records, targetMonth, currentBusinessDate, m
     foodDrinkSalesIncludingBandSum,
     bandFoodDrinkSalesSum,
     customerCountSum,
+    barTimeCustomerCountSum,
+    liveTimeCustomerCountSum,
+    barTimeCustomerRate,
     avgDailyCustomerCount: actualRows.length > 0 ? customerCountSum / actualRows.length : null,
     customerUnitPrice: unitPriceByCustomerCount_(totalSalesSum, customerCountSum),
     normalCustomerUnitPrice: unitPriceByCustomerCount_(totalSalesSum - bandFoodDrinkSalesSum, customerCountSum),
@@ -1203,6 +1212,24 @@ const CUSTOMER_COUNT_KEYS = [
   "customers",
   "attendanceCount",
 ];
+const BAR_TIME_CUSTOMER_COUNT_KEYS = ["barTimeCustomerCount"];
+const BAR_TIME_UNIT_PRICE_NOTE =
+  "※バータイム売上は分けていないため、バータイム単価は表示していません。";
+function barTimeCustomerCountFromMetrics_(metrics) {
+  return pickMetricNullable(metrics, BAR_TIME_CUSTOMER_COUNT_KEYS);
+}
+function deriveLiveTimeCustomerCount_(customerCount, barTimeCustomerCount) {
+  if (customerCount == null || barTimeCustomerCount == null) return null;
+  const total = Number(customerCount);
+  const bar = Number(barTimeCustomerCount);
+  if (!Number.isFinite(total) || !Number.isFinite(bar)) return null;
+  const live = total - bar;
+  if (live < 0) return null;
+  return live;
+}
+function formatCustomerCountLabel_(count) {
+  return count != null ? `${num(count)}名` : "—";
+}
 function bandFoodDrinkSalesFromMetrics_(metrics) {
   return pickMetricValue(metrics, BAND_FOOD_DRINK_SALES_KEYS);
 }
@@ -1792,6 +1819,11 @@ function YearlyMonthCardsBasic({ monthRows, onMonthClick, taxMode, dy }) {
             <YearlyCardMetricRow label="飲食" value={foodCell.text} muted={foodCell.muted} />
             <YearlyCardMetricRow label="営業利益" value={profitCell.text} muted={profitCell.muted} />
             <YearlyCardMetricRow label="人件費" value={laborCell.text} muted={laborCell.muted} />
+            <YearlyCardMetricRow
+              label="バータイム人数"
+              value={m.status === "集計済み" ? formatCustomerCountLabel_(m.barTimeCustomerCountSum) : "—"}
+              muted={m.status !== "集計済み"}
+            />
           </div>
         );
       })}
@@ -2139,6 +2171,9 @@ export default function SalesModule({ events = [], navigateBack }) {
     const bandFoodDrinkSalesSum = actualRows.reduce((s, r) => s + bandFoodDrinkSalesFromMetrics_(r?.metrics), 0);
     const foodDrinkSalesIncludingBandSum = foodDrinkSalesSum + bandFoodDrinkSalesSum;
     const customerCountSum = actualRows.reduce((s, r) => s + pickMetricValue(r?.metrics, CUSTOMER_COUNT_KEYS), 0);
+    const barTimeCustomerCountSum = actualRows.reduce((s, r) => s + pickMetricValue(r?.metrics, BAR_TIME_CUSTOMER_COUNT_KEYS), 0);
+    const liveTimeCustomerCountSum = deriveLiveTimeCustomerCount_(customerCountSum, barTimeCustomerCountSum);
+    const barTimeCustomerRate = calcRate(barTimeCustomerCountSum, customerCountSum);
     const customerUnitPrice = unitPriceByCustomerCount_(totalSalesSum, customerCountSum);
     const normalCustomerUnitPrice = unitPriceByCustomerCount_(totalSalesSum - bandFoodDrinkSalesSum, customerCountSum);
     const foodDrinkUnitPrice = unitPriceByCustomerCount_(foodDrinkSalesSum, customerCountSum);
@@ -2274,6 +2309,9 @@ export default function SalesModule({ events = [], navigateBack }) {
         const totalSales = Number(r?.metrics?.totalSales || 0);
         const targetSales = Number(r?.metrics?.targetSales || 0);
         const customerCount = pickMetricNullable(r?.metrics, CUSTOMER_COUNT_KEYS);
+        const barTimeCustomerCount = barTimeCustomerCountFromMetrics_(r?.metrics);
+        const liveTimeCustomerCount = deriveLiveTimeCustomerCount_(customerCount, barTimeCustomerCount);
+        const barTimeCustomerRate = calcRate(barTimeCustomerCount, customerCount);
         const bandFoodDrinkSales = pickMetricNullable(r?.metrics, BAND_FOOD_DRINK_SALES_KEYS);
         const foodDrinkSalesBase = r?.metrics?.foodDrinkSales != null ? Number(r.metrics.foodDrinkSales) : null;
         const foodDrinkSalesIncludingBand = foodDrinkSalesIncludingBand_(foodDrinkSalesBase, bandFoodDrinkSales);
@@ -2302,6 +2340,9 @@ export default function SalesModule({ events = [], navigateBack }) {
           drinkSales: r?.metrics?.drinkSales != null ? Number(r.metrics.drinkSales) : null,
           foodSales: r?.metrics?.foodSales != null ? Number(r.metrics.foodSales) : null,
           customerCount,
+          barTimeCustomerCount,
+          liveTimeCustomerCount,
+          barTimeCustomerRate,
           customerUnitPrice: unitPriceByCustomerCount_(totalSales, customerCount),
           normalCustomerUnitPrice: unitPriceByCustomerCount_(totalSales - Number(bandFoodDrinkSales || 0), customerCount),
           foodDrinkUnitPrice: unitPriceByCustomerCount_(foodDrinkSalesBase, customerCount),
@@ -2396,6 +2437,9 @@ export default function SalesModule({ events = [], navigateBack }) {
       actualTargetSalesSum,
       actualAchievementRate,
       customerCountSum,
+      barTimeCustomerCountSum,
+      liveTimeCustomerCountSum,
+      barTimeCustomerRate,
       avgDailyCustomerCount: actualDayCount > 0 ? customerCountSum / actualDayCount : null,
       customerUnitPrice,
       normalCustomerUnitPrice,
@@ -2483,6 +2527,9 @@ export default function SalesModule({ events = [], navigateBack }) {
     const yearlyDrink = aggregatedMonths.reduce((s, m) => s + Number(m.drinkSalesSum || 0), 0);
     const yearlyFood = aggregatedMonths.reduce((s, m) => s + Number(m.foodSalesSum || 0), 0);
     const yearlyCustomerCount = aggregatedMonths.reduce((s, m) => s + Number(m.customerCountSum || 0), 0);
+    const yearlyBarTimeCustomerCount = aggregatedMonths.reduce((s, m) => s + Number(m.barTimeCustomerCountSum || 0), 0);
+    const yearlyLiveTimeCustomerCount = deriveLiveTimeCustomerCount_(yearlyCustomerCount, yearlyBarTimeCustomerCount);
+    const yearlyBarTimeCustomerRate = calcRate(yearlyBarTimeCustomerCount, yearlyCustomerCount);
     const yearlyLabor = aggregatedMonths.reduce((s, m) => s + Number(m.laborCostSum || 0), 0);
     const yearlyPurchase = aggregatedMonths.reduce((s, m) => s + Number(m.purchaseTotalSum || 0), 0);
     const yearlyDrinkPurchase = aggregatedMonths.reduce((s, m) => s + Number(m.drinkPurchaseSum || 0), 0);
@@ -2575,6 +2622,9 @@ export default function SalesModule({ events = [], navigateBack }) {
       yearlyDrink,
       yearlyFood,
       yearlyCustomerCount,
+      yearlyBarTimeCustomerCount,
+      yearlyLiveTimeCustomerCount,
+      yearlyBarTimeCustomerRate,
       monthlyAvgCustomerCount: aggregatedMonths.length > 0 ? yearlyCustomerCount / aggregatedMonths.length : null,
       yearlyCustomerUnitPrice,
       yearlyLabor,
@@ -2895,8 +2945,12 @@ export default function SalesModule({ events = [], navigateBack }) {
                   />
                   <AnalysisStackedRow narrow label="月間進捗率" value={pct(monthlyAnalysis.monthlyProgressRate)} valueStyle={analysisMetricMid(vp.narrow)} />
                   <AnalysisStackedRow narrow label="月間売上" value={dy(monthlyAnalysis.totalSalesSum)} valueStyle={analysisMetricStrong(vp.narrow)} />
-                  <AnalysisStackedRow narrow label="月間集客人数" value={`${num(monthlyAnalysis.customerCountSum)}名`} valueStyle={analysisMetricMid(vp.narrow)} />
+                  <AnalysisStackedRow narrow label="月間総集客人数" value={formatCustomerCountLabel_(monthlyAnalysis.customerCountSum)} valueStyle={analysisMetricMid(vp.narrow)} />
+                  <AnalysisStackedRow narrow label="月間ライブタイム人数" value={formatCustomerCountLabel_(monthlyAnalysis.liveTimeCustomerCountSum)} valueStyle={analysisMetricMid(vp.narrow)} />
+                  <AnalysisStackedRow narrow label="月間バータイム人数" value={formatCustomerCountLabel_(monthlyAnalysis.barTimeCustomerCountSum)} valueStyle={analysisMetricMid(vp.narrow)} />
                   <AnalysisStackedRow narrow label="1日平均集客" value={monthlyAnalysis.avgDailyCustomerCount != null ? `${num(monthlyAnalysis.avgDailyCustomerCount)}名` : "—"} valueStyle={analysisMetricMid(vp.narrow)} />
+                  <AnalysisStackedRow narrow label="バータイム比率" value={pct(monthlyAnalysis.barTimeCustomerRate)} valueStyle={analysisMetricMid(vp.narrow)} />
+                  <div style={analysisNote({}, vp.narrow)}>{BAR_TIME_UNIT_PRICE_NOTE}</div>
                   <AnalysisStackedRow narrow label="客単価" value={num(monthlyAnalysis.customerUnitPrice)} valueStyle={analysisMetricMid(vp.narrow)} />
                   <AnalysisStackedRow narrow label="通常客単価" value={num(monthlyAnalysis.normalCustomerUnitPrice)} valueStyle={analysisMetricMid(vp.narrow)} />
                   <AnalysisStackedRow narrow label="月間目標" value={dy(monthlyAnalysis.fullMonthTargetSalesSum)} valueStyle={analysisMetricStrong(vp.narrow)} />
@@ -2924,11 +2978,15 @@ export default function SalesModule({ events = [], navigateBack }) {
                     月間売上 <strong style={ANALYSIS_METRIC_STRONG}>{dy(monthlyAnalysis.totalSalesSum)}</strong> / 月間目標 <strong style={ANALYSIS_METRIC_STRONG}>{dy(monthlyAnalysis.fullMonthTargetSalesSum)}</strong>
                   </div>
                   <div style={{ fontSize: ".84rem", color:"rgba(240,232,208,0.85)" }}>
-                    月間集客人数 <strong>{num(monthlyAnalysis.customerCountSum)}名</strong> / 1日平均集客 <strong>{monthlyAnalysis.avgDailyCustomerCount != null ? `${num(monthlyAnalysis.avgDailyCustomerCount)}名` : "—"}</strong>
+                    月間総集客人数 <strong>{formatCustomerCountLabel_(monthlyAnalysis.customerCountSum)}</strong> / 月間ライブタイム人数 <strong>{formatCustomerCountLabel_(monthlyAnalysis.liveTimeCustomerCountSum)}</strong>
+                  </div>
+                  <div style={{ fontSize: ".84rem", color:"rgba(240,232,208,0.85)" }}>
+                    月間バータイム人数 <strong>{formatCustomerCountLabel_(monthlyAnalysis.barTimeCustomerCountSum)}</strong> / 1日平均集客 <strong>{monthlyAnalysis.avgDailyCustomerCount != null ? `${num(monthlyAnalysis.avgDailyCustomerCount)}名` : "—"}</strong> / バータイム比率 <strong>{pct(monthlyAnalysis.barTimeCustomerRate)}</strong>
                   </div>
                   <div style={{ fontSize: ".84rem", color:"rgba(240,232,208,0.85)" }}>
                     客単価 <strong>{num(monthlyAnalysis.customerUnitPrice)}</strong> / 通常客単価 <strong>{num(monthlyAnalysis.normalCustomerUnitPrice)}</strong>
                   </div>
+                  <div style={analysisNote()}>{BAR_TIME_UNIT_PRICE_NOTE}</div>
                   <div style={{ fontSize: ".82rem", color:"rgba(240,232,208,0.72)" }}>
                     実績日達成率: <strong style={ANALYSIS_METRIC_SUB}>{pct(monthlyAnalysis.actualAchievementRate)}</strong>
                     <span style={{ marginLeft: ".35rem", fontWeight: 400 }}>（実績日ベース目標 {dy(monthlyAnalysis.actualTargetSalesSum)}）</span>
@@ -3202,12 +3260,16 @@ export default function SalesModule({ events = [], navigateBack }) {
                     <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>B. 売上・目標</div>
                     <div style={{ display:"grid", gridTemplateColumns: rGridCols(vp.narrow, 160), gap:".34rem .7rem", fontSize: vp.narrow ? ".88rem" : ".8rem", ...analysisSectionWrap(vp.narrow) }}>
                       <MobileFieldRow narrow={vp.narrow} label="売上合計" value={dy(selectedTrendRow.totalSales)} valueStyle={{ color: "#f3ead2" }} />
-                      <MobileFieldRow narrow={vp.narrow} label="集客人数" value={selectedTrendRow.customerCount != null ? `${num(selectedTrendRow.customerCount)}名` : "—"} />
+                      <MobileFieldRow narrow={vp.narrow} label="総集客人数" value={formatCustomerCountLabel_(selectedTrendRow.customerCount)} />
+                      <MobileFieldRow narrow={vp.narrow} label="ライブタイム人数" value={formatCustomerCountLabel_(selectedTrendRow.liveTimeCustomerCount)} />
+                      <MobileFieldRow narrow={vp.narrow} label="バータイム人数" value={formatCustomerCountLabel_(selectedTrendRow.barTimeCustomerCount)} />
+                      <MobileFieldRow narrow={vp.narrow} label="バータイム比率" value={pct(selectedTrendRow.barTimeCustomerRate)} />
                       <MobileFieldRow narrow={vp.narrow} label="目標" value={dy(selectedTrendRow.targetSales)} />
                       <MobileFieldRow narrow={vp.narrow} label="達成率" value={pct(selectedTrendRow.achievementRate)} valueStyle={{ color: "#f3ead2" }} />
                       <MobileFieldRow narrow={vp.narrow} label="客単価" value={num(selectedTrendRow.customerUnitPrice)} />
                       <MobileFieldRow narrow={vp.narrow} label="通常客単価" value={num(selectedTrendRow.normalCustomerUnitPrice)} />
                     </div>
+                    <div style={{ ...analysisNote({ marginTop: ".28rem" }, vp.narrow) }}>{BAR_TIME_UNIT_PRICE_NOTE}</div>
                   </div>
 
                   <div style={{ marginBottom: ".55rem" }}>
@@ -3460,8 +3522,11 @@ export default function SalesModule({ events = [], navigateBack }) {
                   <div>年間営業利益 <strong>{dy(yearlyAnalysis.yearlyOperatingProfit)}</strong></div>
                   <div>年間営業利益率 <strong>{pct(yearlyAnalysis.yearlyOperatingProfitRate)}</strong></div>
                   <div>年間飲食売上 <strong>{dy(yearlyAnalysis.yearlyFoodDrink)}</strong></div>
-                  <div>年間集客人数 <strong>{num(yearlyAnalysis.yearlyCustomerCount)}名</strong></div>
+                  <div>年間総集客人数 <strong>{formatCustomerCountLabel_(yearlyAnalysis.yearlyCustomerCount)}</strong></div>
+                  <div>年間ライブタイム人数 <strong>{formatCustomerCountLabel_(yearlyAnalysis.yearlyLiveTimeCustomerCount)}</strong></div>
+                  <div>年間バータイム人数 <strong>{formatCustomerCountLabel_(yearlyAnalysis.yearlyBarTimeCustomerCount)}</strong></div>
                   <div>月平均集客 <strong>{yearlyAnalysis.monthlyAvgCustomerCount != null ? `${num(yearlyAnalysis.monthlyAvgCustomerCount)}名` : "—"}</strong></div>
+                  <div>年間バータイム比率 <strong>{pct(yearlyAnalysis.yearlyBarTimeCustomerRate)}</strong></div>
                   <div>年間客単価 <strong>{num(yearlyAnalysis.yearlyCustomerUnitPrice)}</strong></div>
                   <div>年間ドリンク <strong>{dy(yearlyAnalysis.yearlyDrink)}</strong></div>
                   <div>年間フード <strong>{dy(yearlyAnalysis.yearlyFood)}</strong></div>

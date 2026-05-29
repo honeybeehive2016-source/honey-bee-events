@@ -36,6 +36,8 @@ var BLOCKS = [
  * [firstHalfRow, secondHalfRow]
  */
 var METRIC_ROW_MAP = {
+  customerCount: [7, 48],
+  barTimeCustomerCount: [8, 49],
   totalSales: [9, 50],
   entranceSales: [10, 51],
   venueFee: [11, 52],
@@ -164,7 +166,7 @@ function doGet(e) {
 
     var payload = {
       meta: {
-        schemaVersion: "1.3.0",
+        schemaVersion: "1.3.2",
         spreadsheetId: SPREADSHEET_ID,
         sheetName: sheet.getName(),
         targetMonth: targetMonth,
@@ -615,7 +617,7 @@ function buildSheetNotFoundError_(message, availableSheets, candidates) {
 function buildErrorPayload_(err) {
   var payload = {
     meta: {
-      schemaVersion: "1.3.0",
+      schemaVersion: "1.3.2",
       generatedAt: new Date().toISOString(),
       warnings: []
     },
