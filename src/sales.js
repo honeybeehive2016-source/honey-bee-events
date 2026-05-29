@@ -844,19 +844,25 @@ function normalizeMonth(value) {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   return `${d.getFullYear()}-${m}`;
 }
+function clearLegacySalesAdminUnlocked_() {
+  try {
+    localStorage.removeItem(SALES_ADMIN_UNLOCKED_KEY);
+  } catch {}
+}
 function readSalesAdminUnlocked() {
   try {
-    return localStorage.getItem(SALES_ADMIN_UNLOCKED_KEY) === "true";
+    return sessionStorage.getItem(SALES_ADMIN_UNLOCKED_KEY) === "true";
   } catch {
     return false;
   }
 }
 function setSalesAdminUnlocked(unlocked) {
   try {
+    clearLegacySalesAdminUnlocked_();
     if (unlocked) {
-      localStorage.setItem(SALES_ADMIN_UNLOCKED_KEY, "true");
+      sessionStorage.setItem(SALES_ADMIN_UNLOCKED_KEY, "true");
     } else {
-      localStorage.removeItem(SALES_ADMIN_UNLOCKED_KEY);
+      sessionStorage.removeItem(SALES_ADMIN_UNLOCKED_KEY);
     }
   } catch {}
 }
@@ -870,16 +876,6 @@ function requestSalesAdminAccess_() {
   }
   window.alert("PINが違います。");
   return false;
-}
-function readSalesRoleMode() {
-  try {
-    const v = localStorage.getItem(SALES_ROLE_MODE_KEY);
-    const mode = v === "staff" || v === "admin" ? v : "staff";
-    if (mode === "admin" && !readSalesAdminUnlocked()) return "staff";
-    return mode;
-  } catch {
-    return "staff";
-  }
 }
 function readSalesAdminTab() {
   try {
@@ -2118,7 +2114,7 @@ export default function SalesModule({ events = [], navigateBack }) {
   const [error, setError] = useState("");
   const [records, setRecords] = useState([]);
   const [monthlySummary, setMonthlySummary] = useState(null);
-  const [roleMode, setRoleMode] = useState(() => readSalesRoleMode()); // staff | admin
+  const [roleMode, setRoleMode] = useState("staff"); // staff | admin（起動時は常に現場表示）
   const [taxMode, setTaxMode] = useState(() => readSalesTaxMode()); // gross | net
   const [adminTab, setAdminTab] = useState(() => readSalesAdminTab()); // daily | analysis | yearly
   const [targetYear, setTargetYear] = useState(2026);
@@ -2163,6 +2159,9 @@ export default function SalesModule({ events = [], navigateBack }) {
   };
 
   useEffect(() => {
+    clearLegacySalesAdminUnlocked_();
+  }, []);
+  useEffect(() => {
     loadSales(targetMonth);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetMonth]);
@@ -2173,7 +2172,9 @@ export default function SalesModule({ events = [], navigateBack }) {
   }, [taxMode]);
   useEffect(() => {
     try {
-      localStorage.setItem(SALES_ROLE_MODE_KEY, roleMode === "admin" ? "admin" : "staff");
+      if (roleMode === "staff") {
+        localStorage.setItem(SALES_ROLE_MODE_KEY, "staff");
+      }
     } catch {}
   }, [roleMode]);
   useEffect(() => {
