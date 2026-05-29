@@ -403,6 +403,40 @@ function MobileFieldRow({ label, value, valueStyle, narrow }) {
     </div>
   );
 }
+const DAY_REPORT_FOOD_VALUE_STYLE = {
+  fontSize: ".94rem",
+  fontWeight: 600,
+  fontFamily: SALES_NUMBER_FONT_FAMILY,
+  ...SALES_NUMBER_TABULAR,
+  color: "rgba(245,240,208,0.9)",
+};
+function DayReportFoodMetricRow({ label, value, narrow, valueStyle }) {
+  const mergedValueStyle = { ...DAY_REPORT_FOOD_VALUE_STYLE, ...valueStyle };
+  if (narrow) {
+    return (
+      <div style={{ padding: ".22rem 0", minWidth: 0, maxWidth: "100%", boxSizing: "border-box" }}>
+        <div style={{ ...MOBILE_CARD_LABEL_STYLE, marginBottom: ".1rem" }}>{label}</div>
+        <div style={mergedValueStyle}>{value}</div>
+      </div>
+    );
+  }
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "baseline",
+        gap: ".65rem",
+        minWidth: 0,
+        maxWidth: "100%",
+        boxSizing: "border-box",
+      }}
+    >
+      <span style={{ fontSize: ".8rem", color: "rgba(240,232,208,0.78)", flex: "1 1 auto", minWidth: 0 }}>{label}</span>
+      <strong style={{ ...mergedValueStyle, flex: "0 0 auto", textAlign: "right" }}>{value}</strong>
+    </div>
+  );
+}
 function SalesCompositionBreakdown({ items, narrow }) {
   const rowStyle = narrow
     ? {
@@ -3274,20 +3308,35 @@ export default function SalesModule({ events = [], navigateBack }) {
 
                   <div style={{ marginBottom: ".55rem" }}>
                     <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>C. 飲食内訳</div>
-                    <div style={{ display:"grid", gridTemplateColumns: rGridCols(vp.narrow, 160), gap:".34rem .7rem", fontSize: vp.narrow ? ".88rem" : ".8rem" }}>
-                      <div>飲食売上: <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.foodDrinkSalesIncludingBand)}</strong></div>
-                      <div>通常飲食売上: <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.foodDrinkSalesBase)}</strong></div>
-                      <div>バンド飲食代: <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.bandFoodDrinkSales)}</strong></div>
-                      <div>飲食比率: <strong style={{ fontSize: ".94rem" }}>{pct(calcRate(selectedTrendRow.foodDrinkSalesIncludingBand, selectedTrendRow.totalSales))}</strong></div>
-                      <div>ドリンク売上: <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.drinkSales)}</strong></div>
-                      <div>フード売上: <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.foodSales)}</strong></div>
-                      <div>飲食単価: <strong style={{ fontSize: ".94rem" }}>{num(selectedTrendRow.foodDrinkUnitPrice)}</strong></div>
-                      <div>飲食単価（バンド込）: <strong style={{ fontSize: ".94rem" }}>{num(selectedTrendRow.foodDrinkUnitPriceIncludingBand)}</strong></div>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: vp.narrow ? "1fr" : "repeat(auto-fit, minmax(220px, 1fr))",
+                        gap: vp.narrow ? ".1rem" : ".28rem .85rem",
+                        fontSize: vp.narrow ? ".88rem" : ".8rem",
+                        width: "100%",
+                        maxWidth: "100%",
+                        minWidth: 0,
+                        boxSizing: "border-box",
+                      }}
+                    >
+                      <DayReportFoodMetricRow narrow={vp.narrow} label="飲食売上" value={dy(selectedTrendRow.foodDrinkSalesIncludingBand)} />
+                      <DayReportFoodMetricRow narrow={vp.narrow} label="お客様飲食売上" value={dy(selectedTrendRow.foodDrinkSalesBase)} />
+                      <DayReportFoodMetricRow narrow={vp.narrow} label="バンド飲食代" value={dy(selectedTrendRow.bandFoodDrinkSales)} />
+                      <DayReportFoodMetricRow
+                        narrow={vp.narrow}
+                        label="飲食比率"
+                        value={pct(calcRate(selectedTrendRow.foodDrinkSalesIncludingBand, selectedTrendRow.totalSales))}
+                      />
+                      <DayReportFoodMetricRow narrow={vp.narrow} label="ドリンク売上" value={dy(selectedTrendRow.drinkSales)} />
+                      <DayReportFoodMetricRow narrow={vp.narrow} label="フード売上" value={dy(selectedTrendRow.foodSales)} />
+                      <DayReportFoodMetricRow narrow={vp.narrow} label="飲食単価" value={num(selectedTrendRow.foodDrinkUnitPrice)} />
+                      <DayReportFoodMetricRow narrow={vp.narrow} label="バンド込単価" value={num(selectedTrendRow.foodDrinkUnitPriceIncludingBand)} />
                       {selectedTrendRow.bandDrinkSales != null ? (
-                        <div>バンドドリンク: <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.bandDrinkSales)}</strong></div>
+                        <DayReportFoodMetricRow narrow={vp.narrow} label="バンドドリンク" value={dy(selectedTrendRow.bandDrinkSales)} />
                       ) : null}
                       {selectedTrendRow.bandFoodSales != null ? (
-                        <div>バンドフード: <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.bandFoodSales)}</strong></div>
+                        <DayReportFoodMetricRow narrow={vp.narrow} label="バンドフード" value={dy(selectedTrendRow.bandFoodSales)} />
                       ) : null}
                     </div>
                     <div style={{ marginTop: ".4rem", fontSize: ".66rem", color: "rgba(240,232,208,0.72)" }}>売上構成</div>
