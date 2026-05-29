@@ -895,6 +895,10 @@ function emptyMonthAggregate_(targetMonth, status, fetchError) {
     foodDrinkSalesSum: 0,
     foodDrinkSalesIncludingBandSum: 0,
     bandFoodDrinkSalesSum: 0,
+    customerCountSum: 0,
+    avgDailyCustomerCount: null,
+    customerUnitPrice: null,
+    normalCustomerUnitPrice: null,
     hasBandDrinkBreakdown: false,
     hasBandFoodBreakdown: false,
     bandDrinkSalesSum: null,
@@ -927,6 +931,7 @@ function aggregateMonthFromRecords_(records, targetMonth, currentBusinessDate, m
   const foodDrinkSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.foodDrinkSales || 0), 0);
   const bandFoodDrinkSalesSum = actualRows.reduce((s, r) => s + bandFoodDrinkSalesFromMetrics_(r?.metrics), 0);
   const foodDrinkSalesIncludingBandSum = foodDrinkSalesSum + bandFoodDrinkSalesSum;
+  const customerCountSum = actualRows.reduce((s, r) => s + pickMetricValue(r?.metrics, CUSTOMER_COUNT_KEYS), 0);
   const hasBandDrinkBreakdown = actualRows.some((r) => pickMetricNullable(r?.metrics, BAND_DRINK_SALES_KEYS) != null);
   const hasBandFoodBreakdown = actualRows.some((r) => pickMetricNullable(r?.metrics, BAND_FOOD_SALES_KEYS) != null);
   const bandDrinkSalesSum = hasBandDrinkBreakdown
@@ -958,6 +963,10 @@ function aggregateMonthFromRecords_(records, targetMonth, currentBusinessDate, m
     foodDrinkSalesSum,
     foodDrinkSalesIncludingBandSum,
     bandFoodDrinkSalesSum,
+    customerCountSum,
+    avgDailyCustomerCount: actualRows.length > 0 ? customerCountSum / actualRows.length : null,
+    customerUnitPrice: unitPriceByCustomerCount_(totalSalesSum, customerCountSum),
+    normalCustomerUnitPrice: unitPriceByCustomerCount_(totalSalesSum - bandFoodDrinkSalesSum, customerCountSum),
     hasBandDrinkBreakdown,
     hasBandFoodBreakdown,
     bandDrinkSalesSum,
@@ -1183,6 +1192,7 @@ const RENTAL_SALES_KEYS = ["hallRentalSales", "rentalSales", "hallRentalFee", "r
 const BAND_FOOD_DRINK_SALES_KEYS = ["bandFoodDrinkSales"];
 const BAND_DRINK_SALES_KEYS = ["bandDrinkSales", "bandMealDrinkSales", "bandDrink"];
 const BAND_FOOD_SALES_KEYS = ["bandFoodSales", "bandMealFoodSales", "bandFood", "bandMealSales"];
+const CUSTOMER_COUNT_KEYS = ["customerCount", "customers", "attendanceCount", "guestCount"];
 function bandFoodDrinkSalesFromMetrics_(metrics) {
   return pickMetricValue(metrics, BAND_FOOD_DRINK_SALES_KEYS);
 }
@@ -1191,6 +1201,12 @@ function foodDrinkSalesIncludingBand_(foodDrinkSales, bandFoodDrinkSales) {
   const band = bandFoodDrinkSales != null ? Number(bandFoodDrinkSales) : 0;
   if (foodDrinkSales == null && bandFoodDrinkSales == null) return null;
   return base + band;
+}
+function unitPriceByCustomerCount_(amount, customerCount) {
+  const sales = amount != null ? Number(amount) : null;
+  const count = customerCount != null ? Number(customerCount) : null;
+  if (!Number.isFinite(sales) || !Number.isFinite(count) || !(count > 0)) return null;
+  return sales / count;
 }
 function foodDrinkIncludingBandFromRecord_(record) {
   const m = record?.metrics;
@@ -2112,6 +2128,11 @@ export default function SalesModule({ events = [], navigateBack }) {
     const foodSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.foodSales || 0), 0);
     const bandFoodDrinkSalesSum = actualRows.reduce((s, r) => s + bandFoodDrinkSalesFromMetrics_(r?.metrics), 0);
     const foodDrinkSalesIncludingBandSum = foodDrinkSalesSum + bandFoodDrinkSalesSum;
+    const customerCountSum = actualRows.reduce((s, r) => s + pickMetricValue(r?.metrics, CUSTOMER_COUNT_KEYS), 0);
+    const customerUnitPrice = unitPriceByCustomerCount_(totalSalesSum, customerCountSum);
+    const normalCustomerUnitPrice = unitPriceByCustomerCount_(totalSalesSum - bandFoodDrinkSalesSum, customerCountSum);
+    const foodDrinkUnitPrice = unitPriceByCustomerCount_(foodDrinkSalesSum, customerCountSum);
+    const foodDrinkUnitPriceIncludingBand = unitPriceByCustomerCount_(foodDrinkSalesIncludingBandSum, customerCountSum);
     const hasBandDrinkBreakdown = actualRows.some((r) => pickMetricNullable(r?.metrics, BAND_DRINK_SALES_KEYS) != null);
     const hasBandFoodBreakdown = actualRows.some((r) => pickMetricNullable(r?.metrics, BAND_FOOD_SALES_KEYS) != null);
     const bandDrinkSalesSum = hasBandDrinkBreakdown
@@ -2242,6 +2263,10 @@ export default function SalesModule({ events = [], navigateBack }) {
       .map((r) => {
         const totalSales = Number(r?.metrics?.totalSales || 0);
         const targetSales = Number(r?.metrics?.targetSales || 0);
+        const customerCount = pickMetricNullable(r?.metrics, CUSTOMER_COUNT_KEYS);
+        const bandFoodDrinkSales = pickMetricNullable(r?.metrics, BAND_FOOD_DRINK_SALES_KEYS);
+        const foodDrinkSalesBase = r?.metrics?.foodDrinkSales != null ? Number(r.metrics.foodDrinkSales) : null;
+        const foodDrinkSalesIncludingBand = foodDrinkSalesIncludingBand_(foodDrinkSalesBase, bandFoodDrinkSales);
         const achievementRate = calcRate(totalSales, targetSales);
         const eventName = resolveEventNameForAdmin(r, r.resolvedEventNames) || "イベント未登録";
         const matchedEvent = matchEventForRecord(r, eventsForDate(events, r.businessDate));
@@ -2262,12 +2287,15 @@ export default function SalesModule({ events = [], navigateBack }) {
           achievementRate,
           tone: trendTone.tone,
           trendLabel: trendTone.label,
-          foodDrinkSalesBase: r?.metrics?.foodDrinkSales != null ? Number(r.metrics.foodDrinkSales) : null,
-          foodDrinkSalesIncludingBand: foodDrinkIncludingBandFromRecord_(r),
+          foodDrinkSalesBase,
+          foodDrinkSalesIncludingBand,
           drinkSales: r?.metrics?.drinkSales != null ? Number(r.metrics.drinkSales) : null,
           foodSales: r?.metrics?.foodSales != null ? Number(r.metrics.foodSales) : null,
-          customerUnitPrice: r?.metrics?.customerUnitPrice != null ? Number(r.metrics.customerUnitPrice) : null,
-          foodDrinkUnitPrice: r?.metrics?.foodDrinkUnitPrice != null ? Number(r.metrics.foodDrinkUnitPrice) : null,
+          customerCount,
+          customerUnitPrice: unitPriceByCustomerCount_(totalSales, customerCount),
+          normalCustomerUnitPrice: unitPriceByCustomerCount_(totalSales - Number(bandFoodDrinkSales || 0), customerCount),
+          foodDrinkUnitPrice: unitPriceByCustomerCount_(foodDrinkSalesBase, customerCount),
+          foodDrinkUnitPriceIncludingBand: unitPriceByCustomerCount_(foodDrinkSalesIncludingBand, customerCount),
           operatingProfit: r?.metrics?.operatingProfit != null ? Number(r.metrics.operatingProfit) : null,
           cash: r?.metrics?.cash != null ? Number(r.metrics.cash) : null,
           creditCardSales: r?.metrics?.creditCardSales != null ? Number(r.metrics.creditCardSales) : null,
@@ -2357,6 +2385,12 @@ export default function SalesModule({ events = [], navigateBack }) {
       monthlyProgressRate,
       actualTargetSalesSum,
       actualAchievementRate,
+      customerCountSum,
+      avgDailyCustomerCount: actualDayCount > 0 ? customerCountSum / actualDayCount : null,
+      customerUnitPrice,
+      normalCustomerUnitPrice,
+      foodDrinkUnitPrice,
+      foodDrinkUnitPriceIncludingBand,
       avgDailySales,
       operatingProfitSum,
       operatingProfitRate,
@@ -2438,6 +2472,7 @@ export default function SalesModule({ events = [], navigateBack }) {
       : null;
     const yearlyDrink = aggregatedMonths.reduce((s, m) => s + Number(m.drinkSalesSum || 0), 0);
     const yearlyFood = aggregatedMonths.reduce((s, m) => s + Number(m.foodSalesSum || 0), 0);
+    const yearlyCustomerCount = aggregatedMonths.reduce((s, m) => s + Number(m.customerCountSum || 0), 0);
     const yearlyLabor = aggregatedMonths.reduce((s, m) => s + Number(m.laborCostSum || 0), 0);
     const yearlyPurchase = aggregatedMonths.reduce((s, m) => s + Number(m.purchaseTotalSum || 0), 0);
     const yearlyDrinkPurchase = aggregatedMonths.reduce((s, m) => s + Number(m.drinkPurchaseSum || 0), 0);
@@ -2511,6 +2546,7 @@ export default function SalesModule({ events = [], navigateBack }) {
     const yoyRate = previousYearTotal > 0 ? (yearlyTotalSales / previousYearTotal) * 100 : null;
     const landing = buildLandingForecast_(monthRows, yearlyTotalSales, targetMetrics);
     const momComparison = buildMomComparison_(monthRows);
+    const yearlyCustomerUnitPrice = unitPriceByCustomerCount_(yearlyTotalSales, yearlyCustomerCount);
     return {
       targetYear,
       monthRows,
@@ -2528,6 +2564,9 @@ export default function SalesModule({ events = [], navigateBack }) {
       yearlyFoodDrink,
       yearlyDrink,
       yearlyFood,
+      yearlyCustomerCount,
+      monthlyAvgCustomerCount: aggregatedMonths.length > 0 ? yearlyCustomerCount / aggregatedMonths.length : null,
+      yearlyCustomerUnitPrice,
       yearlyLabor,
       yearlyPurchase,
       yearlyDrinkPurchase,
@@ -2846,6 +2885,10 @@ export default function SalesModule({ events = [], navigateBack }) {
                   />
                   <AnalysisStackedRow narrow label="月間進捗率" value={pct(monthlyAnalysis.monthlyProgressRate)} valueStyle={analysisMetricMid(vp.narrow)} />
                   <AnalysisStackedRow narrow label="月間売上" value={dy(monthlyAnalysis.totalSalesSum)} valueStyle={analysisMetricStrong(vp.narrow)} />
+                  <AnalysisStackedRow narrow label="月間集客人数" value={`${num(monthlyAnalysis.customerCountSum)}名`} valueStyle={analysisMetricMid(vp.narrow)} />
+                  <AnalysisStackedRow narrow label="1日平均集客" value={monthlyAnalysis.avgDailyCustomerCount != null ? `${num(monthlyAnalysis.avgDailyCustomerCount)}名` : "—"} valueStyle={analysisMetricMid(vp.narrow)} />
+                  <AnalysisStackedRow narrow label="客単価" value={num(monthlyAnalysis.customerUnitPrice)} valueStyle={analysisMetricMid(vp.narrow)} />
+                  <AnalysisStackedRow narrow label="通常客単価" value={num(monthlyAnalysis.normalCustomerUnitPrice)} valueStyle={analysisMetricMid(vp.narrow)} />
                   <AnalysisStackedRow narrow label="月間目標" value={dy(monthlyAnalysis.fullMonthTargetSalesSum)} valueStyle={analysisMetricStrong(vp.narrow)} />
                   <AnalysisStackedRow narrow label="実績日達成率" value={pct(monthlyAnalysis.actualAchievementRate)} valueStyle={analysisMetricMid(vp.narrow)} />
                   <div style={analysisNote({}, vp.narrow)}>※終了済み営業日の目標に対する達成率（実績日ベース目標 {dy(monthlyAnalysis.actualTargetSalesSum)}）</div>
@@ -2869,6 +2912,12 @@ export default function SalesModule({ events = [], navigateBack }) {
                   </div>
                   <div style={{ fontSize: ".88rem" }}>
                     月間売上 <strong style={ANALYSIS_METRIC_STRONG}>{dy(monthlyAnalysis.totalSalesSum)}</strong> / 月間目標 <strong style={ANALYSIS_METRIC_STRONG}>{dy(monthlyAnalysis.fullMonthTargetSalesSum)}</strong>
+                  </div>
+                  <div style={{ fontSize: ".84rem", color:"rgba(240,232,208,0.85)" }}>
+                    月間集客人数 <strong>{num(monthlyAnalysis.customerCountSum)}名</strong> / 1日平均集客 <strong>{monthlyAnalysis.avgDailyCustomerCount != null ? `${num(monthlyAnalysis.avgDailyCustomerCount)}名` : "—"}</strong>
+                  </div>
+                  <div style={{ fontSize: ".84rem", color:"rgba(240,232,208,0.85)" }}>
+                    客単価 <strong>{num(monthlyAnalysis.customerUnitPrice)}</strong> / 通常客単価 <strong>{num(monthlyAnalysis.normalCustomerUnitPrice)}</strong>
                   </div>
                   <div style={{ fontSize: ".82rem", color:"rgba(240,232,208,0.72)" }}>
                     実績日達成率: <strong style={ANALYSIS_METRIC_SUB}>{pct(monthlyAnalysis.actualAchievementRate)}</strong>
@@ -3143,9 +3192,11 @@ export default function SalesModule({ events = [], navigateBack }) {
                     <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>B. 売上・目標</div>
                     <div style={{ display:"grid", gridTemplateColumns: rGridCols(vp.narrow, 160), gap:".34rem .7rem", fontSize: vp.narrow ? ".88rem" : ".8rem", ...analysisSectionWrap(vp.narrow) }}>
                       <MobileFieldRow narrow={vp.narrow} label="売上合計" value={dy(selectedTrendRow.totalSales)} valueStyle={{ color: "#f3ead2" }} />
+                      <MobileFieldRow narrow={vp.narrow} label="集客人数" value={selectedTrendRow.customerCount != null ? `${num(selectedTrendRow.customerCount)}名` : "—"} />
                       <MobileFieldRow narrow={vp.narrow} label="目標" value={dy(selectedTrendRow.targetSales)} />
                       <MobileFieldRow narrow={vp.narrow} label="達成率" value={pct(selectedTrendRow.achievementRate)} valueStyle={{ color: "#f3ead2" }} />
                       <MobileFieldRow narrow={vp.narrow} label="客単価" value={num(selectedTrendRow.customerUnitPrice)} />
+                      <MobileFieldRow narrow={vp.narrow} label="通常客単価" value={num(selectedTrendRow.normalCustomerUnitPrice)} />
                     </div>
                   </div>
 
@@ -3154,13 +3205,12 @@ export default function SalesModule({ events = [], navigateBack }) {
                     <div style={{ display:"grid", gridTemplateColumns: rGridCols(vp.narrow, 160), gap:".34rem .7rem", fontSize: vp.narrow ? ".88rem" : ".8rem" }}>
                       <div>飲食売上: <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.foodDrinkSalesIncludingBand)}</strong></div>
                       <div>通常飲食売上: <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.foodDrinkSalesBase)}</strong></div>
-                      {selectedTrendRow.bandFoodDrinkSales != null && Number(selectedTrendRow.bandFoodDrinkSales) > 0 ? (
-                        <div>バンド飲食代: <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.bandFoodDrinkSales)}</strong></div>
-                      ) : null}
+                      <div>バンド飲食代: <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.bandFoodDrinkSales)}</strong></div>
                       <div>飲食比率: <strong style={{ fontSize: ".94rem" }}>{pct(calcRate(selectedTrendRow.foodDrinkSalesIncludingBand, selectedTrendRow.totalSales))}</strong></div>
                       <div>ドリンク売上: <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.drinkSales)}</strong></div>
                       <div>フード売上: <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.foodSales)}</strong></div>
                       <div>飲食単価: <strong style={{ fontSize: ".94rem" }}>{num(selectedTrendRow.foodDrinkUnitPrice)}</strong></div>
+                      <div>飲食単価（バンド込）: <strong style={{ fontSize: ".94rem" }}>{num(selectedTrendRow.foodDrinkUnitPriceIncludingBand)}</strong></div>
                       {selectedTrendRow.bandDrinkSales != null ? (
                         <div>バンドドリンク: <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.bandDrinkSales)}</strong></div>
                       ) : null}
@@ -3400,6 +3450,9 @@ export default function SalesModule({ events = [], navigateBack }) {
                   <div>年間営業利益 <strong>{dy(yearlyAnalysis.yearlyOperatingProfit)}</strong></div>
                   <div>年間営業利益率 <strong>{pct(yearlyAnalysis.yearlyOperatingProfitRate)}</strong></div>
                   <div>年間飲食売上 <strong>{dy(yearlyAnalysis.yearlyFoodDrink)}</strong></div>
+                  <div>年間集客人数 <strong>{num(yearlyAnalysis.yearlyCustomerCount)}名</strong></div>
+                  <div>月平均集客 <strong>{yearlyAnalysis.monthlyAvgCustomerCount != null ? `${num(yearlyAnalysis.monthlyAvgCustomerCount)}名` : "—"}</strong></div>
+                  <div>年間客単価 <strong>{num(yearlyAnalysis.yearlyCustomerUnitPrice)}</strong></div>
                   <div>年間ドリンク <strong>{dy(yearlyAnalysis.yearlyDrink)}</strong></div>
                   <div>年間フード <strong>{dy(yearlyAnalysis.yearlyFood)}</strong></div>
                   <div>集計済み月数 <strong>{num(yearlyAnalysis.aggregatedMonthCount)}ヶ月</strong></div>
