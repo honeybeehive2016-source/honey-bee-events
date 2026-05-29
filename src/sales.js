@@ -1060,7 +1060,7 @@ async function fetchSalesMonth_(targetMonth) {
   if (!json || !Array.isArray(json.records)) throw new Error("JSON形式が不正です");
   return json;
 }
-function YearlyMonthBarChart({ title, rows, valueKey, barTone, formatTop, taxMode, onMonthClick }) {
+function YearlyMonthBarChart({ title, rows, valueKey, barTone, formatTop, taxMode, onMonthClick, tall = false }) {
   const chartRows = rows.length ? rows : [];
   const maxVal = chartRows.reduce((m, r) => {
     if (r.status === "取得失敗") return m;
@@ -1070,6 +1070,10 @@ function YearlyMonthBarChart({ title, rows, valueKey, barTone, formatTop, taxMod
   }, 0);
   const scaleMax = maxVal > 0 ? maxVal : 1;
   const clickable = typeof onMonthClick === "function";
+  const chartHeight = tall ? 200 : 168;
+  const barAreaHeight = tall ? 158 : 130;
+  const topLabelSize = tall ? ".52rem" : ".48rem";
+  const monthLabelSize = tall ? ".58rem" : ".56rem";
   return (
     <div style={analysisCard("trend")}>
       <div style={analysisSecTitle("trend", ".5rem")}>{title}</div>
@@ -1077,7 +1081,7 @@ function YearlyMonthBarChart({ title, rows, valueKey, barTone, formatTop, taxMod
         <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.45)" }}>データなし</div>
       ) : (
         <div style={{ width: "100%", overflow: "hidden" }}>
-          <div style={{ display: "flex", alignItems: "flex-end", gap: ".18rem", height: 168, width: "100%" }}>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: tall ? ".22rem" : ".18rem", height: chartHeight, width: "100%" }}>
             {chartRows.map((r) => {
               const raw = r[valueKey];
               const v = raw == null ? 0 : Number(raw);
@@ -1112,13 +1116,13 @@ function YearlyMonthBarChart({ title, rows, valueKey, barTone, formatTop, taxMod
                   }}
                   {...(clickable ? yearlyRowHoverHandlers_() : {})}
                 >
-                  <div style={{ fontSize: ".48rem", color: "rgba(240,232,208,0.62)", marginBottom: ".12rem", lineHeight: 1.15, overflow: "hidden", textOverflow: "ellipsis" }}>
+                  <div style={{ fontSize: topLabelSize, color: "rgba(240,232,208,0.62)", marginBottom: ".12rem", lineHeight: 1.15, overflow: "hidden", textOverflow: "ellipsis" }}>
                     {topLabel}
                   </div>
-                  <div style={{ height: 130, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-                    <div style={{ width: "72%", maxWidth: 28, height: `${h}%`, minHeight: hasValue ? 4 : 2, borderRadius: "3px 3px 0 0", background: hasValue ? barTone : "rgba(240,232,208,0.08)" }} />
+                  <div style={{ height: barAreaHeight, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+                    <div style={{ width: "72%", maxWidth: tall ? 34 : 28, height: `${h}%`, minHeight: hasValue ? 4 : 2, borderRadius: "3px 3px 0 0", background: hasValue ? barTone : "rgba(240,232,208,0.08)" }} />
                   </div>
-                  <div style={{ marginTop: ".18rem", fontSize: ".56rem", color: "rgba(240,232,208,0.58)" }}>{monthShort}</div>
+                  <div style={{ marginTop: ".18rem", fontSize: monthLabelSize, color: "rgba(240,232,208,0.58)" }}>{monthShort}</div>
                 </div>
               );
             })}
@@ -1263,6 +1267,73 @@ function deriveLiveTimeCustomerCount_(customerCount, barTimeCustomerCount) {
 }
 function formatCustomerCountLabel_(count) {
   return count != null ? `${num(count)}名` : "—";
+}
+function yearlyMonthChartGridCols_(narrow) {
+  return narrow ? "1fr" : "repeat(2, minmax(0, 1fr))";
+}
+function CustomerCountSummaryBlock({ narrow, parentItems, breakdownItems }) {
+  const parentRowStyle = narrow
+    ? { display: "grid", gap: ".14rem" }
+    : { display: "flex", flexWrap: "wrap", gap: ".3rem 1.15rem", alignItems: "baseline" };
+  const parentLabelStyle = {
+    fontSize: narrow ? ".78rem" : ".84rem",
+    color: "rgba(240,232,208,0.88)",
+  };
+  const parentValueStyle = {
+    fontWeight: 700,
+    color: "rgba(245,240,208,0.95)",
+    fontFamily: SALES_NUMBER_FONT_FAMILY,
+    ...SALES_NUMBER_TABULAR,
+  };
+  const breakdownWrap = {
+    marginTop: ".38rem",
+    paddingLeft: narrow ? ".55rem" : ".7rem",
+    borderLeft: "2px solid rgba(201,168,76,0.22)",
+  };
+  const breakdownHeadingStyle = {
+    fontSize: ".68rem",
+    color: "rgba(201,168,76,0.72)",
+    marginBottom: ".22rem",
+    letterSpacing: ".04em",
+  };
+  const breakdownRowStyle = {
+    display: "grid",
+    gap: ".12rem",
+    fontSize: ".74rem",
+    color: "rgba(240,232,208,0.62)",
+  };
+  return (
+    <div style={{ minWidth: 0, maxWidth: "100%", boxSizing: "border-box" }}>
+      <div style={parentRowStyle}>
+        {parentItems.map((item) => (
+          <div key={item.label} style={parentLabelStyle}>
+            {item.label}{" "}
+            <strong style={parentValueStyle}>{item.value}</strong>
+          </div>
+        ))}
+      </div>
+      <div style={breakdownWrap}>
+        <div style={breakdownHeadingStyle}>内訳</div>
+        <div style={breakdownRowStyle}>
+          {breakdownItems.map((item) => (
+            <div key={item.label} style={{ minWidth: 0, maxWidth: "100%" }}>
+              {item.label}{" "}
+              <strong
+                style={{
+                  fontWeight: 600,
+                  color: "rgba(240,232,208,0.78)",
+                  fontFamily: SALES_NUMBER_FONT_FAMILY,
+                  ...SALES_NUMBER_TABULAR,
+                }}
+              >
+                {item.value}
+              </strong>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 function bandFoodDrinkSalesFromMetrics_(metrics) {
   return pickMetricValue(metrics, BAND_FOOD_DRINK_SALES_KEYS);
@@ -2979,12 +3050,22 @@ export default function SalesModule({ events = [], navigateBack }) {
                   />
                   <AnalysisStackedRow narrow label="月間進捗率" value={pct(monthlyAnalysis.monthlyProgressRate)} valueStyle={analysisMetricMid(vp.narrow)} />
                   <AnalysisStackedRow narrow label="月間売上" value={dy(monthlyAnalysis.totalSalesSum)} valueStyle={analysisMetricStrong(vp.narrow)} />
-                  <AnalysisStackedRow narrow label="月間総集客人数" value={formatCustomerCountLabel_(monthlyAnalysis.customerCountSum)} valueStyle={analysisMetricMid(vp.narrow)} />
-                  <AnalysisStackedRow narrow label="月間ライブタイム人数" value={formatCustomerCountLabel_(monthlyAnalysis.liveTimeCustomerCountSum)} valueStyle={analysisMetricMid(vp.narrow)} />
-                  <AnalysisStackedRow narrow label="月間バータイム人数" value={formatCustomerCountLabel_(monthlyAnalysis.barTimeCustomerCountSum)} valueStyle={analysisMetricMid(vp.narrow)} />
-                  <AnalysisStackedRow narrow label="1日平均集客" value={monthlyAnalysis.avgDailyCustomerCount != null ? `${num(monthlyAnalysis.avgDailyCustomerCount)}名` : "—"} valueStyle={analysisMetricMid(vp.narrow)} />
-                  <AnalysisStackedRow narrow label="バータイム比率" value={pct(monthlyAnalysis.barTimeCustomerRate)} valueStyle={analysisMetricMid(vp.narrow)} />
-                  <div style={analysisNote({}, vp.narrow)}>{BAR_TIME_UNIT_PRICE_NOTE}</div>
+                  <CustomerCountSummaryBlock
+                    narrow={vp.narrow}
+                    parentItems={[
+                      { label: "月間総集客人数", value: formatCustomerCountLabel_(monthlyAnalysis.customerCountSum) },
+                      {
+                        label: "1日平均集客",
+                        value: monthlyAnalysis.avgDailyCustomerCount != null ? `${num(monthlyAnalysis.avgDailyCustomerCount)}名` : "—",
+                      },
+                    ]}
+                    breakdownItems={[
+                      { label: "ライブタイム人数", value: formatCustomerCountLabel_(monthlyAnalysis.liveTimeCustomerCountSum) },
+                      { label: "バータイム人数", value: formatCustomerCountLabel_(monthlyAnalysis.barTimeCustomerCountSum) },
+                      { label: "バータイム比率", value: pct(monthlyAnalysis.barTimeCustomerRate) },
+                    ]}
+                  />
+                  <div style={analysisNote({ marginTop: ".35rem" }, vp.narrow)}>{BAR_TIME_UNIT_PRICE_NOTE}</div>
                   <AnalysisStackedRow narrow label="客単価" value={num(monthlyAnalysis.customerUnitPrice)} valueStyle={analysisMetricMid(vp.narrow)} />
                   <AnalysisStackedRow narrow label="通常客単価" value={num(monthlyAnalysis.normalCustomerUnitPrice)} valueStyle={analysisMetricMid(vp.narrow)} />
                   <AnalysisStackedRow narrow label="月間目標" value={dy(monthlyAnalysis.fullMonthTargetSalesSum)} valueStyle={analysisMetricStrong(vp.narrow)} />
@@ -3011,13 +3092,22 @@ export default function SalesModule({ events = [], navigateBack }) {
                   <div style={{ fontSize: ".88rem" }}>
                     月間売上 <strong style={ANALYSIS_METRIC_STRONG}>{dy(monthlyAnalysis.totalSalesSum)}</strong> / 月間目標 <strong style={ANALYSIS_METRIC_STRONG}>{dy(monthlyAnalysis.fullMonthTargetSalesSum)}</strong>
                   </div>
-                  <div style={{ fontSize: ".84rem", color:"rgba(240,232,208,0.85)" }}>
-                    月間総集客人数 <strong>{formatCustomerCountLabel_(monthlyAnalysis.customerCountSum)}</strong> / 月間ライブタイム人数 <strong>{formatCustomerCountLabel_(monthlyAnalysis.liveTimeCustomerCountSum)}</strong>
-                  </div>
-                  <div style={{ fontSize: ".84rem", color:"rgba(240,232,208,0.85)" }}>
-                    月間バータイム人数 <strong>{formatCustomerCountLabel_(monthlyAnalysis.barTimeCustomerCountSum)}</strong> / 1日平均集客 <strong>{monthlyAnalysis.avgDailyCustomerCount != null ? `${num(monthlyAnalysis.avgDailyCustomerCount)}名` : "—"}</strong> / バータイム比率 <strong>{pct(monthlyAnalysis.barTimeCustomerRate)}</strong>
-                  </div>
-                  <div style={{ fontSize: ".84rem", color:"rgba(240,232,208,0.85)" }}>
+                  <CustomerCountSummaryBlock
+                    narrow={vp.narrow}
+                    parentItems={[
+                      { label: "月間総集客人数", value: formatCustomerCountLabel_(monthlyAnalysis.customerCountSum) },
+                      {
+                        label: "1日平均集客",
+                        value: monthlyAnalysis.avgDailyCustomerCount != null ? `${num(monthlyAnalysis.avgDailyCustomerCount)}名` : "—",
+                      },
+                    ]}
+                    breakdownItems={[
+                      { label: "ライブタイム人数", value: formatCustomerCountLabel_(monthlyAnalysis.liveTimeCustomerCountSum) },
+                      { label: "バータイム人数", value: formatCustomerCountLabel_(monthlyAnalysis.barTimeCustomerCountSum) },
+                      { label: "バータイム比率", value: pct(monthlyAnalysis.barTimeCustomerRate) },
+                    ]}
+                  />
+                  <div style={{ fontSize: ".84rem", color:"rgba(240,232,208,0.85)", marginTop: ".35rem" }}>
                     客単価 <strong>{num(monthlyAnalysis.customerUnitPrice)}</strong> / 通常客単価 <strong>{num(monthlyAnalysis.normalCustomerUnitPrice)}</strong>
                   </div>
                   <div style={analysisNote()}>{BAR_TIME_UNIT_PRICE_NOTE}</div>
@@ -3571,11 +3661,23 @@ export default function SalesModule({ events = [], navigateBack }) {
                   <div>年間営業利益 <strong>{dy(yearlyAnalysis.yearlyOperatingProfit)}</strong></div>
                   <div>年間営業利益率 <strong>{pct(yearlyAnalysis.yearlyOperatingProfitRate)}</strong></div>
                   <div>年間飲食売上 <strong>{dy(yearlyAnalysis.yearlyFoodDrink)}</strong></div>
-                  <div>年間総集客人数 <strong>{formatCustomerCountLabel_(yearlyAnalysis.yearlyCustomerCount)}</strong></div>
-                  <div>年間ライブタイム人数 <strong>{formatCustomerCountLabel_(yearlyAnalysis.yearlyLiveTimeCustomerCount)}</strong></div>
-                  <div>年間バータイム人数 <strong>{formatCustomerCountLabel_(yearlyAnalysis.yearlyBarTimeCustomerCount)}</strong></div>
-                  <div>月平均集客 <strong>{yearlyAnalysis.monthlyAvgCustomerCount != null ? `${num(yearlyAnalysis.monthlyAvgCustomerCount)}名` : "—"}</strong></div>
-                  <div>年間バータイム比率 <strong>{pct(yearlyAnalysis.yearlyBarTimeCustomerRate)}</strong></div>
+                  <div style={{ gridColumn: vp.narrow ? "auto" : "1 / -1", minWidth: 0, maxWidth: "100%" }}>
+                    <CustomerCountSummaryBlock
+                      narrow={vp.narrow}
+                      parentItems={[
+                        { label: "年間総集客人数", value: formatCustomerCountLabel_(yearlyAnalysis.yearlyCustomerCount) },
+                        {
+                          label: "月平均集客",
+                          value: yearlyAnalysis.monthlyAvgCustomerCount != null ? `${num(yearlyAnalysis.monthlyAvgCustomerCount)}名` : "—",
+                        },
+                      ]}
+                      breakdownItems={[
+                        { label: "年間ライブタイム人数", value: formatCustomerCountLabel_(yearlyAnalysis.yearlyLiveTimeCustomerCount) },
+                        { label: "年間バータイム人数", value: formatCustomerCountLabel_(yearlyAnalysis.yearlyBarTimeCustomerCount) },
+                        { label: "年間バータイム比率", value: pct(yearlyAnalysis.yearlyBarTimeCustomerRate) },
+                      ]}
+                    />
+                  </div>
                   <div>年間客単価 <strong>{num(yearlyAnalysis.yearlyCustomerUnitPrice)}</strong></div>
                   <div>年間ドリンク <strong>{dy(yearlyAnalysis.yearlyDrink)}</strong></div>
                   <div>年間フード <strong>{dy(yearlyAnalysis.yearlyFood)}</strong></div>
@@ -3921,11 +4023,22 @@ export default function SalesModule({ events = [], navigateBack }) {
 
               <YearlyYoYBarChart rows={yearlyAnalysis.monthlyYoYRows} onMonthClick={navigateToMonthAnalysis} />
 
-              <div style={{ display: "grid", gridTemplateColumns: rGridCols(vp.narrow, 280), gap: ".65rem" }}>
-                <YearlyMonthBarChart title="月別売上推移" rows={yearlyAnalysis.monthRows} valueKey="totalSalesSum" barTone="linear-gradient(180deg, rgba(201,168,76,0.95), rgba(201,168,76,0.55))" taxMode={taxMode} onMonthClick={navigateToMonthAnalysis} />
-                <YearlyMonthBarChart title="月別目標達成率" rows={yearlyAnalysis.monthRows} valueKey="progressRate" barTone="linear-gradient(180deg, rgba(102,197,124,0.95), rgba(102,197,124,0.55))" formatTop={(r) => (r.progressRate != null ? pct(r.progressRate) : "—")} taxMode={taxMode} onMonthClick={navigateToMonthAnalysis} />
-                <YearlyMonthBarChart title="月別飲食売上" rows={yearlyAnalysis.monthRows} valueKey="foodDrinkSalesIncludingBandSum" barTone="linear-gradient(180deg, rgba(102,197,124,0.9), rgba(102,197,124,0.5))" taxMode={taxMode} onMonthClick={navigateToMonthAnalysis} />
-                <YearlyMonthBarChart title="月別営業利益" rows={yearlyAnalysis.monthRows} valueKey="operatingProfitSum" barTone="linear-gradient(180deg, rgba(126,200,126,0.95), rgba(126,200,126,0.55))" taxMode={taxMode} onMonthClick={navigateToMonthAnalysis} />
+              <div style={{ display: "grid", gridTemplateColumns: yearlyMonthChartGridCols_(vp.narrow), gap: ".75rem", width: "100%", maxWidth: "100%", minWidth: 0 }}>
+                <YearlyMonthBarChart tall title="月別売上推移" rows={yearlyAnalysis.monthRows} valueKey="totalSalesSum" barTone="linear-gradient(180deg, rgba(201,168,76,0.95), rgba(201,168,76,0.55))" taxMode={taxMode} onMonthClick={navigateToMonthAnalysis} />
+                <YearlyMonthBarChart tall title="月別目標達成率" rows={yearlyAnalysis.monthRows} valueKey="progressRate" barTone="linear-gradient(180deg, rgba(102,197,124,0.95), rgba(102,197,124,0.55))" formatTop={(r) => (r.progressRate != null ? pct(r.progressRate) : "—")} taxMode={taxMode} onMonthClick={navigateToMonthAnalysis} />
+                <YearlyMonthBarChart tall title="月別飲食売上" rows={yearlyAnalysis.monthRows} valueKey="foodDrinkSalesIncludingBandSum" barTone="linear-gradient(180deg, rgba(102,197,124,0.9), rgba(102,197,124,0.5))" taxMode={taxMode} onMonthClick={navigateToMonthAnalysis} />
+                <YearlyMonthBarChart tall title="月別営業利益" rows={yearlyAnalysis.monthRows} valueKey="operatingProfitSum" barTone="linear-gradient(180deg, rgba(126,200,126,0.95), rgba(126,200,126,0.55))" taxMode={taxMode} onMonthClick={navigateToMonthAnalysis} />
+                <YearlyMonthBarChart
+                  tall
+                  title="月別集客推移"
+                  rows={yearlyAnalysis.monthRows}
+                  valueKey="customerCountSum"
+                  barTone="linear-gradient(180deg, rgba(167,126,255,0.95), rgba(167,126,255,0.55))"
+                  formatTop={(r) =>
+                    r.status === "集計済み" && r.customerCountSum != null ? `${num(r.customerCountSum)}名` : "—"
+                  }
+                  onMonthClick={navigateToMonthAnalysis}
+                />
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: rGridCols(vp.narrow, 220), gap: ".65rem" }}>
