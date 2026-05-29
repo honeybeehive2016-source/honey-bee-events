@@ -1192,7 +1192,17 @@ const RENTAL_SALES_KEYS = ["hallRentalSales", "rentalSales", "hallRentalFee", "r
 const BAND_FOOD_DRINK_SALES_KEYS = ["bandFoodDrinkSales"];
 const BAND_DRINK_SALES_KEYS = ["bandDrinkSales", "bandMealDrinkSales", "bandDrink"];
 const BAND_FOOD_SALES_KEYS = ["bandFoodSales", "bandMealFoodSales", "bandFood", "bandMealSales"];
-const CUSTOMER_COUNT_KEYS = ["customerCount", "customers", "attendanceCount", "guestCount"];
+const CUSTOMER_COUNT_KEYS = [
+  "customerCount",
+  "guestCount",
+  "visitorCount",
+  "attendance",
+  "attendees",
+  "pax",
+  "headcount",
+  "customers",
+  "attendanceCount",
+];
 function bandFoodDrinkSalesFromMetrics_(metrics) {
   return pickMetricValue(metrics, BAND_FOOD_DRINK_SALES_KEYS);
 }
@@ -1203,10 +1213,10 @@ function foodDrinkSalesIncludingBand_(foodDrinkSales, bandFoodDrinkSales) {
   return base + band;
 }
 function unitPriceByCustomerCount_(amount, customerCount) {
-  const sales = amount != null ? Number(amount) : null;
-  const count = customerCount != null ? Number(customerCount) : null;
-  if (!Number.isFinite(sales) || !Number.isFinite(count) || !(count > 0)) return null;
-  return sales / count;
+  const a = amount != null ? Number(amount) : null;
+  const c = customerCount != null ? Number(customerCount) : null;
+  if (!Number.isFinite(a) || !Number.isFinite(c) || !(c > 0)) return null;
+  return Math.round(a / c);
 }
 function foodDrinkIncludingBandFromRecord_(record) {
   const m = record?.metrics;
