@@ -1769,13 +1769,22 @@ function DayAnalysisBlock({ analysis, taxMode, narrow, onSelectReferenceDay }) {
               </div>
             </div>
           ) : null}
-          {past.debugInfo?.seriesCategory || past.debugInfo?.compareKey ? (
+          {past.debugInfo?.selectedDate || past.debugInfo?.pastComparableCount != null ? (
             <div style={{ marginBottom: ".22rem", fontSize: ".58rem", color: "rgba(240,232,208,0.34)", lineHeight: 1.45 }}>
-              {past.debugInfo.resolveSource ? `判定元：${past.debugInfo.resolveSource}` : null}
-              {past.debugInfo.seriesCategory ? (
-                <span style={{ marginLeft: past.debugInfo.resolveSource ? ".45rem" : 0 }}>
-                  判定カテゴリ：{past.debugInfo.seriesCategory}
+              {past.debugInfo.selectedDate ? `選択日：${past.debugInfo.selectedDate}` : null}
+              {past.debugInfo.pastComparableCount != null ? (
+                <span style={{ marginLeft: past.debugInfo.selectedDate ? ".45rem" : 0 }}>
+                  過去比較対象：{num(past.debugInfo.pastComparableCount)}件
                 </span>
+              ) : null}
+              {past.debugInfo.excludedFutureCount > 0 ? (
+                <span style={{ marginLeft: ".45rem" }}>除外：未来日あり</span>
+              ) : null}
+              {past.debugInfo.resolveSource ? (
+                <span style={{ marginLeft: ".45rem" }}>判定元：{past.debugInfo.resolveSource}</span>
+              ) : null}
+              {past.debugInfo.seriesCategory ? (
+                <span style={{ marginLeft: ".45rem" }}>判定カテゴリ：{past.debugInfo.seriesCategory}</span>
               ) : null}
               {past.debugInfo.compareKey ? (
                 <span style={{ marginLeft: ".45rem" }}>比較キー：{past.debugInfo.compareKey}</span>
@@ -2909,17 +2918,46 @@ function averagePastComparableMetrics_(matches) {
     sampleCount: n,
   };
 }
+function parseSalesDateKey_(value) {
+  const raw = String(value || "").trim();
+  const m = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (!m) return null;
+  const dateKey = m[1];
+  const [year, month, day] = dateKey.split("-").map(Number);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const dt = new Date(year, month - 1, day);
+  if (dt.getFullYear() !== year || dt.getMonth() !== month - 1 || dt.getDate() !== day) return null;
+  return dateKey;
+}
+function isPastComparableDate_(candidateDate, selectedDate) {
+  const candidateKey = parseSalesDateKey_(candidateDate);
+  const selectedKey = parseSalesDateKey_(selectedDate);
+  if (!candidateKey || !selectedKey) return false;
+  return candidateKey < selectedKey;
+}
+function filterPastComparableMatches_(matches, selectedDate) {
+  const selectedKey = parseSalesDateKey_(selectedDate);
+  if (!selectedKey) return [];
+  return (matches || []).filter((row) => isPastComparableDate_(row?.businessDate, selectedKey));
+}
 function findPastSimilarMatches_(selected, pool) {
-  const candidates = (pool || []).filter((row) => row?.rowKey && row.rowKey !== selected?.rowKey);
+  const selectedDateKey = parseSalesDateKey_(selected?.businessDate);
+  const rawCandidates = (pool || []).filter((row) => row?.rowKey && row.rowKey !== selected?.rowKey);
+  const candidates = selectedDateKey
+    ? rawCandidates.filter((row) => isPastComparableDate_(row.businessDate, selectedDateKey))
+    : [];
+  const excludedFutureCount = selectedDateKey ? rawCandidates.length - candidates.length : rawCandidates.length;
+  const attachMeta = (info) => ({ ...info, selectedDateKey, excludedFutureCount });
   const selectedPerformText =
     selected?.eventPerformContentFull || selected?.performContentFull || selected?.eventPerformContent || selected?.performContent || "";
   const compareKey = primaryComparableEventNameNorm_(selected);
   const selectedSeries = resolveEventSeries_(selected);
   const resolveSource = buildEventSeriesNameText_(selected) ? "イベント名" : "出演・内容";
 
-  const exactMatches = candidates.filter((row) => eventNamesExactMatch_(selected, row));
+  const exactMatches = filterPastComparableMatches_(candidates.filter((row) => eventNamesExactMatch_(selected, row)), selectedDateKey);
   if (exactMatches.length) {
-    return {
+    return attachMeta({
       matchTypeLabel: "同じイベント名",
       matchKind: "exactName",
       seriesRule: null,
@@ -2928,15 +2966,18 @@ function findPastSimilarMatches_(selected, pool) {
       matchNote: hasNormalizedSpellingVariant_(selected, exactMatches) ? "表記ゆれを含めて比較しています" : null,
       resolveSource,
       seriesCategory: selectedSeries?.label || null,
-    };
+    });
   }
 
   if (selectedSeries) {
-    const matches = candidates.filter((row) => {
-      const series = resolveEventSeries_(row);
-      return series && series.id === selectedSeries.id;
-    });
-    return {
+    const matches = filterPastComparableMatches_(
+      candidates.filter((row) => {
+        const series = resolveEventSeries_(row);
+        return series && series.id === selectedSeries.id;
+      }),
+      selectedDateKey
+    );
+    return attachMeta({
       matchTypeLabel: selectedSeries.label,
       matchKind: "series",
       seriesRule: selectedSeries,
@@ -2945,19 +2986,22 @@ function findPastSimilarMatches_(selected, pool) {
       matchNote: null,
       resolveSource,
       seriesCategory: selectedSeries.label,
-    };
+    });
   }
 
   const performerTokens = extractPerformerTokens_(selectedPerformText);
   if (performerTokens.length === 1) {
-    const matches = candidates.filter((row) =>
-      performerTokensMatch_(
-        selectedPerformText,
-        row.eventPerformContentFull || row.performContentFull || row.eventPerformContent || row.performContent || ""
-      )
+    const matches = filterPastComparableMatches_(
+      candidates.filter((row) =>
+        performerTokensMatch_(
+          selectedPerformText,
+          row.eventPerformContentFull || row.performContentFull || row.eventPerformContent || row.performContent || ""
+        )
+      ),
+      selectedDateKey
     );
     if (matches.length) {
-      return {
+      return attachMeta({
         matchTypeLabel: "同じ出演者を含む実績（参考）",
         matchKind: "performerSingle",
         seriesRule: null,
@@ -2966,19 +3010,22 @@ function findPastSimilarMatches_(selected, pool) {
         matchNote: null,
         resolveSource,
         seriesCategory: null,
-      };
+      });
     }
   }
 
   if (performerTokens.length >= 2) {
-    const matches = candidates.filter((row) =>
-      performerComboMatch_(
-        selectedPerformText,
-        row.eventPerformContentFull || row.performContentFull || row.eventPerformContent || row.performContent || ""
-      )
+    const matches = filterPastComparableMatches_(
+      candidates.filter((row) =>
+        performerComboMatch_(
+          selectedPerformText,
+          row.eventPerformContentFull || row.performContentFull || row.eventPerformContent || row.performContent || ""
+        )
+      ),
+      selectedDateKey
     );
     if (matches.length) {
-      return {
+      return attachMeta({
         matchTypeLabel: "同じ出演者組み合わせ",
         matchKind: "performerCombo",
         seriesRule: null,
@@ -2987,14 +3034,17 @@ function findPastSimilarMatches_(selected, pool) {
         matchNote: null,
         resolveSource,
         seriesCategory: null,
-      };
+      });
     }
   }
 
   if (compareKey.length >= 3) {
-    const matches = candidates.filter((row) => eventNamesPartialMatch_(selected, row));
+    const matches = filterPastComparableMatches_(
+      candidates.filter((row) => eventNamesPartialMatch_(selected, row)),
+      selectedDateKey
+    );
     if (matches.length) {
-      return {
+      return attachMeta({
         matchTypeLabel: "イベント名の部分一致",
         matchKind: "partialName",
         seriesRule: null,
@@ -3003,11 +3053,20 @@ function findPastSimilarMatches_(selected, pool) {
         matchNote: hasNormalizedSpellingVariant_(selected, matches) ? "表記ゆれを含めて比較しています" : null,
         resolveSource,
         seriesCategory: null,
-      };
+      });
     }
   }
 
-  return { matchTypeLabel: null, matchKind: null, seriesRule: null, matches: [], compareKey, matchNote: null, resolveSource, seriesCategory: null };
+  return attachMeta({
+    matchTypeLabel: null,
+    matchKind: null,
+    seriesRule: null,
+    matches: [],
+    compareKey,
+    matchNote: null,
+    resolveSource,
+    seriesCategory: null,
+  });
 }
 function parseTrendRowKeyParts_(rowKey) {
   const m = String(rowKey || "").match(/^(\d{4}-\d{2}-\d{2})_(.+)_([^_]+)_(\d+)$/);
@@ -3077,11 +3136,15 @@ function buildPastSimilarComparisonComment_(selected, avg, matchInfo, options = 
     if (!pastMonthsDataLoaded) {
       return "同系イベントの過去実績がまだ取得できていません。過去の DISCO BAND などを比較対象に含めるには、対象年の月次データが読み込まれている必要があります。";
     }
-    return "読み込み済みデータ内に同系イベントの過去実績がありません。対象年の他月データを確認してください。";
+    return "選択日より前の同系実績がまだないため、今回は過去比較できません。今後の同系イベント実績を蓄積してください。";
+  }
+
+  if (matchKind === "exactName" && sampleCount === 0) {
+    return "選択日より前の同名イベント実績がまだないため、今回は過去比較できません。";
   }
 
   if (!sampleCount || !avg) {
-    return "比較できる過去実績が見つかりませんでした。同系イベントの実績が増えると、傾向比較がしやすくなります。";
+    return "選択日より前の比較実績が見つかりませんでした。同系イベントの実績が増えると、傾向比較がしやすくなります。";
   }
   if (matchKind === "series" && sampleCount < 2) {
     return "同系イベントの過去実績が少ないため、今回は参考比較です。今後のために、イベントカテゴリ別の実績を蓄積してください。";
@@ -3161,14 +3224,20 @@ function buildPastSimilarComparisonComment_(selected, avg, matchInfo, options = 
 function buildPastSimilarComparison_(selected, pool, taxMode, options = {}) {
   if (!selected) return null;
   const matchInfo = findPastSimilarMatches_(selected, pool);
-  const sampleCount = matchInfo.matches.length;
-  const avg = sampleCount > 0 ? averagePastComparableMetrics_(matchInfo.matches) : null;
-  const comment = buildPastSimilarComparisonComment_(selected, avg, matchInfo, options);
+  const selectedDateKey = parseSalesDateKey_(selected?.businessDate);
+  const pastMatches = filterPastComparableMatches_(matchInfo.matches, selectedDateKey);
+  const sampleCount = pastMatches.length;
+  const avg = sampleCount > 0 ? averagePastComparableMetrics_(pastMatches) : null;
+  const comment = buildPastSimilarComparisonComment_(selected, avg, { ...matchInfo, matches: pastMatches }, options);
+  const hasPastStatus =
+    sampleCount === 0 &&
+    (matchInfo.matchKind === "series" || matchInfo.matchKind === "exactName") &&
+    matchInfo.matchTypeLabel;
   return {
     matchTypeLabel: matchInfo.matchTypeLabel,
     matchKind: matchInfo.matchKind,
     sampleCount,
-    matches: matchInfo.matches.slice(0, 3),
+    matches: pastMatches.slice(0, 3),
     avg,
     comment,
     matchNote: matchInfo.matchNote || null,
@@ -3178,9 +3247,11 @@ function buildPastSimilarComparison_(selected, pool, taxMode, options = {}) {
       seriesCategory: matchInfo.seriesCategory || matchInfo.seriesRule?.label || null,
       compareKey: matchInfo.compareKey || null,
       matchType: matchInfo.matchKind || null,
+      selectedDate: selectedDateKey,
+      pastComparableCount: sampleCount,
+      excludedFutureCount: matchInfo.excludedFutureCount || 0,
     },
-    statusNote:
-      sampleCount > 0 ? null : matchInfo.matchKind === "series" ? "過去同系実績：未取得または該当なし" : null,
+    statusNote: hasPastStatus ? "過去同系実績：該当なし" : null,
     pastMonthsDataLoaded: !!options.pastMonthsDataLoaded,
     yearlyLoading: !!options.yearlyLoading,
     selected,
