@@ -781,53 +781,151 @@ function buildYearlyAlerts_(ctx) {
   }
   return alerts.slice(0, 5);
 }
-function buildMonthlyImprovementComments_(analysis, taxMode) {
-  const comments = [];
-  const a = analysis || {};
-  if (Number(a.fullMonthTargetSalesSum || 0) > 0) {
-    const remaining = Math.max(0, Number(a.fullMonthTargetSalesSum || 0) - Number(a.totalSalesSum || 0));
-    const rate = a.monthlyProgressRate;
-    if (rate != null && rate >= 100) {
-      comments.push(`売上は目標達成ペースです。月間進捗率 ${pct(rate)}`);
-    } else if (rate != null && rate >= 90) {
-      comments.push(`売上は目標まで ${formatDisplayYen(remaining, taxMode)}。月間進捗率 ${pct(rate)}`);
-    } else if (rate != null) {
-      comments.push(`売上は目標まで ${formatDisplayYen(remaining, taxMode)}。月間進捗率 ${pct(rate)}（未達リスク）`);
-    }
+function countUnderTargetCategories_(causeAnalysis) {
+  const counts = {};
+  for (const r of causeAnalysis || []) {
+    const cat = r?.category;
+    if (!cat || cat === "判定不可") continue;
+    counts[cat] = (counts[cat] || 0) + 1;
   }
+  return counts;
+}
+function pickProgressWeakSide_(causeAnalysis) {
+  const counts = countUnderTargetCategories_(causeAnalysis);
+  const customerWeak = (counts["集客不足型"] || 0) + (counts["集客・単価不足型"] || 0);
+  const unitWeak = (counts["単価不足型"] || 0) + (counts["集客・単価不足型"] || 0);
+  if (customerWeak > unitWeak) return "customer";
+  if (unitWeak > customerWeak) return "unit";
+  return "both";
+}
+function buildUnderTargetCauseAdvice_(causeAnalysis) {
+  const rows = (causeAnalysis || []).filter((r) => r?.category && r.category !== "判定不可");
+  if (rows.length === 0) return null;
+  const counts = countUnderTargetCategories_(causeAnalysis);
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const [topCat, topCount] = sorted[0] || [];
+  if (!topCat || !topCount) return null;
+  const shouldShow = topCount >= 2 || topCount >= Math.ceil(rows.length / 2);
+  if (!shouldShow) return null;
+  const messages = {
+    集客不足型:
+      "未達日は集客不足型が目立ちます。イベント前の告知頻度、予約確認、出演者との集客共有を強化してください。",
+    単価不足型:
+      "未達日は単価不足型が目立ちます。ドリンク追加、フード提案、セットメニューなど、来店後の注文導線を見直してください。",
+    "集客・単価不足型":
+      "未達日は集客・単価の両面で不足が目立ちます。告知・予約導線と来店後の追加注文導線をセットで見直してください。",
+    目標過大の可能性:
+      "未達の中には目標過大の可能性がある日もあります。過去同系イベントの実績を基準に、目標設定の妥当性を見直してください。",
+  };
+  return messages[topCat] || null;
+}
+function buildSalesProgressAdvice_(a, taxMode) {
+  if (!(Number(a.fullMonthTargetSalesSum || 0) > 0)) return null;
+  const remaining = Math.max(0, Number(a.fullMonthTargetSalesSum || 0) - Number(a.totalSalesSum || 0));
+  const rate = a.monthlyProgressRate;
+  const causeAnalysis = a.underTargetCauseAnalysis;
+  const weakSide = pickProgressWeakSide_(causeAnalysis);
+  const causeCounts = countUnderTargetCategories_(causeAnalysis);
+  const hasCustomerCause = (causeCounts["集客不足型"] || 0) + (causeCounts["集客・単価不足型"] || 0) > 0;
+  const hasUnitCause = (causeCounts["単価不足型"] || 0) + (causeCounts["集客・単価不足型"] || 0) > 0;
+
+  if (rate != null && rate >= 100) {
+    return "月間目標は達成済みです。次は売上を作った要因を確認し、集客人数・客単価・飲食売上のどれが伸びたかを来月のイベント設計に活かしてください。";
+  }
+  if (rate != null && rate >= 90) {
+    let action =
+      "残り営業日は集客数を落とさないことに加え、ドリンク追加やフード提案で客単価を少し上げると達成が現実的になります。";
+    if (weakSide === "customer") {
+      action =
+        "残り営業日は集客数を落とさないことが最優先です。直近イベントの事前告知と予約確認を強化してください。";
+    } else if (weakSide === "unit") {
+      action =
+        "残り営業日は集客を維持しつつ、ドリンク追加やフード提案で客単価を少し上げると達成が現実的になります。";
+    }
+    return `売上は目標まで ${formatDisplayYen(remaining, taxMode)} で、達成圏内です。${action}`;
+  }
+  if (rate != null) {
+    if (hasCustomerCause && !hasUnitCause) {
+      return `月間進捗率は ${pct(rate)} で未達リスクがあります。未達日は集客不足型が目立つため、告知・予約導線と出演者への集客共有を優先してください。`;
+    }
+    if (hasUnitCause && !hasCustomerCause) {
+      return `月間進捗率は ${pct(rate)} で未達リスクがあります。未達日は単価不足型が目立つため、フード提案と追加注文導線を優先してください。`;
+    }
+    return `月間進捗率は ${pct(rate)} で未達リスクがあります。未達日の傾向を確認し、集客不足型が多ければ告知・予約導線、単価不足型が多ければフード提案と追加注文導線を優先してください。`;
+  }
+  return null;
+}
+function buildYoyAdvice_(a) {
   const yoyRate = a.priorYearMonth?.prevMonthRate;
-  if (yoyRate != null) {
-    if (yoyRate >= 110) {
-      comments.push(`前年同月比は ${pct1(yoyRate)}。前年より売上は伸びています`);
-    } else if (yoyRate >= 90) {
-      comments.push(`前年同月比は ${pct1(yoyRate)}。前年並みのペースです`);
-    } else {
-      comments.push(`前年同月比は ${pct1(yoyRate)}。前年割れです`);
-    }
+  if (yoyRate == null) return null;
+  if (yoyRate >= 110) {
+    return `前年同月比は ${pct1(yoyRate)} と好調です。売上が伸びている一方で、集客増によるものか客単価上昇によるものかを分けて確認すると、再現しやすい成功パターンが見つかります。`;
   }
-  if (Number(a.customerCountSum || 0) > 0) {
-    const avgLabel = a.avgDailyCustomerCount != null ? `${num(a.avgDailyCustomerCount)}名` : "—";
-    comments.push(`月間総集客人数は ${num(a.customerCountSum)}名、1日平均集客は ${avgLabel}`);
+  if (yoyRate >= 90) {
+    return `前年同月比は ${pct1(yoyRate)} でほぼ横ばいです。売上維持はできていますが、集客人数・客単価・飲食比率のどれかを伸ばさないと大きな上振れは作りにくい状態です。`;
   }
-  if (a.barTimeCustomerRate != null) {
-    if (a.barTimeCustomerRate >= 10) {
-      comments.push(`バータイム比率は ${pct(a.barTimeCustomerRate)}。バータイム残留が良好です`);
-    } else if (a.barTimeCustomerRate < 5) {
-      comments.push(`バータイム比率は ${pct(a.barTimeCustomerRate)}。ライブ後の残留強化余地があります`);
-    } else {
-      comments.push(`バータイム比率は ${pct(a.barTimeCustomerRate)}`);
-    }
+  return "前年同月を下回っています。前年より集客が落ちているのか、客単価が落ちているのかを優先して確認し、弱い方に施策を寄せてください。";
+}
+function buildCustomerAdvice_(a) {
+  if (!(Number(a.customerCountSum || 0) > 0)) return null;
+  const avgLabel = a.avgDailyCustomerCount != null ? `${num(a.avgDailyCustomerCount)}名` : "—";
+  const base = `月間総集客人数は ${num(a.customerCountSum)}名、1日平均は ${avgLabel}です。`;
+  const progress = a.monthlyProgressRate;
+  const causeCounts = countUnderTargetCategories_(a.underTargetCauseAnalysis);
+  const customerCauseHeavy =
+    (causeCounts["集客不足型"] || 0) + (causeCounts["集客・単価不足型"] || 0) >= 2;
+  const unitPriceCarrying =
+    a.customerUnitPrice != null &&
+    a.normalCustomerUnitPrice != null &&
+    Number(a.customerUnitPrice) >= Number(a.normalCustomerUnitPrice);
+
+  if (progress != null && progress < 90) {
+    return `${base}売上進捗に対して集客が十分でない可能性があるため、イベント前の予約確認・SNS再告知・出演者への集客共有を強化してください。`;
   }
-  if (a.operatingGrossProfitRate != null) {
-    if (a.operatingGrossProfitRate >= 70) {
-      comments.push(`営業粗利率は ${pct1(a.operatingGrossProfitRate)}。粗利は良好です`);
-    } else if (a.operatingGrossProfitRate >= 60) {
-      comments.push(`営業粗利率は ${pct1(a.operatingGrossProfitRate)}。仕入れ・経費のバランスは要確認`);
-    } else {
-      comments.push(`営業粗利率は ${pct1(a.operatingGrossProfitRate)}。粗利率に注意が必要です`);
-    }
+  if (progress != null && progress >= 90 && (unitPriceCarrying || progress >= 100) && !customerCauseHeavy) {
+    return `${base}売上進捗は高めですが、客単価で補えている可能性があるため、高単価イベントの特徴を成功パターンとして確認してください。`;
   }
-  return comments.slice(0, 5);
+  if (customerCauseHeavy) {
+    return `${base}未達日の傾向から集客不足が見られるため、イベント前の予約確認・SNS再告知・出演者への集客共有を強化してください。`;
+  }
+  return `${base}集客と客単価のバランスを見ながら、未達日が出やすいイベントの事前準備を優先してください。`;
+}
+function buildBarTimeAdvice_(a) {
+  if (a.barTimeCustomerRate == null) return null;
+  const rate = a.barTimeCustomerRate;
+  if (rate < 5) {
+    return `バータイム比率は ${pct(rate)} と低めです。ライブ後にすぐ退店している可能性があるため、終演後の一杯、出演者との交流、軽いフード提案など、残る理由を作る施策を検討してください。`;
+  }
+  if (rate >= 10) {
+    return `バータイム比率は ${pct(rate)} と良好です。ライブ後に残る流れが作れている可能性があるため、該当イベントの終演時間・出演者導線・客層を成功パターンとして確認してください。`;
+  }
+  return `バータイム比率は ${pct(rate)} で中間的です。イベント内容によって差が出やすいので、残留率が高い日と低い日を比較し、終演後の導線を見直してください。`;
+}
+function buildGrossProfitAdvice_(a) {
+  if (a.operatingGrossProfitRate == null) return null;
+  const rate = a.operatingGrossProfitRate;
+  if (rate >= 70) {
+    return `営業粗利率は ${pct1(rate)} と良好です。売上に対して仕入れ・経費は抑えられていますが、飲食比率が高い日でも粗利が維持できているか確認すると、より安全です。`;
+  }
+  if (rate >= 60) {
+    return `営業粗利率は ${pct1(rate)} でやや注意です。仕入れ・経費が重い日がないか、フード売上に対してフード仕入れが上がりすぎていないかを確認してください。`;
+  }
+  return `営業粗利率は ${pct1(rate)} で注意が必要です。売上があっても手元に残りにくい状態のため、仕入れ・経費・値付け・ロスの確認を優先してください。`;
+}
+function buildMonthlyImprovementComments_(analysis, taxMode) {
+  const a = analysis || {};
+  const candidates = [
+    { priority: 0, text: buildUnderTargetCauseAdvice_(a.underTargetCauseAnalysis) },
+    { priority: 1, text: buildSalesProgressAdvice_(a, taxMode) },
+    { priority: 2, text: buildYoyAdvice_(a) },
+    { priority: 3, text: buildCustomerAdvice_(a) },
+    { priority: 4, text: buildBarTimeAdvice_(a) },
+    { priority: 5, text: buildGrossProfitAdvice_(a) },
+  ]
+    .filter((item) => item.text)
+    .sort((x, y) => x.priority - y.priority);
+
+  return candidates.slice(0, 5).map((item) => item.text);
 }
 function classifyUnderTargetDay_(ctx) {
   const customerCount = ctx.customerCount != null ? Number(ctx.customerCount) : null;
@@ -3382,23 +3480,35 @@ export default function SalesModule({ events = [], navigateBack }) {
           </div>
 
           <div style={analysisCardWrap("insight", vp.narrow)}>
-            <div style={analysisSecTitle("insight", ".5rem")}>月次改善コメント</div>
+            <div style={analysisSecTitle("insight", ".5rem")}>月次改善アドバイス</div>
             {monthlyImprovementComments.length === 0 ? (
-              <div style={{ fontSize: ".76rem", color: "rgba(240,232,208,0.5)" }}>コメントを生成するデータが不足しています</div>
+              <div style={{ fontSize: ".78rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.55 }}>
+                アドバイスを生成するデータが不足しています
+              </div>
             ) : (
               <ul
                 style={{
                   margin: 0,
-                  paddingLeft: "1.15rem",
+                  paddingLeft: "1.2rem",
                   display: "grid",
-                  gap: ".32rem",
-                  fontSize: vp.narrow ? ".8rem" : ".78rem",
-                  lineHeight: 1.55,
-                  color: "rgba(240,232,208,0.84)",
+                  gap: vp.narrow ? ".55rem" : ".5rem",
+                  fontSize: vp.narrow ? ".82rem" : ".8rem",
+                  lineHeight: 1.65,
+                  color: "rgba(240,232,208,0.86)",
                 }}
               >
                 {monthlyImprovementComments.map((line, i) => (
-                  <li key={`improvement_${i}`} style={{ wordBreak: "break-word" }}>
+                  <li
+                    key={`improvement_${i}`}
+                    style={{
+                      wordBreak: "break-word",
+                      paddingBottom: i < monthlyImprovementComments.length - 1 ? ".12rem" : 0,
+                      borderBottom:
+                        i < monthlyImprovementComments.length - 1
+                          ? `1px solid ${analysisRowBorder("insight")}`
+                          : "none",
+                    }}
+                  >
                     {line}
                   </li>
                 ))}
