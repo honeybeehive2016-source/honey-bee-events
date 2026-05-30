@@ -51,7 +51,14 @@ const EVENT_SERIES_RULES = [
   {
     id: "disco",
     label: "DISCO系イベント",
-    keywords: ["DISCO", "DISCO NIGHT", "HONEY BEE DISCO NIGHT", "DISCO BAND", "ディスコ"],
+    keywords: [
+      "DISCO",
+      "DISCO NIGHT",
+      "DISCO BAND",
+      "HONEY BEE DISCO NIGHT",
+      "HONEY BEE DISCO NIGHT 2026",
+      "ディスコ",
+    ],
   },
   {
     id: "anison",
@@ -1340,7 +1347,20 @@ function buildUnderTargetCauseAnalysis_(underTargetRows, averages, resolveName) 
     .sort((a, b) => Number(b.shortfall || 0) - Number(a.shortfall || 0))
     .slice(0, 5);
 }
-function buildSelectedDayAnalysis_(row, monthly, taxMode) {
+function compareMetricEval_(dayVal, avgVal, { lowRatio = 0.85, highRatio = 1.05 } = {}) {
+  if (dayVal == null || avgVal == null || !(Number(avgVal) > 0)) return "—";
+  const ratio = Number(dayVal) / Number(avgVal);
+  if (ratio < lowRatio) return "低め";
+  if (ratio >= highRatio) return "高め";
+  return "同水準";
+}
+function countRatioPhrase_(ratio) {
+  if (ratio < 0.55) return "月平均の約半分";
+  if (ratio < 0.85) return "月平均を下回る水準";
+  if (ratio >= 1.05) return "月平均を上回る水準";
+  return "月平均に近い水準";
+}
+function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison) {
   if (!row) return null;
   const targetSales = Number(row.targetSales || 0);
   const totalSales = Number(row.totalSales || 0);
@@ -1354,88 +1374,154 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode) {
   const avgFoodRate = monthly.avgFoodDrinkRate;
   const dayBarRate = row.barTimeCustomerRate;
   const avgBarRate = monthly.barTimeCustomerRate;
+  const barTimeCount = row.barTimeCustomerCount != null ? Number(row.barTimeCustomerCount) : null;
+  const isAchieved = targetSales > 0 && achievementRate != null && achievementRate >= 100;
+  const countLow = customerCount != null && avgCount != null && avgCount > 0 && customerCount < avgCount * 0.85;
+  const countHigh = customerCount != null && avgCount != null && avgCount > 0 && customerCount >= avgCount * 1.05;
+  const unitLow = dayUnitPrice != null && avgUnit != null && avgUnit > 0 && dayUnitPrice < avgUnit * 0.9;
+  const unitHigh = dayUnitPrice != null && avgUnit != null && avgUnit > 0 && dayUnitPrice >= avgUnit * 1.05;
+  const foodHigh = dayFoodRate != null && avgFoodRate != null && dayFoodRate >= avgFoodRate + 3;
+  const foodLow = dayFoodRate != null && avgFoodRate != null && dayFoodRate <= avgFoodRate - 3;
+  const barLow =
+    dayBarRate != null &&
+    (barTimeCount === 0 || (avgBarRate != null && dayBarRate < Math.max(5, avgBarRate * 0.7)));
+  const countRatio = customerCount != null && avgCount != null && avgCount > 0 ? customerCount / avgCount : null;
+  const seriesLabel =
+    pastSimilarComparison?.matchKind === "series"
+      ? pastSimilarComparison.matchTypeLabel
+      : resolveEventSeries_({
+          sheetEventName: row.eventName,
+          eventName: row.eventName,
+          eventPerformContentFull: row.eventPerformContentFull,
+          performContentFull: row.eventPerformContentFull,
+        })?.label || "同系イベント";
+  const pastAvg = pastSimilarComparison?.avg;
+  const pastCount = pastSimilarComparison?.sampleCount || 0;
+  const pastCustomerDiff =
+    pastAvg?.customerCount != null && customerCount != null
+      ? customerCount - Number(pastAvg.customerCount)
+      : null;
+  const pastUnitDiff =
+    pastAvg?.customerUnitPrice != null && dayUnitPrice != null
+      ? dayUnitPrice - Number(pastAvg.customerUnitPrice)
+      : null;
 
-  let achievementStatus = "目標データがありません。";
-  if (targetSales > 0) {
-    if (achievementRate != null && achievementRate >= 100) {
-      achievementStatus = `目標を達成しています。達成率は ${pct(achievementRate)} です。`;
-    } else {
-      achievementStatus = `目標に対して ${formatDisplayYen(shortfall, taxMode)} 不足しています。達成率は ${pct(achievementRate)} です。`;
+  const conclusionParts = [];
+  if (isAchieved) {
+    conclusionParts.push(`この日は目標を達成しています（達成率 ${pct(achievementRate)}）。`);
+    const drivers = [];
+    if (countHigh) drivers.push("集客");
+    if (unitHigh) drivers.push("客単価");
+    if (foodHigh) drivers.push("飲食比率");
+    if (dayBarRate != null && avgBarRate != null && dayBarRate >= Math.max(10, avgBarRate + 2)) {
+      drivers.push("バータイム");
     }
+    if (drivers.length) {
+      conclusionParts.push(`${drivers.join("・")}が月平均より高く、達成の要因になった可能性があります。`);
+    } else {
+      conclusionParts.push("売上構成は月平均に近く、総合的な底上げで達成した可能性があります。");
+    }
+    if (pastCount > 0 && pastCustomerDiff != null && pastUnitDiff != null) {
+      if (pastCustomerDiff >= 0 && pastUnitDiff >= 0) {
+        conclusionParts.push(`${seriesLabel}の過去平均より集客・客単価ともに高く、同系イベントとして好調な日でした。`);
+      } else if (pastUnitDiff >= 0) {
+        conclusionParts.push(`${seriesLabel}の過去平均より客単価は高く、来店後の売上化が達成に効いています。`);
+      }
+    }
+  } else if (targetSales > 0) {
+    if (countLow && unitLow) {
+      conclusionParts.push(
+        `この日は集客人数と客単価の両方が月平均を下回り、未達の主因は集客と来店後売上の両面です（達成率 ${pct(achievementRate)}）。`
+      );
+    } else if (countLow) {
+      conclusionParts.push(
+        `この日は集客人数が${countRatio != null ? countRatioPhrase_(countRatio) : "月平均を下回る水準"}で、未達の主因は集客です（達成率 ${pct(achievementRate)} / 不足 ${formatDisplayYen(shortfall, taxMode)}）。`
+      );
+      if (unitHigh || foodHigh) {
+        conclusionParts.push("一方で客単価と飲食比率は高く、来店したお客様からの売上化は悪くありません。");
+      }
+    } else if (unitLow) {
+      conclusionParts.push(
+        `この日は集客は確保できている一方、客単価が月平均を下回り、未達の主因は来店後の売上化です（達成率 ${pct(achievementRate)}）。`
+      );
+    } else {
+      conclusionParts.push(
+        `この日は目標 ${formatDisplayYen(targetSales, taxMode)} に対し ${formatDisplayYen(totalSales, taxMode)} で、達成率 ${pct(achievementRate)} です。`
+      );
+    }
+    if (pastCount > 0) {
+      if (pastCustomerDiff != null && pastCustomerDiff < -1 && pastUnitDiff != null && pastUnitDiff >= 0) {
+        conclusionParts.push(`${seriesLabel}の過去平均より集客は低いが客単価は高く、今回は来店後の売上化で補っている傾向です。`);
+      } else if (pastCustomerDiff != null && pastCustomerDiff < -1) {
+        conclusionParts.push(`${seriesLabel}の過去平均より売上・集客とも低く、告知時期や固定客への案内が課題です。`);
+      } else if (pastUnitDiff != null && pastUnitDiff >= 100) {
+        conclusionParts.push(`${seriesLabel}の過去平均より客単価が高く、飲食提案や滞在導線は機能している可能性があります。`);
+      }
+    }
+  } else {
+    conclusionParts.push("目標データがないため、月平均との比較を中心に確認してください。");
   }
 
-  let customerEval = "集客人数データがありません。";
-  if (customerCount != null && avgCount != null && avgCount > 0) {
-    if (customerCount < avgCount * 0.85) {
-      customerEval = "集客人数が月平均を大きく下回っています。来店前の告知・予約導線が主な課題です。";
-    } else if (customerCount >= avgCount * 1.05) {
-      customerEval = "集客人数は月平均を上回っています。集客面は好調です。";
-    } else {
-      customerEval = "集客人数は月平均に近い水準です。";
+  let nextSeriesMemo = `次回の${seriesLabel}では、達成日の告知・出演者構成・来店後導線を記録し、再現ポイントとして残してください。`;
+  if (isAchieved) {
+    const replicate = [];
+    if (countHigh) replicate.push("集客が取れた告知開始時期と出演者構成");
+    if (unitHigh || foodHigh) replicate.push("来店後の飲食提案・滞在導線");
+    if (!barLow && dayBarRate != null && avgBarRate != null && dayBarRate >= avgBarRate) {
+      replicate.push("終演後のバータイム導線");
     }
-  }
-
-  let unitPriceEval = "客単価データがありません。";
-  if (dayUnitPrice != null && avgUnit != null && avgUnit > 0) {
-    if (dayUnitPrice < avgUnit * 0.9) {
-      unitPriceEval = "客単価が月平均より低めです。来店後の追加注文導線が課題です。";
-    } else if (dayUnitPrice >= avgUnit * 1.05) {
-      unitPriceEval = "客単価は月平均を上回っています。来店後の購買力は好調です。";
-    } else {
-      unitPriceEval = "客単価は月平均に近いため、来店後の購買力は大きく崩れていません。";
+    nextSeriesMemo = `次回の${seriesLabel}では、${replicate.length ? replicate.join("・") : "今回のイベント設計"}を再現してください。`;
+    if (pastCount > 0 && pastCustomerDiff != null && pastCustomerDiff >= 0) {
+      nextSeriesMemo += " 過去平均を上回る集客要因（告知・固定客案内）をテンプレ化すると再現しやすくなります。";
     }
-  }
-
-  let foodDrinkEval = "飲食比率データがありません。";
-  if (dayFoodRate != null && avgFoodRate != null) {
-    if (dayFoodRate >= avgFoodRate + 3) {
-      foodDrinkEval = "飲食比率は月平均より高めです。来店したお客様からの飲食売上は比較的取れています。";
-    } else if (dayFoodRate <= avgFoodRate - 3) {
-      foodDrinkEval = "飲食比率は月平均より低めです。飲食メニュー提案やセット導線に改善余地があります。";
-    } else {
-      foodDrinkEval = "飲食比率は月平均に近い水準です。";
-    }
-  }
-
-  let barTimeEval = "バータイムデータがありません。";
-  if (dayBarRate != null && avgBarRate != null) {
-    if (dayBarRate >= Math.max(10, avgBarRate + 2)) {
-      barTimeEval = "バータイム比率は月平均より高めです。終演後の滞在導線が機能している可能性があります。";
-    } else if (dayBarRate < Math.max(5, avgBarRate * 0.7)) {
-      barTimeEval = "バータイム人数が少ないため、終演後の滞在導線には改善余地があります。";
-    } else {
-      barTimeEval = "バータイム比率は月平均に近い水準です。";
-    }
-  }
-
-  const countLow = customerCount != null && avgCount != null && customerCount < avgCount * 0.85;
-  const countOk = customerCount != null && avgCount != null && customerCount >= avgCount * 0.85;
-  const unitLow = dayUnitPrice != null && avgUnit != null && dayUnitPrice < avgUnit * 0.9;
-  let improvementMemo = "次回同系イベントでは、達成日のイベント構成を参考に改善点を整理してください。";
-  if (countLow && unitLow) {
-    improvementMemo =
-      "この日は集客・客単価の両面が課題です。次回同系イベントでは、事前告知と来店後の注文導線をセットで見直してください。";
   } else if (countLow && !unitLow) {
-    improvementMemo =
-      "この日は単価より集客が課題です。次回同系イベントでは、事前告知・出演者との集客共有・予約確認を早めに設計してください。";
-  } else if (countOk && unitLow) {
-    improvementMemo =
-      "この日は集客より客単価が課題です。次回同系イベントでは、フード提案・追加ドリンク・セットメニューの導線を強化してください。";
-  } else if (targetSales > 0 && achievementRate != null && achievementRate >= 70 && totalSales >= (monthly.avgDailySales || 0) * 0.85) {
-    improvementMemo =
-      "売上は月平均に近い一方で目標未達です。次回同系イベントでは、過去実績を基準に目標設定の妥当性を確認してください。";
-  } else if (achievementRate != null && achievementRate >= 100) {
-    improvementMemo =
-      "目標達成日です。集客・客単価・飲食・バータイムのどれが効いたかを記録し、同系イベントに横展開してください。";
+    nextSeriesMemo = `次回の${seriesLabel}では、過去に集客が強かった日の出演者構成・告知開始時期・固定客への案内方法を確認してください。`;
+    if (unitHigh || foodHigh) {
+      nextSeriesMemo += " 今回のように客単価は取れているため、まずは来場人数の底上げを優先するのが効果的です。";
+    } else {
+      nextSeriesMemo += " 単価施策よりも事前告知と来場導線の強化を先に設計してください。";
+    }
+  } else if (countLow && unitLow) {
+    nextSeriesMemo = `次回の${seriesLabel}では、告知開始時期・出演者構成・固定客への案内に加え、来店後のフード・ドリンク提案もセットで見直してください。`;
+  } else if (unitLow && !countLow) {
+    nextSeriesMemo = `次回の${seriesLabel}では、集客は確保できているため、セットメニュー・追加ドリンク・フード提案の導線を強化してください。`;
+  } else if (pastCount > 0 && pastCustomerDiff != null && pastCustomerDiff < -1) {
+    nextSeriesMemo = `次回の${seriesLabel}では、過去平均の集客水準を基準に告知設計を見直してください。客単価が取れている日は来場人数の底上げを優先してください。`;
   }
+
+  const metricRows = [
+    {
+      label: "集客",
+      day: customerCount != null ? `${num(customerCount)}名` : "—",
+      avg: avgCount != null ? `${num(Math.round(avgCount * 10) / 10)}名` : "—",
+      eval: compareMetricEval_(customerCount, avgCount),
+    },
+    {
+      label: "客単価",
+      day: dayUnitPrice != null ? formatDisplayYen(dayUnitPrice, taxMode) : "—",
+      avg: avgUnit != null ? formatDisplayYen(avgUnit, taxMode) : "—",
+      eval: compareMetricEval_(dayUnitPrice, avgUnit),
+    },
+    {
+      label: "飲食比率",
+      day: dayFoodRate != null ? pct(dayFoodRate) : "—",
+      avg: avgFoodRate != null ? pct(avgFoodRate) : "—",
+      eval: foodHigh ? "高め" : foodLow ? "低め" : dayFoodRate != null && avgFoodRate != null ? "同水準" : "—",
+    },
+    {
+      label: "バータイム比率",
+      day: dayBarRate != null ? pct(dayBarRate) : "—",
+      avg: avgBarRate != null ? pct(avgBarRate) : "—",
+      eval: barLow ? "低め" : compareMetricEval_(dayBarRate, avgBarRate, { lowRatio: 0.7, highRatio: 1.1 }),
+    },
+  ];
 
   return {
-    achievementStatus,
-    customerEval,
-    unitPriceEval,
-    foodDrinkEval,
-    barTimeEval,
-    improvementMemo,
+    conclusion: conclusionParts.join(" "),
+    metricRows,
+    nextSeriesMemo,
+    pastSimilarComparison,
+    isAchieved,
     comparisons: {
       customerCount,
       avgDailyCustomerCount: avgCount,
@@ -1450,69 +1536,121 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode) {
 }
 function DayAnalysisBlock({ analysis, taxMode, narrow }) {
   if (!analysis) return null;
-  const c = analysis.comparisons || {};
+  const past = analysis.pastSimilarComparison;
   const fmtCount = (v) => (v != null ? `${num(v)}名` : "—");
   const fmtUnit = (v) => (v != null ? formatDisplayYen(v, taxMode) : "—");
   const fmtRate = (v) => (v != null ? pct(v) : "—");
-  const compareRows = [
-    { label: "集客", day: fmtCount(c.customerCount), avg: fmtCount(c.avgDailyCustomerCount) },
-    { label: "客単価", day: fmtUnit(c.dayUnitPrice), avg: fmtUnit(c.avgUnitPrice) },
-    { label: "飲食比率", day: fmtRate(c.dayFoodRate), avg: fmtRate(c.avgFoodRate) },
-    { label: "バータイム比率", day: fmtRate(c.dayBarRate), avg: fmtRate(c.avgBarRate) },
-  ];
-  const evalRows = [
-    { label: "達成状況", text: analysis.achievementStatus },
-    { label: "集客評価", text: analysis.customerEval },
-    { label: "客単価評価", text: analysis.unitPriceEval },
-    { label: "飲食評価", text: analysis.foodDrinkEval },
-    { label: "バータイム評価", text: analysis.barTimeEval },
-    { label: "改善メモ", text: analysis.improvementMemo },
-  ];
+  const pastCompareRows =
+    past?.sampleCount > 0
+      ? [
+          { label: "売上", day: fmtUnit(past.comparisons?.sales?.day), avg: fmtUnit(past.comparisons?.sales?.avg) },
+          { label: "集客", day: fmtCount(past.comparisons?.customerCount?.day), avg: fmtCount(past.comparisons?.customerCount?.avg) },
+          { label: "客単価", day: fmtUnit(past.comparisons?.customerUnitPrice?.day), avg: fmtUnit(past.comparisons?.customerUnitPrice?.avg) },
+          { label: "飲食比率", day: fmtRate(past.comparisons?.foodDrinkRate?.day), avg: fmtRate(past.comparisons?.foodDrinkRate?.avg) },
+        ]
+      : [];
+  const sectionCardStyle = {
+    padding: ".45rem .55rem",
+    borderRadius: 5,
+    border: "1px solid rgba(201,168,76,0.16)",
+    background: "rgba(0,0,0,0.14)",
+  };
   return (
     <div style={{ marginBottom: ".55rem" }}>
       <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>
         この日の分析
       </div>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: narrow ? "1fr" : "repeat(2, minmax(0, 1fr))",
-          gap: narrow ? ".28rem" : ".22rem .65rem",
-          marginBottom: ".42rem",
-          padding: ".45rem .55rem",
-          borderRadius: 5,
-          border: "1px solid rgba(201,168,76,0.16)",
-          background: "rgba(0,0,0,0.14)",
-          fontSize: narrow ? ".8rem" : ".76rem",
-          lineHeight: 1.5,
-          color: "rgba(240,232,208,0.82)",
-        }}
-      >
-        {compareRows.map((r) => (
-          <div key={r.label} style={{ wordBreak: "break-word" }}>
-            {r.label} {r.day} / 月平均 {r.avg}
-          </div>
-        ))}
+
+      <div style={{ ...sectionCardStyle, marginBottom: ".38rem", borderColor: "rgba(201,168,76,0.28)", background: "rgba(201,168,76,0.06)" }}>
+        <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.88)", marginBottom: ".18rem", fontWeight: 600 }}>
+          A. この日の結論
+        </div>
+        <div style={{ fontSize: narrow ? ".84rem" : ".8rem", lineHeight: 1.65, color: "rgba(240,232,208,0.92)", wordBreak: "break-word" }}>
+          {analysis.conclusion}
+        </div>
       </div>
-      <div style={{ display: "grid", gap: ".32rem" }}>
-        {evalRows.map((r) => (
-          <div
-            key={r.label}
-            style={{
-              padding: ".38rem .5rem",
-              borderRadius: 4,
-              border: `1px solid ${analysisRowBorder("dayReport")}`,
-              background: "rgba(0,0,0,0.12)",
-            }}
-          >
-            <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.82)", marginBottom: ".12rem", fontWeight: 600 }}>
-              {r.label}
+
+      <div style={{ ...sectionCardStyle, marginBottom: ".38rem" }}>
+        <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.82)", marginBottom: ".22rem", fontWeight: 600 }}>
+          B. 数字の比較
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: narrow ? "1fr" : "repeat(2, minmax(0, 1fr))",
+            gap: narrow ? ".22rem" : ".16rem .55rem",
+            fontSize: narrow ? ".8rem" : ".76rem",
+            lineHeight: 1.5,
+            color: "rgba(240,232,208,0.82)",
+          }}
+        >
+          {(analysis.metricRows || []).map((row) => (
+            <div key={row.label} style={{ wordBreak: "break-word" }}>
+              {row.label} {row.day} / 月平均 {row.avg}
+              <span style={{ marginLeft: ".35rem", color: "rgba(201,168,76,0.75)" }}>({row.eval})</span>
             </div>
-            <div style={{ fontSize: narrow ? ".8rem" : ".76rem", lineHeight: 1.55, color: "rgba(240,232,208,0.84)", wordBreak: "break-word" }}>
-              {r.text}
-            </div>
+          ))}
+        </div>
+      </div>
+
+      {past ? (
+        <div style={{ ...sectionCardStyle, marginBottom: ".38rem" }}>
+          <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.82)", marginBottom: ".22rem", fontWeight: 600 }}>
+            C. 過去同系実績との比較
           </div>
-        ))}
+          <div style={{ fontSize: narrow ? ".78rem" : ".76rem", color: "rgba(201,168,76,0.88)", marginBottom: ".22rem", fontWeight: 600 }}>
+            比較タイプ：{past.matchTypeLabel || "—"}
+            {past.sampleCount > 0 ? (
+              <span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.55)", fontWeight: 400 }}>
+                （{num(past.sampleCount)}件）
+              </span>
+            ) : null}
+          </div>
+          {past.sampleCount === 0 && past.statusNote ? (
+            <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)", marginBottom: ".28rem" }}>
+              {past.statusNote}
+            </div>
+          ) : null}
+          {pastCompareRows.length > 0 ? (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: narrow ? "1fr" : "repeat(2, minmax(0, 1fr))",
+                gap: narrow ? ".22rem" : ".16rem .55rem",
+                marginBottom: ".32rem",
+                fontSize: narrow ? ".8rem" : ".76rem",
+                lineHeight: 1.5,
+                color: "rgba(240,232,208,0.82)",
+              }}
+            >
+              {pastCompareRows.map((row) => (
+                <div key={row.label} style={{ wordBreak: "break-word" }}>
+                  {row.label} {row.day} / 平均 {row.avg}
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {past.matches?.length > 0 ? (
+            <div style={{ marginBottom: ".28rem", fontSize: ".7rem", color: "rgba(240,232,208,0.52)", lineHeight: 1.45 }}>
+              参考実績：
+              {past.matches
+                .map((row) => `${(row.businessDate || "").slice(5).replace("-", "/")} ${row.eventName || row.sheetEventName || "—"}`)
+                .join(" / ")}
+            </div>
+          ) : null}
+          <div style={{ fontSize: narrow ? ".8rem" : ".76rem", lineHeight: 1.6, color: "rgba(240,232,208,0.84)", wordBreak: "break-word" }}>
+            {past.comment}
+          </div>
+        </div>
+      ) : null}
+
+      <div style={{ ...sectionCardStyle, borderColor: "rgba(201,168,76,0.22)", background: "rgba(0,0,0,0.18)" }}>
+        <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.88)", marginBottom: ".14rem", fontWeight: 600 }}>
+          D. 次回同系イベントへのメモ
+        </div>
+        <div style={{ fontSize: narrow ? ".8rem" : ".76rem", lineHeight: 1.6, color: "rgba(240,232,208,0.86)", wordBreak: "break-word" }}>
+          {analysis.nextSeriesMemo}
+        </div>
       </div>
     </div>
   );
@@ -1545,73 +1683,6 @@ function UnderTargetCauseEvidence({ row, taxMode, narrow }) {
             {r.avg != null ? ` / 月平均 ${r.avg}` : ""}
           </div>
         ))}
-      </div>
-    </div>
-  );
-}
-function PastSimilarComparisonBlock({ comparison, taxMode, narrow }) {
-  if (!comparison) return null;
-  const fmtCount = (v) => (v != null ? `${num(v)}名` : "—");
-  const fmtUnit = (v) => (v != null ? formatDisplayYen(v, taxMode) : "—");
-  const fmtRate = (v) => (v != null ? pct(v) : "—");
-  const c = comparison.comparisons || {};
-  const compareRows = [
-    { label: "売上", day: fmtUnit(c.sales?.day), avg: fmtUnit(c.sales?.avg) },
-    { label: "集客", day: fmtCount(c.customerCount?.day), avg: fmtCount(c.customerCount?.avg) },
-    { label: "客単価", day: fmtUnit(c.customerUnitPrice?.day), avg: fmtUnit(c.customerUnitPrice?.avg) },
-    { label: "飲食比率", day: fmtRate(c.foodDrinkRate?.day), avg: fmtRate(c.foodDrinkRate?.avg) },
-  ];
-  return (
-    <div style={{ marginBottom: ".55rem" }}>
-      <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>
-        過去同系実績との比較
-      </div>
-      <div
-        style={{
-          padding: ".45rem .55rem",
-          borderRadius: 5,
-          border: "1px solid rgba(201,168,76,0.16)",
-          background: "rgba(0,0,0,0.14)",
-        }}
-      >
-        <div style={{ fontSize: narrow ? ".78rem" : ".76rem", color: "rgba(201,168,76,0.88)", marginBottom: ".28rem", fontWeight: 600 }}>
-          比較タイプ：{comparison.matchTypeLabel || "—"}
-          {comparison.sampleCount > 0 ? (
-            <span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.55)", fontWeight: 400 }}>
-              （{num(comparison.sampleCount)}件）
-            </span>
-          ) : null}
-        </div>
-        {comparison.sampleCount > 0 ? (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: narrow ? "1fr" : "repeat(2, minmax(0, 1fr))",
-              gap: narrow ? ".22rem" : ".18rem .55rem",
-              marginBottom: ".38rem",
-              fontSize: narrow ? ".8rem" : ".76rem",
-              lineHeight: 1.5,
-              color: "rgba(240,232,208,0.82)",
-            }}
-          >
-            {compareRows.map((row) => (
-              <div key={row.label} style={{ wordBreak: "break-word" }}>
-                {row.label} {row.day} / 平均 {row.avg}
-              </div>
-            ))}
-          </div>
-        ) : null}
-        {comparison.matches?.length > 0 ? (
-          <div style={{ marginBottom: ".32rem", fontSize: ".7rem", color: "rgba(240,232,208,0.52)", lineHeight: 1.45 }}>
-            参考実績：
-            {comparison.matches
-              .map((row) => `${(row.businessDate || "").slice(5).replace("-", "/")} ${row.eventName || "—"}`)
-              .join(" / ")}
-          </div>
-        ) : null}
-        <div style={{ fontSize: narrow ? ".8rem" : ".76rem", lineHeight: 1.6, color: "rgba(240,232,208,0.84)", wordBreak: "break-word" }}>
-          {comparison.comment}
-        </div>
       </div>
     </div>
   );
@@ -2460,11 +2531,14 @@ function matchEventSeries_(text, rule) {
 }
 function buildEventSeriesSearchText_(info) {
   const event = info?.event || null;
+  const sheetName = String(info?.sheetEventName || info?.record?.sheetEventName || "").trim();
+  const resolvedName = String(info?.eventName || "").trim();
   return [
-    info?.sheetEventName,
-    info?.eventName,
+    sheetName,
+    resolvedName,
     event?.name,
     event?.perf,
+    event?.performers,
     event?.desc,
     event?.description,
     info?.performContent,
@@ -2517,7 +2591,8 @@ function recordToPastComparableDay_(record, events) {
   const matchedEvent = matchEventForRecord(record, eventsForDate(events, record.businessDate));
   const performRaw = formatEventPerformContent(matchedEvent);
   const performFormatted = formatPerformDisplay(performRaw);
-  const eventName = resolveEventNameForAdmin(record, record.resolvedEventNames) || String(record?.sheetEventName || "").trim();
+  const sheetName = String(record?.sheetEventName || "").trim();
+  const eventName = resolveEventNameForAdmin(record, record.resolvedEventNames) || sheetName;
   const totalSales = Number(record?.metrics?.totalSales || 0);
   const customerCount = pickMetricNullable(record?.metrics, CUSTOMER_COUNT_KEYS);
   const bandFoodDrinkSales = pickMetricNullable(record?.metrics, BAND_FOOD_DRINK_SALES_KEYS);
@@ -2527,7 +2602,7 @@ function recordToPastComparableDay_(record, events) {
   return {
     rowKey: `${record.businessDate}_${record.sourceBlock}_${record.sourceColumn}_${idx}`,
     businessDate: record.businessDate,
-    sheetEventName: record?.sheetEventName || "",
+    sheetEventName: sheetName,
     eventName,
     event: matchedEvent,
     performContent: performFormatted.display,
@@ -2619,14 +2694,12 @@ function findPastSimilarMatches_(selected, pool) {
       const series = resolveEventSeries_(row);
       return series && series.id === selectedSeries.id;
     });
-    if (matches.length) {
-      return {
-        matchTypeLabel: selectedSeries.label,
-        matchKind: "series",
-        seriesRule: selectedSeries,
-        matches,
-      };
-    }
+    return {
+      matchTypeLabel: selectedSeries.label,
+      matchKind: "series",
+      seriesRule: selectedSeries,
+      matches,
+    };
   }
 
   if (selectedName) {
@@ -2673,9 +2746,22 @@ function findPastSimilarMatches_(selected, pool) {
 
   return { matchTypeLabel: null, matchKind: null, seriesRule: null, matches: [] };
 }
-function buildPastSimilarComparisonComment_(selected, avg, matchInfo) {
+function buildPastSimilarComparisonComment_(selected, avg, matchInfo, options = {}) {
+  const { pastMonthsDataLoaded = false, yearlyLoading = false } = options;
   const { matchTypeLabel, matchKind, seriesRule, matches } = matchInfo || {};
   const sampleCount = matches?.length || 0;
+  const seriesLabel = seriesRule?.label || matchTypeLabel || "同系イベント";
+
+  if (matchKind === "series" && sampleCount === 0) {
+    if (yearlyLoading && !pastMonthsDataLoaded) {
+      return "対象年の過去月データを読み込み中です。完了後に同系イベントの比較が表示されます。";
+    }
+    if (!pastMonthsDataLoaded) {
+      return "同系イベントの過去実績がまだ取得できていません。過去の DISCO BAND などを比較対象に含めるには、対象年の月次データが読み込まれている必要があります。";
+    }
+    return "読み込み済みデータ内に同系イベントの過去実績がありません。対象年の他月データを確認してください。";
+  }
+
   if (!sampleCount || !avg) {
     return "比較できる過去実績が見つかりませんでした。同系イベントの実績が増えると、傾向比較がしやすくなります。";
   }
@@ -2683,7 +2769,6 @@ function buildPastSimilarComparisonComment_(selected, avg, matchInfo) {
     return "同系イベントの過去実績が少ないため、今回は参考比較です。今後のために、イベントカテゴリ別の実績を蓄積してください。";
   }
 
-  const seriesLabel = seriesRule?.label || matchTypeLabel || "過去実績";
   const salesDiff = Number(selected.totalSales || 0) - Number(avg.totalSales || 0);
   const customerDiff =
     selected.customerCount != null && avg.customerCount != null
@@ -2695,17 +2780,20 @@ function buildPastSimilarComparisonComment_(selected, avg, matchInfo) {
       : null;
 
   if (matchKind === "series") {
+    if (customerDiff != null && customerDiff < -1 && unitDiff != null && unitDiff >= 0) {
+      return `${seriesLabel}の過去平均より集客が低い一方、客単価は高めです。今回はイベント集客よりも、来店後の売上化で補っている可能性があります。`;
+    }
+    if (salesDiff < 0 && customerDiff != null && customerDiff < -1) {
+      return `${seriesLabel}の過去平均より売上・集客とも低めです。告知時期、出演者構成、固定客への案内を見直してください。`;
+    }
+    if (unitDiff != null && unitDiff >= 100 && (customerDiff == null || Math.abs(customerDiff) <= 2)) {
+      return `${seriesLabel}の過去平均より客単価が高めです。飲食提案や滞在導線は良い可能性があります。`;
+    }
     if (salesDiff >= 0 && unitDiff != null && unitDiff >= 0) {
-      return `${seriesLabel}の過去実績と比べて、今回は売上・客単価が高めです。同系イベントとして傾向を見る参考になります。`;
+      return `${seriesLabel}の過去実績と比べて、今回は売上・客単価が高めです。同系イベントとして再現ポイントを記録してください。`;
     }
-    if (customerDiff != null && customerDiff < 0 && (unitDiff == null || unitDiff >= -100)) {
-      return `${seriesLabel}の過去実績と比べて、今回は集客が弱めです。次回の同系イベントでは、告知時期・出演者構成・選曲コンセプトを確認してください。`;
-    }
-    if (unitDiff != null && unitDiff >= 0 && (customerDiff == null || Math.abs(customerDiff) <= 2)) {
-      return `${seriesLabel}の過去実績と比べて、今回は客単価が高めです。参加者数だけでなく、来店後の飲食提案が効いた可能性があります。`;
-    }
-    if (salesDiff < 0 && customerDiff != null && customerDiff < 0) {
-      return `${seriesLabel}の過去実績と比べて、今回は売上・集客ともに弱めです。同系イベントの告知設計と集客導線を見直してください。`;
+    if (customerDiff != null && customerDiff < -1 && (unitDiff == null || unitDiff >= -100)) {
+      return `${seriesLabel}の過去平均より集客が弱めです。次回の同系イベントでは、告知時期・出演者構成・固定客への案内を優先してください。`;
     }
     return `${seriesLabel}の過去実績と比べて、今回の位置づけを確認してください。同系イベントとして傾向を蓄積していくと分析しやすくなります。`;
   }
@@ -2721,18 +2809,23 @@ function buildPastSimilarComparisonComment_(selected, avg, matchInfo) {
   }
   return `${matchTypeLabel}の過去実績と比べて、今回の位置づけを確認してください。`;
 }
-function buildPastSimilarComparison_(selected, pool, taxMode) {
+function buildPastSimilarComparison_(selected, pool, taxMode, options = {}) {
   if (!selected) return null;
   const matchInfo = findPastSimilarMatches_(selected, pool);
-  const avg = averagePastComparableMetrics_(matchInfo.matches);
-  const comment = buildPastSimilarComparisonComment_(selected, avg, matchInfo);
+  const sampleCount = matchInfo.matches.length;
+  const avg = sampleCount > 0 ? averagePastComparableMetrics_(matchInfo.matches) : null;
+  const comment = buildPastSimilarComparisonComment_(selected, avg, matchInfo, options);
   return {
     matchTypeLabel: matchInfo.matchTypeLabel,
     matchKind: matchInfo.matchKind,
-    sampleCount: matchInfo.matches.length,
+    sampleCount,
     matches: matchInfo.matches.slice(0, 3),
     avg,
     comment,
+    statusNote:
+      sampleCount > 0 ? null : matchInfo.matchKind === "series" ? "過去同系実績：未取得または該当なし" : null,
+    pastMonthsDataLoaded: !!options.pastMonthsDataLoaded,
+    yearlyLoading: !!options.yearlyLoading,
     selected,
     comparisons: {
       sales: {
@@ -3363,9 +3456,14 @@ export default function SalesModule({ events = [], navigateBack }) {
     } catch {}
   }, [adminTab]);
   useEffect(() => {
-    if (roleMode !== "admin" || adminTab !== "yearly") return undefined;
+    if (roleMode !== "admin") return undefined;
+    if (adminTab !== "yearly" && adminTab !== "analysis") return undefined;
     let cancelled = false;
-    const months = buildYearMonths_(targetYear);
+    const year =
+      adminTab === "yearly"
+        ? targetYear
+        : Number(String(targetMonth).slice(0, 4)) || targetYear;
+    const months = buildYearMonths_(year);
     setYearlyLoading(true);
     setYearlyMonthData([]);
     (async () => {
@@ -3393,7 +3491,7 @@ export default function SalesModule({ events = [], navigateBack }) {
     return () => {
       cancelled = true;
     };
-  }, [roleMode, adminTab, targetYear]);
+  }, [roleMode, adminTab, targetYear, targetMonth]);
   useEffect(() => {
     try {
       localStorage.setItem(SALES_TARGET_MONTH_KEY, normalizeMonth(targetMonth));
@@ -3795,20 +3893,12 @@ export default function SalesModule({ events = [], navigateBack }) {
     () => monthlyAnalysis.dailyTrendRows.find((r) => r.rowKey === selectedTrendRowKey) || null,
     [monthlyAnalysis.dailyTrendRows, selectedTrendRowKey]
   );
-  const selectedDayAnalysis = useMemo(() => {
-    if (!selectedTrendRow) return null;
-    return buildSelectedDayAnalysis_(
-      selectedTrendRow,
-      {
-        avgDailyCustomerCount: monthlyAnalysis.avgDailyCustomerCount,
-        customerUnitPrice: monthlyAnalysis.customerUnitPrice,
-        avgFoodDrinkRate: calcRate(monthlyAnalysis.foodDrinkSalesIncludingBandSum, monthlyAnalysis.totalSalesSum),
-        barTimeCustomerRate: monthlyAnalysis.barTimeCustomerRate,
-        avgDailySales: monthlyAnalysis.avgDailySales,
-      },
-      taxMode
+  const comparisonPastMonthsReady = useMemo(() => {
+    const year = String(targetMonth).slice(0, 4);
+    return (yearlyMonthData || []).some(
+      (item) => item?.ok && item.month !== targetMonth && String(item.month || "").startsWith(year)
     );
-  }, [selectedTrendRow, monthlyAnalysis, taxMode]);
+  }, [yearlyMonthData, targetMonth]);
   const pastComparablePool = useMemo(() => {
     const pool = [];
     const seen = new Set();
@@ -3843,10 +3933,43 @@ export default function SalesModule({ events = [], navigateBack }) {
     );
     const selected =
       selectedRecord != null
-        ? recordToPastComparableDay_(selectedRecord, events)
+        ? recordToPastComparableDay_(
+            {
+              ...selectedRecord,
+              resolvedEventNames:
+                selectedRecord.resolvedEventNames || eventNamesForDate(events, selectedRecord.businessDate),
+            },
+            events
+          )
         : trendRowToPastComparableDay_(selectedTrendRow, events);
-    return buildPastSimilarComparison_(selected, pastComparablePool, taxMode);
-  }, [selectedTrendRow, monthlyAnalysis.actualRows, pastComparablePool, events, taxMode]);
+    return buildPastSimilarComparison_(selected, pastComparablePool, taxMode, {
+      pastMonthsDataLoaded: comparisonPastMonthsReady,
+      yearlyLoading,
+    });
+  }, [
+    selectedTrendRow,
+    monthlyAnalysis.actualRows,
+    pastComparablePool,
+    events,
+    taxMode,
+    comparisonPastMonthsReady,
+    yearlyLoading,
+  ]);
+  const selectedDayAnalysis = useMemo(() => {
+    if (!selectedTrendRow) return null;
+    return buildSelectedDayAnalysis_(
+      selectedTrendRow,
+      {
+        avgDailyCustomerCount: monthlyAnalysis.avgDailyCustomerCount,
+        customerUnitPrice: monthlyAnalysis.customerUnitPrice,
+        avgFoodDrinkRate: calcRate(monthlyAnalysis.foodDrinkSalesIncludingBandSum, monthlyAnalysis.totalSalesSum),
+        barTimeCustomerRate: monthlyAnalysis.barTimeCustomerRate,
+        avgDailySales: monthlyAnalysis.avgDailySales,
+      },
+      taxMode,
+      selectedPastSimilarComparison
+    );
+  }, [selectedTrendRow, monthlyAnalysis, taxMode, selectedPastSimilarComparison]);
   const selectCauseDayForReport_ = (rowKey) => {
     if (!rowKey) return;
     setSelectedTrendRowKey(rowKey);
@@ -4691,8 +4814,6 @@ export default function SalesModule({ events = [], navigateBack }) {
                   </div>
 
                   <DayAnalysisBlock analysis={selectedDayAnalysis} taxMode={taxMode} narrow={vp.narrow} />
-
-                  <PastSimilarComparisonBlock comparison={selectedPastSimilarComparison} taxMode={taxMode} narrow={vp.narrow} />
 
                   <div style={{ marginBottom: ".55rem" }}>
                     <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>C. 飲食内訳</div>
