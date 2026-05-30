@@ -431,7 +431,6 @@ function analysisCard(variant) {
 }
 function analysisCardWrap(variant, narrow) {
   const base = analysisCard(variant);
-  if (!narrow) return base;
   return {
     ...base,
     width: "100%",
@@ -442,9 +441,13 @@ function analysisCardWrap(variant, narrow) {
   };
 }
 function analysisSectionWrap(narrow, extra = {}) {
-  return narrow
-    ? { width: "100%", maxWidth: "100%", minWidth: 0, boxSizing: "border-box", ...extra }
-    : extra;
+  return {
+    width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+    ...extra,
+  };
 }
 function analysisSecTitle(variant, marginBottom) {
   const v = ANALYSIS_CARD[variant] || ANALYSIS_CARD.trend;
@@ -481,8 +484,20 @@ function useSalesViewport() {
   return vp;
 }
 function rGridCols(narrow, minPx = 170) {
-  return narrow ? "1fr" : `repeat(auto-fit,minmax(${minPx}px,1fr))`;
+  if (narrow) return "1fr";
+  return `repeat(auto-fit, minmax(min(${minPx}px, 100%), 1fr))`;
 }
+const DAY_REPORT_BOX = {
+  width: "100%",
+  maxWidth: "100%",
+  minWidth: 0,
+  boxSizing: "border-box",
+  overflow: "hidden",
+};
+const DAY_ANALYSIS_TEXT = {
+  wordBreak: "break-word",
+  overflowWrap: "anywhere",
+};
 function touchBtnExtra(narrow) {
   return narrow ? { minHeight: 44, fontSize: ".85rem", padding: ".48rem .85rem" } : {};
 }
@@ -1395,25 +1410,39 @@ function buildUnderTargetCauseAnalysis_(underTargetRows, averages, resolveName) 
     .sort((a, b) => Number(b.shortfall || 0) - Number(a.shortfall || 0))
     .slice(0, 5);
 }
-function compareMetricEval_(dayVal, avgVal, { lowRatio = 0.85, highRatio = 1.05 } = {}) {
-  if (dayVal == null || avgVal == null || !(Number(avgVal) > 0)) return "—";
-  const ratio = Number(dayVal) / Number(avgVal);
-  if (ratio < lowRatio) return "低め";
-  if (ratio >= highRatio) return "高め";
-  return "同水準";
-}
-function countRatioPhrase_(ratio) {
-  if (ratio < 0.55) return "月平均の約半分";
-  if (ratio < 0.85) return "月平均を下回る水準";
-  if (ratio >= 1.05) return "月平均を上回る水準";
-  return "月平均に近い水準";
+function buildSeriesComparisonComment_(seriesLabel, pastAvg, metrics) {
+  if (!pastAvg || !seriesLabel) return null;
+  const { totalSales, customerCount, dayUnitPrice, targetSales, isAchieved } = metrics;
+  const salesDiff = Number(totalSales || 0) - Number(pastAvg.totalSales || 0);
+  const customerDiff =
+    customerCount != null && pastAvg.customerCount != null
+      ? Number(customerCount) - Number(pastAvg.customerCount)
+      : null;
+  const unitDiff =
+    dayUnitPrice != null && pastAvg.customerUnitPrice != null
+      ? Number(dayUnitPrice) - Number(pastAvg.customerUnitPrice)
+      : null;
+  const nearPastAvg = Math.abs(salesDiff) <= Math.max(10000, Number(pastAvg.totalSales || 0) * 0.1);
+
+  if (salesDiff < -10000 && customerDiff != null && customerDiff < -1) {
+    return `${seriesLabel}平均と比べて、今回は売上・集客ともに低めです。客単価が大きく崩れていないため、イベント前の集客設計が主な課題です。`;
+  }
+  if (customerDiff != null && customerDiff < -1 && unitDiff != null && unitDiff >= -100) {
+    return `${seriesLabel}平均と比べて、今回は集客は低い一方で客単価は高めです。来店後の売上化はできているため、次回は来場人数の底上げを優先してください。`;
+  }
+  if (nearPastAvg && !isAchieved && Number(targetSales || 0) > 0) {
+    return `${seriesLabel}平均と比べて、売上・集客ともに近い水準です。目標未達の場合は、イベント内容よりも目標設定の妥当性を確認してください。`;
+  }
+  if (salesDiff >= 0 && unitDiff != null && unitDiff >= 0) {
+    return `${seriesLabel}平均と比べて、今回は売上・客単価が高めです。再現ポイントを記録してください。`;
+  }
+  return `${seriesLabel}平均と比べて、今回の位置づけを確認してください。`;
 }
 function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison) {
   if (!row) return null;
   const targetSales = Number(row.targetSales || 0);
   const totalSales = Number(row.totalSales || 0);
   const achievementRate = row.achievementRate;
-  const shortfall = Math.max(0, targetSales - totalSales);
   const customerCount = row.customerCount != null ? Number(row.customerCount) : null;
   const dayUnitPrice = row.customerUnitPrice != null ? Number(row.customerUnitPrice) : null;
   const avgCount = monthly.avgDailyCustomerCount != null ? Number(monthly.avgDailyCustomerCount) : null;
@@ -1424,17 +1453,11 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison)
   const avgBarRate = monthly.barTimeCustomerRate;
   const barTimeCount = row.barTimeCustomerCount != null ? Number(row.barTimeCustomerCount) : null;
   const isAchieved = targetSales > 0 && achievementRate != null && achievementRate >= 100;
-  const countLow = customerCount != null && avgCount != null && avgCount > 0 && customerCount < avgCount * 0.85;
-  const countHigh = customerCount != null && avgCount != null && avgCount > 0 && customerCount >= avgCount * 1.05;
   const unitLow = dayUnitPrice != null && avgUnit != null && avgUnit > 0 && dayUnitPrice < avgUnit * 0.9;
-  const unitHigh = dayUnitPrice != null && avgUnit != null && avgUnit > 0 && dayUnitPrice >= avgUnit * 1.05;
-  const foodHigh = dayFoodRate != null && avgFoodRate != null && dayFoodRate >= avgFoodRate + 3;
-  const foodLow = dayFoodRate != null && avgFoodRate != null && dayFoodRate <= avgFoodRate - 3;
   const barLow =
     dayBarRate != null &&
     (barTimeCount === 0 || (avgBarRate != null && dayBarRate < Math.max(5, avgBarRate * 0.7)));
-  const countRatio = customerCount != null && avgCount != null && avgCount > 0 ? customerCount / avgCount : null;
-  const comparisonLabel =
+  const seriesLabel =
     pastSimilarComparison?.matchKind === "exactName"
       ? "同じイベント名"
       : pastSimilarComparison?.matchKind === "series"
@@ -1445,7 +1468,6 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison)
             eventPerformContentFull: row.eventPerformContentFull,
             performContentFull: row.eventPerformContentFull,
           })?.label || "同系イベント";
-  const seriesLabel = comparisonLabel;
   const pastAvg = pastSimilarComparison?.avg;
   const pastCount = pastSimilarComparison?.sampleCount || 0;
   const pastCustomerDiff =
@@ -1456,160 +1478,115 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison)
     pastAvg?.customerUnitPrice != null && dayUnitPrice != null
       ? dayUnitPrice - Number(pastAvg.customerUnitPrice)
       : null;
+  const pastSalesDiff =
+    pastAvg?.totalSales != null ? totalSales - Number(pastAvg.totalSales) : null;
+  const nearPastAvg =
+    pastSalesDiff != null && Math.abs(pastSalesDiff) <= Math.max(10000, Number(pastAvg?.totalSales || 0) * 0.1);
+  const metricCtx = { totalSales, customerCount, dayUnitPrice, targetSales, isAchieved };
+  const seriesComparisonComment =
+    pastCount > 0 ? buildSeriesComparisonComment_(seriesLabel, pastAvg, metricCtx) : null;
 
-  const conclusionParts = [];
-  if (isAchieved) {
-    conclusionParts.push(`この日は目標を達成しています（達成率 ${pct(achievementRate)}）。`);
-    const drivers = [];
-    if (countHigh) drivers.push("集客");
-    if (unitHigh) drivers.push("客単価");
-    if (foodHigh) drivers.push("飲食比率");
-    if (dayBarRate != null && avgBarRate != null && dayBarRate >= Math.max(10, avgBarRate + 2)) {
-      drivers.push("バータイム");
-    }
-    if (drivers.length) {
-      conclusionParts.push(`${drivers.join("・")}が月平均より高く、達成の要因になった可能性があります。`);
+  let businessSummary = "";
+  if (pastCount > 0) {
+    if (isAchieved) {
+      businessSummary =
+        "この日は目標を達成しており、同系イベント内でも再現したい日です。集客・客単価・飲食比率のどこが強かったかを確認し、次回の基準にしてください。";
+    } else if (pastSalesDiff != null && pastSalesDiff < -10000 && pastCustomerDiff != null && pastCustomerDiff < -1) {
+      businessSummary =
+        "この日は売上・集客ともに弱く、同系イベントとしては再設計が必要です。次回開催する場合は、出演者構成・曜日・告知期間・目標設定を見直してください。";
+    } else if (pastCustomerDiff != null && pastCustomerDiff < -1 && pastUnitDiff != null && pastUnitDiff >= -100) {
+      businessSummary =
+        "この日は目標未達ですが、来店客からの飲食売上は取れています。課題は単価よりも来場人数で、次回は出演者構成・告知開始時期・固定客への案内を優先して見直すべきです。";
+    } else if (nearPastAvg && targetSales > 0) {
+      businessSummary =
+        "売上は同系イベント平均に近い一方で目標に届いていません。イベント自体が悪いというより、目標設定が実績規模に対して高かった可能性があります。";
     } else {
-      conclusionParts.push("売上構成は月平均に近く、総合的な底上げで達成した可能性があります。");
-    }
-    if (pastCount > 0 && pastCustomerDiff != null && pastUnitDiff != null) {
-      if (pastSimilarComparison?.matchKind === "exactName") {
-        if (pastCustomerDiff >= 0 && pastUnitDiff >= 0) {
-          conclusionParts.push("同じイベント名の過去実績と比べて、集客・客単価ともに高く、好調な日でした。");
-        } else if (pastUnitDiff >= 0) {
-          conclusionParts.push("同じイベント名の過去実績と比べて客単価は高く、来店後の売上化が達成に効いています。");
-        }
-      } else if (pastCustomerDiff >= 0 && pastUnitDiff >= 0) {
-        conclusionParts.push(`${seriesLabel}の過去平均より集客・客単価ともに高く、同系イベントとして好調な日でした。`);
-      } else if (pastUnitDiff >= 0) {
-        conclusionParts.push(`${seriesLabel}の過去平均より客単価は高く、来店後の売上化が達成に効いています。`);
-      }
-    }
-  } else if (targetSales > 0) {
-    if (countLow && unitLow) {
-      conclusionParts.push(
-        `この日は集客人数と客単価の両方が月平均を下回り、未達の主因は集客と来店後売上の両面です（達成率 ${pct(achievementRate)}）。`
-      );
-    } else if (countLow) {
-      conclusionParts.push(
-        `この日は集客人数が${countRatio != null ? countRatioPhrase_(countRatio) : "月平均を下回る水準"}で、未達の主因は集客です（達成率 ${pct(achievementRate)} / 不足 ${formatDisplayYen(shortfall, taxMode)}）。`
-      );
-      if (unitHigh || foodHigh) {
-        conclusionParts.push("一方で客単価と飲食比率は高く、来店したお客様からの売上化は悪くありません。");
-      }
-    } else if (unitLow) {
-      conclusionParts.push(
-        `この日は集客は確保できている一方、客単価が月平均を下回り、未達の主因は来店後の売上化です（達成率 ${pct(achievementRate)}）。`
-      );
-    } else {
-      conclusionParts.push(
-        `この日は目標 ${formatDisplayYen(targetSales, taxMode)} に対し ${formatDisplayYen(totalSales, taxMode)} で、達成率 ${pct(achievementRate)} です。`
-      );
-    }
-    if (pastCount > 0) {
-      if (pastSimilarComparison?.matchKind === "exactName") {
-        if (pastCustomerDiff != null && pastCustomerDiff < -1 && pastUnitDiff != null && pastUnitDiff >= 0) {
-          conclusionParts.push("同じイベント名の過去実績と比べて集客は弱いが客単価は高く、今回は来店後の売上化で補っている傾向です。");
-        } else if (pastCustomerDiff != null && pastCustomerDiff < -1) {
-          conclusionParts.push("同じイベント名の過去実績と比べて売上・集客とも弱く、今回固有の告知時期や出演者構成を確認してください。");
-        } else if (pastUnitDiff != null && pastUnitDiff >= 100) {
-          conclusionParts.push("同じイベント名の過去実績と比べて客単価が高く、来店後の飲食提案や滞在導線が機能しています。");
-        }
-      } else if (pastCustomerDiff != null && pastCustomerDiff < -1 && pastUnitDiff != null && pastUnitDiff >= 0) {
-        conclusionParts.push(`${seriesLabel}の過去平均より集客は低いが客単価は高く、今回は来店後の売上化で補っている傾向です。`);
-      } else if (pastCustomerDiff != null && pastCustomerDiff < -1) {
-        conclusionParts.push(`${seriesLabel}の過去平均より売上・集客とも低く、告知時期や固定客への案内が課題です。`);
-      } else if (pastUnitDiff != null && pastUnitDiff >= 100) {
-        conclusionParts.push(`${seriesLabel}の過去平均より客単価が高く、飲食提案や滞在導線は機能している可能性があります。`);
-      }
-    }
-  } else {
-    conclusionParts.push("目標データがないため、月平均との比較を中心に確認してください。");
-  }
-
-  let nextSeriesMemo = `次回の${seriesLabel}では、達成日の告知・出演者構成・来店後導線を記録し、再現ポイントとして残してください。`;
-  if (pastSimilarComparison?.matchKind === "exactName" && pastCount > 0) {
-    nextSeriesMemo = `次回の${primaryComparableEventNameRaw_(row) || seriesLabel}では、同じイベント名の過去実績で集客が取れた日の告知開始時期・出演者構成を確認してください。`;
-    if (unitHigh || foodHigh) {
-      nextSeriesMemo += " 今回のように客単価が取れている日は、まず来場人数の底上げを優先するのが効果的です。";
+      businessSummary = `この日は同系イベントとして位置づけを確認すべき日です。${seriesComparisonComment || ""}`;
     }
   } else if (isAchieved) {
-    const replicate = [];
-    if (countHigh) replicate.push("集客が取れた告知開始時期と出演者構成");
-    if (unitHigh || foodHigh) replicate.push("来店後の飲食提案・滞在導線");
-    if (!barLow && dayBarRate != null && avgBarRate != null && dayBarRate >= avgBarRate) {
-      replicate.push("終演後のバータイム導線");
-    }
-    nextSeriesMemo = `次回の${seriesLabel}では、${replicate.length ? replicate.join("・") : "今回のイベント設計"}を再現してください。`;
-    if (pastCount > 0 && pastCustomerDiff != null && pastCustomerDiff >= 0) {
-      nextSeriesMemo += " 過去平均を上回る集客要因（告知・固定客案内）をテンプレ化すると再現しやすくなります。";
-    }
-  } else if (countLow && !unitLow) {
-    nextSeriesMemo = `次回の${seriesLabel}では、過去に集客が強かった日の出演者構成・告知開始時期・固定客への案内方法を確認してください。`;
-    if (unitHigh || foodHigh) {
-      nextSeriesMemo += " 今回のように客単価は取れているため、まずは来場人数の底上げを優先するのが効果的です。";
-    } else {
-      nextSeriesMemo += " 単価施策よりも事前告知と来場導線の強化を先に設計してください。";
-    }
-  } else if (countLow && unitLow) {
-    nextSeriesMemo = `次回の${seriesLabel}では、告知開始時期・出演者構成・固定客への案内に加え、来店後のフード・ドリンク提案もセットで見直してください。`;
-  } else if (unitLow && !countLow) {
-    nextSeriesMemo = `次回の${seriesLabel}では、集客は確保できているため、セットメニュー・追加ドリンク・フード提案の導線を強化してください。`;
-  } else if (pastCount > 0 && pastCustomerDiff != null && pastCustomerDiff < -1) {
-    nextSeriesMemo = `次回の${seriesLabel}では、過去平均の集客水準を基準に告知設計を見直してください。客単価が取れている日は来場人数の底上げを優先してください。`;
+    businessSummary =
+      "この日は目標を達成しています。過去同系実績がまだないため同系比較はできませんが、次回以降の基準値として記録してください。";
+  } else if (targetSales > 0) {
+    businessSummary =
+      "この日は目標未達です。過去同系実績がまだないため同系比較では判断できません。初回または実績不足のイベントとして、次回以降のために売上・集客・客単価を基準値として保存してください。";
+  } else {
+    businessSummary = "目標データがないため、同系イベント実績の蓄積を優先してください。";
   }
 
-  const metricRows = [
-    {
-      label: "集客",
-      day: customerCount != null ? `${num(customerCount)}名` : "—",
-      avg: avgCount != null ? `${num(Math.round(avgCount * 10) / 10)}名` : "—",
-      eval: compareMetricEval_(customerCount, avgCount),
-    },
-    {
-      label: "客単価",
-      day: dayUnitPrice != null ? formatDisplayYen(dayUnitPrice, taxMode) : "—",
-      avg: avgUnit != null ? formatDisplayYen(avgUnit, taxMode) : "—",
-      eval: compareMetricEval_(dayUnitPrice, avgUnit),
-    },
-    {
-      label: "飲食比率",
-      day: dayFoodRate != null ? pct(dayFoodRate) : "—",
-      avg: avgFoodRate != null ? pct(avgFoodRate) : "—",
-      eval: foodHigh ? "高め" : foodLow ? "低め" : dayFoodRate != null && avgFoodRate != null ? "同水準" : "—",
-    },
-    {
-      label: "バータイム比率",
-      day: dayBarRate != null ? pct(dayBarRate) : "—",
-      avg: avgBarRate != null ? pct(avgBarRate) : "—",
-      eval: barLow ? "低め" : compareMetricEval_(dayBarRate, avgBarRate, { lowRatio: 0.7, highRatio: 1.1 }),
-    },
+  const judgmentPoints = [];
+  if (pastCount > 0 && pastSalesDiff != null && pastSalesDiff < -Math.max(15000, Number(pastAvg?.totalSales || 0) * 0.15)) {
+    judgmentPoints.push({ label: "継続判断", text: "同系平均より大きく下回るため、次回は条件変更が必要" });
+  } else if (isAchieved && pastCount > 0) {
+    judgmentPoints.push({ label: "継続判断", text: "同系平均を上回っており、継続開催の好材料" });
+  } else if (pastCount === 0) {
+    judgmentPoints.push({ label: "継続判断", text: "同系比較データ不足のため、次回以降の実績蓄積を優先" });
+  }
+  if (!isAchieved && pastCount > 0 && nearPastAvg && targetSales > 0) {
+    judgmentPoints.push({ label: "目標設定", text: "過去平均に対して目標が高すぎる可能性あり" });
+  }
+  if (pastCustomerDiff != null && pastCustomerDiff < -1) {
+    judgmentPoints.push({ label: "集客施策", text: "出演者構成・告知開始時期・固定客案内を優先" });
+  } else if (!isAchieved && pastCount === 0) {
+    judgmentPoints.push({ label: "集客施策", text: "初回イベントのため、次回に向けた告知設計の記録を残す" });
+  }
+  if (pastUnitDiff != null && pastUnitDiff >= -100) {
+    judgmentPoints.push({ label: "単価施策", text: "客単価は悪くないため、優先度は集客より低い" });
+  } else if (unitLow) {
+    judgmentPoints.push({ label: "単価施策", text: "来店後の追加注文・セット提案の導線を見直す" });
+  }
+  if (barLow) {
+    judgmentPoints.push({ label: "バータイム施策", text: "残留が弱いため、終演後の一杯導線を検討" });
+  }
+
+  let nextAction = `次回の${seriesLabel}では、今回の結果を基準値として記録し、次回以降の同系比較に使えるようにしてください。`;
+  if (pastCount > 0 && pastCustomerDiff != null && pastCustomerDiff < -1 && pastUnitDiff != null && pastUnitDiff >= -100) {
+    nextAction = `次回の${seriesLabel}では、まず来場人数の底上げを優先してください。過去に集客が強かった日の出演者構成・告知開始日・固定客への案内方法を確認し、客単価施策より告知と予約導線を先に改善してください。`;
+  } else if (pastCount > 0 && nearPastAvg && !isAchieved && targetSales > 0) {
+    nextAction = `次回の${seriesLabel}では、過去平均売上を基準に目標を再設定してください。同系平均と比べて大きく崩れていない場合は、イベント内容より目標の妥当性を先に見直すのが安全です。`;
+  } else if (isAchieved && pastCount > 0) {
+    nextAction = `次回の${seriesLabel}では、今回達成できた告知・出演者構成・来店後導線をテンプレ化し、同系イベントの標準運用として残してください。`;
+  } else if (pastCount > 0 && pastSalesDiff != null && pastSalesDiff < -10000) {
+    nextAction = `次回の${seriesLabel}では、出演者構成・曜日・告知期間を見直してください。同系平均から大きく乖離しているため、同条件での継続は慎重に判断してください。`;
+  } else if (pastCount === 0) {
+    nextAction = `次回の${seriesLabel}では、今回の売上・集客・客単価を基準値として保存してください。2回目以降から同系比較が可能になり、経営判断の精度が上がります。`;
+  }
+
+  const referenceMetrics = [
+    { label: "集客", day: customerCount != null ? `${num(customerCount)}名` : "—", ref: avgCount != null ? `${num(Math.round(avgCount * 10) / 10)}名` : "—" },
+    { label: "客単価", day: dayUnitPrice != null ? formatDisplayYen(dayUnitPrice, taxMode) : "—", ref: avgUnit != null ? formatDisplayYen(avgUnit, taxMode) : "—" },
+    { label: "飲食比率", day: dayFoodRate != null ? pct(dayFoodRate) : "—", ref: avgFoodRate != null ? pct(avgFoodRate) : "—" },
+    { label: "バータイム比率", day: dayBarRate != null ? pct(dayBarRate) : "—", ref: avgBarRate != null ? pct(avgBarRate) : "—" },
   ];
 
+  const seriesCompareCards =
+    pastCount > 0 && pastSimilarComparison?.comparisons
+      ? [
+          { label: "売上", past: pastSimilarComparison.comparisons.sales?.avg, pastFmt: (v) => formatDisplayYen(v, taxMode), today: pastSimilarComparison.comparisons.sales?.day, todayFmt: (v) => formatDisplayYen(v, taxMode) },
+          { label: "集客", past: pastSimilarComparison.comparisons.customerCount?.avg, pastFmt: (v) => `${num(v)}名`, today: pastSimilarComparison.comparisons.customerCount?.day, todayFmt: (v) => `${num(v)}名` },
+          { label: "客単価", past: pastSimilarComparison.comparisons.customerUnitPrice?.avg, pastFmt: (v) => formatDisplayYen(v, taxMode), today: pastSimilarComparison.comparisons.customerUnitPrice?.day, todayFmt: (v) => formatDisplayYen(v, taxMode) },
+          { label: "飲食比率", past: pastSimilarComparison.comparisons.foodDrinkRate?.avg, pastFmt: (v) => pct(v), today: pastSimilarComparison.comparisons.foodDrinkRate?.day, todayFmt: (v) => pct(v) },
+        ].map((card) => ({
+          label: card.label,
+          past: card.past != null ? card.pastFmt(card.past) : "—",
+          today: card.today != null ? card.todayFmt(card.today) : "—",
+        }))
+      : [];
+
   return {
-    conclusion: conclusionParts.join(" "),
-    metricRows,
-    nextSeriesMemo,
+    businessSummary,
+    seriesComparisonComment,
+    judgmentPoints: judgmentPoints.slice(0, 5),
+    nextAction,
+    referenceMetrics,
+    seriesCompareCards,
     pastSimilarComparison,
     isAchieved,
-    comparisons: {
-      customerCount,
-      avgDailyCustomerCount: avgCount,
-      dayUnitPrice,
-      avgUnitPrice: avgUnit,
-      dayFoodRate,
-      avgFoodRate,
-      dayBarRate,
-      avgBarRate,
-    },
+    seriesLabel,
   };
 }
 function DayAnalysisBlock({ analysis, taxMode, narrow, onSelectReferenceDay }) {
   if (!analysis) return null;
   const past = analysis.pastSimilarComparison;
-  const fmtCount = (v) => (v != null ? `${num(v)}名` : "—");
-  const fmtUnit = (v) => (v != null ? formatDisplayYen(v, taxMode) : "—");
-  const fmtRate = (v) => (v != null ? pct(v) : "—");
   const referenceChipStyle = {
     display: "inline-block",
     margin: ".12rem .18rem .12rem 0",
@@ -1623,186 +1600,180 @@ function DayAnalysisBlock({ analysis, taxMode, narrow, onSelectReferenceDay }) {
     lineHeight: 1.45,
     cursor: onSelectReferenceDay ? "pointer" : "default",
     textAlign: "left",
+    maxWidth: "100%",
+    ...DAY_ANALYSIS_TEXT,
   };
-  const pastCompareRows =
-    past?.sampleCount > 0
-      ? [
-          { label: "売上", day: fmtUnit(past.comparisons?.sales?.day), avg: fmtUnit(past.comparisons?.sales?.avg) },
-          { label: "集客", day: fmtCount(past.comparisons?.customerCount?.day), avg: fmtCount(past.comparisons?.customerCount?.avg) },
-          { label: "客単価", day: fmtUnit(past.comparisons?.customerUnitPrice?.day), avg: fmtUnit(past.comparisons?.customerUnitPrice?.avg) },
-          { label: "飲食比率", day: fmtRate(past.comparisons?.foodDrinkRate?.day), avg: fmtRate(past.comparisons?.foodDrinkRate?.avg) },
-        ]
-      : [];
   const sectionCardStyle = {
     padding: ".45rem .55rem",
     borderRadius: 5,
     border: "1px solid rgba(201,168,76,0.16)",
     background: "rgba(0,0,0,0.14)",
+    width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+    overflow: "hidden",
+  };
+  const grid2Style = {
+    display: "grid",
+    gridTemplateColumns: narrow ? "1fr" : "repeat(2, minmax(0, 1fr))",
+    gap: narrow ? ".22rem" : ".18rem .45rem",
+    width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
+  };
+  const metricCardStyle = {
+    padding: ".32rem .4rem",
+    borderRadius: 4,
+    border: "1px solid rgba(201,168,76,0.12)",
+    background: "rgba(0,0,0,0.1)",
+    minWidth: 0,
+    ...DAY_ANALYSIS_TEXT,
   };
   return (
-    <div style={{ marginBottom: ".55rem" }}>
+    <div style={{ ...DAY_REPORT_BOX, marginBottom: ".55rem" }}>
       <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>
         この日の分析
       </div>
 
       <div style={{ ...sectionCardStyle, marginBottom: ".38rem", borderColor: "rgba(201,168,76,0.28)", background: "rgba(201,168,76,0.06)" }}>
         <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.88)", marginBottom: ".18rem", fontWeight: 600 }}>
-          A. この日の結論
+          A. 経営判断サマリー
         </div>
-        <div style={{ fontSize: narrow ? ".84rem" : ".8rem", lineHeight: 1.65, color: "rgba(240,232,208,0.92)", wordBreak: "break-word" }}>
-          {analysis.conclusion}
-        </div>
-      </div>
-
-      <div style={{ ...sectionCardStyle, marginBottom: ".38rem" }}>
-        <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.82)", marginBottom: ".22rem", fontWeight: 600 }}>
-          B. 数字の比較
-        </div>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: narrow ? "1fr" : "repeat(2, minmax(0, 1fr))",
-            gap: narrow ? ".22rem" : ".16rem .55rem",
-            fontSize: narrow ? ".8rem" : ".76rem",
-            lineHeight: 1.5,
-            color: "rgba(240,232,208,0.82)",
-          }}
-        >
-          {(analysis.metricRows || []).map((row) => (
-            <div key={row.label} style={{ wordBreak: "break-word" }}>
-              {row.label} {row.day} / 月平均 {row.avg}
-              <span style={{ marginLeft: ".35rem", color: "rgba(201,168,76,0.75)" }}>({row.eval})</span>
-            </div>
-          ))}
+        <div style={{ fontSize: narrow ? ".84rem" : ".8rem", lineHeight: 1.65, color: "rgba(240,232,208,0.92)", ...DAY_ANALYSIS_TEXT }}>
+          {analysis.businessSummary}
         </div>
       </div>
 
-      {past ? (
-        <div style={{ ...sectionCardStyle, marginBottom: ".38rem" }}>
-          <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.82)", marginBottom: ".22rem", fontWeight: 600 }}>
-            C. 過去同系実績との比較
-          </div>
-          <div style={{ fontSize: narrow ? ".78rem" : ".76rem", color: "rgba(201,168,76,0.88)", marginBottom: ".22rem", fontWeight: 600 }}>
-            比較タイプ：{past.matchTypeLabel || "—"}
-            {past.sampleCount > 0 ? (
-              <span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.55)", fontWeight: 400 }}>
-                （{num(past.sampleCount)}件）
-              </span>
-            ) : null}
-          </div>
-          {past.matchNote ? (
-            <div style={{ fontSize: ".68rem", color: "rgba(240,232,208,0.48)", marginBottom: ".18rem" }}>
-              {past.matchNote}
-            </div>
+      <div style={{ ...sectionCardStyle, marginBottom: ".38rem", borderColor: "rgba(201,168,76,0.22)", background: "rgba(201,168,76,0.04)" }}>
+        <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.88)", marginBottom: ".22rem", fontWeight: 600 }}>
+          B. 同系イベント比較
+        </div>
+        <div style={{ fontSize: narrow ? ".78rem" : ".76rem", color: "rgba(201,168,76,0.88)", marginBottom: ".18rem", fontWeight: 600, ...DAY_ANALYSIS_TEXT }}>
+          比較タイプ：{past?.matchTypeLabel || analysis.seriesLabel || "—"}
+          {past?.sampleCount > 0 ? (
+            <span style={{ marginLeft: ".35rem", color: "rgba(240,232,208,0.55)", fontWeight: 400 }}>
+              （{num(past.sampleCount)}件）
+            </span>
           ) : null}
-          {past.sampleCount === 0 && past.statusNote ? (
-            <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)", marginBottom: ".28rem" }}>
-              {past.statusNote}
-            </div>
-          ) : null}
-          {pastCompareRows.length > 0 ? (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: narrow ? "1fr" : "repeat(2, minmax(0, 1fr))",
-                gap: narrow ? ".22rem" : ".16rem .55rem",
-                marginBottom: ".32rem",
-                fontSize: narrow ? ".8rem" : ".76rem",
-                lineHeight: 1.5,
-                color: "rgba(240,232,208,0.82)",
-              }}
-            >
-              {pastCompareRows.map((row) => (
-                <div key={row.label} style={{ wordBreak: "break-word" }}>
-                  {row.label} {row.day} / 平均 {row.avg}
+        </div>
+        {past?.sampleCount === 0 && past?.statusNote ? (
+          <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)", marginBottom: ".22rem", ...DAY_ANALYSIS_TEXT }}>
+            {past.statusNote}
+          </div>
+        ) : null}
+        {past?.matchNote ? (
+          <div style={{ fontSize: ".68rem", color: "rgba(240,232,208,0.48)", marginBottom: ".18rem", ...DAY_ANALYSIS_TEXT }}>
+            {past.matchNote}
+          </div>
+        ) : null}
+        {analysis.seriesCompareCards?.length > 0 ? (
+          <div style={{ ...grid2Style, marginBottom: ".28rem" }}>
+            {analysis.seriesCompareCards.map((card) => (
+              <div key={card.label} style={metricCardStyle}>
+                <div style={{ fontSize: ".66rem", color: "rgba(201,168,76,0.78)", marginBottom: ".1rem" }}>{card.label}</div>
+                <div style={{ fontSize: narrow ? ".78rem" : ".74rem", lineHeight: 1.5, color: "rgba(240,232,208,0.84)" }}>
+                  過去平均 {card.past}
                 </div>
-              ))}
-            </div>
-          ) : null}
-          {past.matches?.length > 0 ? (
-            <div style={{ marginBottom: ".28rem", fontSize: ".7rem", color: "rgba(240,232,208,0.52)", lineHeight: 1.45 }}>
-              <div style={{ marginBottom: ".12rem" }}>
-                参考実績
-                {onSelectReferenceDay ? (
-                  <span style={{ marginLeft: ".25rem", color: "rgba(240,232,208,0.38)" }}>（クリックで営業レポートを表示）</span>
-                ) : null}
-                ：
+                <div style={{ fontSize: narrow ? ".78rem" : ".74rem", lineHeight: 1.5, color: "rgba(240,232,208,0.92)", fontWeight: 600 }}>
+                  今回 {card.today}
+                </div>
               </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: ".08rem" }}>
-                {past.matches.map((row) => {
-                  const label = `${(row.businessDate || "").slice(5).replace("-", "/")} ${row.eventName || row.sheetEventName || "—"}`;
-                  const canSelect = onSelectReferenceDay && (row.rowKey || row.businessDate);
-                  if (!canSelect) {
-                    return (
-                      <span key={row.rowKey || label} style={referenceChipStyle}>
-                        {label}
-                      </span>
-                    );
-                  }
-                  return (
-                    <button
-                      key={row.rowKey || `${row.businessDate}_${label}`}
-                      type="button"
-                      style={referenceChipStyle}
-                      onClick={() => onSelectReferenceDay(row)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          onSelectReferenceDay(row);
-                        }
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.background = "rgba(201,168,76,0.16)";
-                        e.currentTarget.style.color = "rgba(240,232,208,0.92)";
-                        e.currentTarget.style.textDecoration = "underline";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.background = "rgba(201,168,76,0.08)";
-                        e.currentTarget.style.color = "rgba(240,232,208,0.78)";
-                        e.currentTarget.style.textDecoration = "none";
-                      }}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ) : null}
-          {past.debugInfo?.selectedDate || past.debugInfo?.pastComparableCount != null ? (
-            <div style={{ marginBottom: ".22rem", fontSize: ".58rem", color: "rgba(240,232,208,0.34)", lineHeight: 1.45 }}>
-              {past.debugInfo.selectedDate ? `選択日：${past.debugInfo.selectedDate}` : null}
-              {past.debugInfo.pastComparableCount != null ? (
-                <span style={{ marginLeft: past.debugInfo.selectedDate ? ".45rem" : 0 }}>
-                  過去比較対象：{num(past.debugInfo.pastComparableCount)}件
-                </span>
-              ) : null}
-              {past.debugInfo.excludedFutureCount > 0 ? (
-                <span style={{ marginLeft: ".45rem" }}>除外：未来日あり</span>
-              ) : null}
-              {past.debugInfo.resolveSource ? (
-                <span style={{ marginLeft: ".45rem" }}>判定元：{past.debugInfo.resolveSource}</span>
-              ) : null}
-              {past.debugInfo.seriesCategory ? (
-                <span style={{ marginLeft: ".45rem" }}>判定カテゴリ：{past.debugInfo.seriesCategory}</span>
-              ) : null}
-              {past.debugInfo.compareKey ? (
-                <span style={{ marginLeft: ".45rem" }}>比較キー：{past.debugInfo.compareKey}</span>
-              ) : null}
-            </div>
-          ) : null}
-          <div style={{ fontSize: narrow ? ".8rem" : ".76rem", lineHeight: 1.6, color: "rgba(240,232,208,0.84)", wordBreak: "break-word" }}>
-            {past.comment}
+            ))}
           </div>
+        ) : null}
+        {(analysis.seriesComparisonComment || past?.comment) ? (
+          <div style={{ fontSize: narrow ? ".8rem" : ".76rem", lineHeight: 1.6, color: "rgba(240,232,208,0.86)", marginBottom: ".24rem", ...DAY_ANALYSIS_TEXT }}>
+            {analysis.seriesComparisonComment || past.comment}
+          </div>
+        ) : null}
+        {past?.matches?.length > 0 ? (
+          <div style={{ marginBottom: ".12rem", fontSize: ".7rem", color: "rgba(240,232,208,0.52)", lineHeight: 1.45, ...DAY_ANALYSIS_TEXT }}>
+            <div style={{ marginBottom: ".12rem" }}>
+              参考実績
+              {onSelectReferenceDay ? (
+                <span style={{ marginLeft: ".25rem", color: "rgba(240,232,208,0.38)" }}>（クリックで営業レポートを表示）</span>
+              ) : null}
+              ：
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: ".08rem", minWidth: 0 }}>
+              {past.matches.map((row) => {
+                const label = `${(row.businessDate || "").slice(5).replace("-", "/")} ${row.eventName || row.sheetEventName || "—"}`;
+                const canSelect = onSelectReferenceDay && (row.rowKey || row.businessDate);
+                if (!canSelect) {
+                  return (
+                    <span key={row.rowKey || label} style={referenceChipStyle}>
+                      {label}
+                    </span>
+                  );
+                }
+                return (
+                  <button
+                    key={row.rowKey || `${row.businessDate}_${label}`}
+                    type="button"
+                    style={referenceChipStyle}
+                    onClick={() => onSelectReferenceDay(row)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onSelectReferenceDay(row);
+                      }
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = "rgba(201,168,76,0.16)";
+                      e.currentTarget.style.color = "rgba(240,232,208,0.92)";
+                      e.currentTarget.style.textDecoration = "underline";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = "rgba(201,168,76,0.08)";
+                      e.currentTarget.style.color = "rgba(240,232,208,0.78)";
+                      e.currentTarget.style.textDecoration = "none";
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      {analysis.judgmentPoints?.length > 0 ? (
+        <div style={{ ...sectionCardStyle, marginBottom: ".38rem" }}>
+          <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.82)", marginBottom: ".18rem", fontWeight: 600 }}>
+            C. 判断ポイント
+          </div>
+          <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: narrow ? ".8rem" : ".76rem", lineHeight: 1.6, color: "rgba(240,232,208,0.84)", ...DAY_ANALYSIS_TEXT }}>
+            {analysis.judgmentPoints.map((point) => (
+              <li key={point.label} style={{ marginBottom: ".12rem" }}>
+                <strong style={{ color: "rgba(201,168,76,0.82)" }}>{point.label}</strong>：{point.text}
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
 
-      <div style={{ ...sectionCardStyle, borderColor: "rgba(201,168,76,0.22)", background: "rgba(0,0,0,0.18)" }}>
+      <div style={{ ...sectionCardStyle, marginBottom: ".38rem", borderColor: "rgba(201,168,76,0.22)", background: "rgba(0,0,0,0.18)" }}>
         <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.88)", marginBottom: ".14rem", fontWeight: 600 }}>
-          D. 次回同系イベントへのメモ
+          D. 次回アクション
         </div>
-        <div style={{ fontSize: narrow ? ".8rem" : ".76rem", lineHeight: 1.6, color: "rgba(240,232,208,0.86)", wordBreak: "break-word" }}>
-          {analysis.nextSeriesMemo}
+        <div style={{ fontSize: narrow ? ".8rem" : ".76rem", lineHeight: 1.6, color: "rgba(240,232,208,0.86)", ...DAY_ANALYSIS_TEXT }}>
+          {analysis.nextAction}
+        </div>
+      </div>
+
+      <div style={{ ...sectionCardStyle, opacity: 0.88 }}>
+        <div style={{ fontSize: ".64rem", color: "rgba(201,168,76,0.68)", marginBottom: ".16rem", fontWeight: 600 }}>
+          参考指標（月平均比）
+        </div>
+        <div style={{ ...grid2Style, fontSize: narrow ? ".74rem" : ".7rem", lineHeight: 1.5, color: "rgba(240,232,208,0.58)" }}>
+          {(analysis.referenceMetrics || []).map((row) => (
+            <div key={row.label} style={{ minWidth: 0, ...DAY_ANALYSIS_TEXT }}>
+              {row.label} {row.day}
+              <span style={{ marginLeft: ".28rem" }}>/ 月平均 {row.ref}</span>
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -2731,9 +2702,6 @@ function buildEventSeriesPerformText_(info) {
   ]
     .filter(Boolean)
     .join(" ");
-}
-function buildEventSeriesSearchText_(info) {
-  return [buildEventSeriesNameText_(info), buildEventSeriesPerformText_(info)].filter(Boolean).join(" ");
 }
 function resolveEventSeries_(rowOrEventInfo) {
   const info = rowOrEventInfo || {};
@@ -5208,15 +5176,15 @@ export default function SalesModule({ events = [], navigateBack }) {
             {selectedTrendRow && (
               <div
                 ref={dayReportRef}
-                style={{ marginTop: ".75rem", borderTop: "1px dashed rgba(175,180,190,0.2)", paddingTop: ".7rem" }}
+                style={{ marginTop: ".75rem", borderTop: "1px dashed rgba(175,180,190,0.2)", paddingTop: ".7rem", ...DAY_REPORT_BOX }}
               >
-                <div style={analysisCardWrap("dayReport", vp.narrow)}>
+                <div style={{ ...analysisCardWrap("dayReport", vp.narrow), ...DAY_REPORT_BOX }}>
                   <div style={{ ...analysisSecTitle("dayReport"), fontSize: ".86rem", fontWeight: 700, letterSpacing: ".06em", textTransform: "none" }}>選択日の営業レポート</div>
 
-                  <div style={{ marginBottom: ".55rem" }}>
+                  <div style={{ marginBottom: ".55rem", ...DAY_REPORT_BOX }}>
                     <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>A. 基本情報</div>
-                    <div style={{ display:"grid", gap:".38rem", fontSize:".8rem" }}>
-                      <div style={{ display:"grid", gridTemplateColumns: rGridCols(vp.narrow, 140), gap:".34rem .7rem" }}>
+                    <div style={{ display:"grid", gap:".38rem", fontSize:".8rem", ...DAY_REPORT_BOX }}>
+                      <div style={{ display:"grid", gridTemplateColumns: rGridCols(vp.narrow, 140), gap:".34rem .7rem", minWidth: 0 }}>
                         <div>日付: <strong style={{ fontSize: vp.narrow ? "1rem" : ".95rem" }}>{selectedTrendRow.businessDate || "—"}</strong></div>
                         <div>曜日: <strong style={{ fontSize: vp.narrow ? "1rem" : ".95rem" }}>{selectedTrendRow.weekday || "—"}</strong></div>
                       </div>
@@ -5251,7 +5219,7 @@ export default function SalesModule({ events = [], navigateBack }) {
                     </div>
                   </div>
 
-                  <div style={{ marginBottom: ".55rem" }}>
+                  <div style={{ marginBottom: ".55rem", ...DAY_REPORT_BOX }}>
                     <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>B. 売上・目標</div>
                     <div style={{ display:"grid", gridTemplateColumns: rGridCols(vp.narrow, 160), gap:".34rem .7rem", fontSize: vp.narrow ? ".88rem" : ".8rem", ...analysisSectionWrap(vp.narrow) }}>
                       <MobileFieldRow narrow={vp.narrow} label="売上合計" value={dy(selectedTrendRow.totalSales)} valueStyle={{ color: "#f3ead2" }} />
@@ -5274,18 +5242,15 @@ export default function SalesModule({ events = [], navigateBack }) {
                     onSelectReferenceDay={selectReferenceDayForReport_}
                   />
 
-                  <div style={{ marginBottom: ".55rem" }}>
+                  <div style={{ marginBottom: ".55rem", ...DAY_REPORT_BOX }}>
                     <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>C. 飲食内訳</div>
                     <div
                       style={{
                         display: "grid",
-                        gridTemplateColumns: vp.narrow ? "1fr" : "repeat(auto-fit, minmax(220px, 1fr))",
-                        gap: vp.narrow ? ".1rem" : ".28rem .85rem",
+                        gridTemplateColumns: vp.narrow ? "1fr" : "repeat(2, minmax(0, 1fr))",
+                        gap: vp.narrow ? ".1rem" : ".28rem .65rem",
                         fontSize: vp.narrow ? ".88rem" : ".8rem",
-                        width: "100%",
-                        maxWidth: "100%",
-                        minWidth: 0,
-                        boxSizing: "border-box",
+                        ...DAY_REPORT_BOX,
                       }}
                     >
                       <DayReportFoodMetricRow narrow={vp.narrow} label="飲食売上" value={dy(selectedTrendRow.foodDrinkSalesIncludingBand)} />
@@ -5324,9 +5289,9 @@ export default function SalesModule({ events = [], navigateBack }) {
                     </div>
                   </div>
 
-                  <div style={{ marginBottom: ".55rem" }}>
+                  <div style={{ marginBottom: ".55rem", ...DAY_REPORT_BOX }}>
                     <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>D. 決済・入金</div>
-                    <div style={{ display:"grid", gridTemplateColumns: rGridCols(vp.narrow, 160), gap:".34rem .7rem", fontSize: vp.narrow ? ".88rem" : ".8rem" }}>
+                    <div style={{ display:"grid", gridTemplateColumns: rGridCols(vp.narrow, 160), gap:".34rem .7rem", fontSize: vp.narrow ? ".88rem" : ".8rem", ...analysisSectionWrap(vp.narrow) }}>
                       <div>現金: <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.cash)}</strong></div>
                       <div>クレジット: <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.creditCardSales)}</strong></div>
                       <div>PayPay: <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.paypaySales)}</strong></div>
@@ -5334,7 +5299,7 @@ export default function SalesModule({ events = [], navigateBack }) {
                     </div>
                   </div>
 
-                  <div style={{ marginBottom: ".55rem" }}>
+                  <div style={{ marginBottom: ".55rem", ...DAY_REPORT_BOX }}>
                     <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>E. コスト・利益</div>
                     <div style={{ display:"grid", gridTemplateColumns: rGridCols(vp.narrow, 160), gap:".34rem .7rem", fontSize: vp.narrow ? ".88rem" : ".8rem", ...analysisSectionWrap(vp.narrow) }}>
                       <MobileFieldRow narrow={vp.narrow} label="営業利益" value={dy(selectedTrendRow.operatingProfit)} valueStyle={{ color: "#f3ead2" }} />
@@ -5349,9 +5314,9 @@ export default function SalesModule({ events = [], navigateBack }) {
                     </div>
                   </div>
 
-                  <div>
+                  <div style={DAY_REPORT_BOX}>
                     <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>F. 参考情報</div>
-                    <div style={{ display:"grid", gridTemplateColumns: rGridCols(vp.narrow, 180), gap:".34rem .7rem", fontSize: vp.narrow ? ".88rem" : ".8rem" }}>
+                    <div style={{ display:"grid", gridTemplateColumns: rGridCols(vp.narrow, 180), gap:".34rem .7rem", fontSize: vp.narrow ? ".88rem" : ".8rem", ...analysisSectionWrap(vp.narrow) }}>
                       <div>参考：バンドギャラ <strong style={{ fontSize: ".94rem" }}>{dy(selectedTrendRow.bandGuarantee)}</strong></div>
                     </div>
                     <div style={{ fontSize: ".64rem", color: "rgba(240,232,208,0.55)", marginTop: ".2rem" }}>※経費には含めていません</div>
