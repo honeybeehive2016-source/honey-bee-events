@@ -260,6 +260,26 @@ const ANALYSIS_CARD = {
     title: { color: "#9ec9b8", borderBottom: "1px solid rgba(102,170,140,0.24)" },
     rowBorder: "rgba(102,170,140,0.12)",
   },
+  insight: {
+    card: {
+      background: "linear-gradient(165deg, rgba(22,20,14,0.99) 0%, rgba(14,12,8,1) 100%)",
+      border: "1px solid rgba(201,168,76,0.28)",
+      boxShadow: "inset 0 1px 0 rgba(201,168,76,0.06)",
+      padding: "1rem 1.1rem",
+    },
+    title: { color: "#c9a84c", borderBottom: "1px solid rgba(201,168,76,0.22)" },
+    rowBorder: "rgba(201,168,76,0.12)",
+  },
+  causeAnalysis: {
+    card: {
+      background: "linear-gradient(180deg, rgba(14,14,14,0.99), rgba(8,8,8,1))",
+      border: "1px solid rgba(190,120,88,0.22)",
+      boxShadow: "inset 2px 0 0 rgba(190,110,78,0.24)",
+      padding: ".95rem 1.05rem",
+    },
+    title: { color: "rgba(220,168,130,0.9)", borderBottom: "1px solid rgba(190,120,88,0.16)", fontSize: ".72rem" },
+    rowBorder: "rgba(190,120,88,0.12)",
+  },
   alert: {
     card: {
       background: "linear-gradient(180deg, rgba(32,22,18,0.98), rgba(20,14,12,0.99))",
@@ -760,6 +780,154 @@ function buildYearlyAlerts_(ctx) {
     });
   }
   return alerts.slice(0, 5);
+}
+function buildMonthlyImprovementComments_(analysis, taxMode) {
+  const comments = [];
+  const a = analysis || {};
+  if (Number(a.fullMonthTargetSalesSum || 0) > 0) {
+    const remaining = Math.max(0, Number(a.fullMonthTargetSalesSum || 0) - Number(a.totalSalesSum || 0));
+    const rate = a.monthlyProgressRate;
+    if (rate != null && rate >= 100) {
+      comments.push(`売上は目標達成ペースです。月間進捗率 ${pct(rate)}`);
+    } else if (rate != null && rate >= 90) {
+      comments.push(`売上は目標まで ${formatDisplayYen(remaining, taxMode)}。月間進捗率 ${pct(rate)}`);
+    } else if (rate != null) {
+      comments.push(`売上は目標まで ${formatDisplayYen(remaining, taxMode)}。月間進捗率 ${pct(rate)}（未達リスク）`);
+    }
+  }
+  const yoyRate = a.priorYearMonth?.prevMonthRate;
+  if (yoyRate != null) {
+    if (yoyRate >= 110) {
+      comments.push(`前年同月比は ${pct1(yoyRate)}。前年より売上は伸びています`);
+    } else if (yoyRate >= 90) {
+      comments.push(`前年同月比は ${pct1(yoyRate)}。前年並みのペースです`);
+    } else {
+      comments.push(`前年同月比は ${pct1(yoyRate)}。前年割れです`);
+    }
+  }
+  if (Number(a.customerCountSum || 0) > 0) {
+    const avgLabel = a.avgDailyCustomerCount != null ? `${num(a.avgDailyCustomerCount)}名` : "—";
+    comments.push(`月間総集客人数は ${num(a.customerCountSum)}名、1日平均集客は ${avgLabel}`);
+  }
+  if (a.barTimeCustomerRate != null) {
+    if (a.barTimeCustomerRate >= 10) {
+      comments.push(`バータイム比率は ${pct(a.barTimeCustomerRate)}。バータイム残留が良好です`);
+    } else if (a.barTimeCustomerRate < 5) {
+      comments.push(`バータイム比率は ${pct(a.barTimeCustomerRate)}。ライブ後の残留強化余地があります`);
+    } else {
+      comments.push(`バータイム比率は ${pct(a.barTimeCustomerRate)}`);
+    }
+  }
+  if (a.operatingGrossProfitRate != null) {
+    if (a.operatingGrossProfitRate >= 70) {
+      comments.push(`営業粗利率は ${pct1(a.operatingGrossProfitRate)}。粗利は良好です`);
+    } else if (a.operatingGrossProfitRate >= 60) {
+      comments.push(`営業粗利率は ${pct1(a.operatingGrossProfitRate)}。仕入れ・経費のバランスは要確認`);
+    } else {
+      comments.push(`営業粗利率は ${pct1(a.operatingGrossProfitRate)}。粗利率に注意が必要です`);
+    }
+  }
+  return comments.slice(0, 5);
+}
+function classifyUnderTargetDay_(ctx) {
+  const customerCount = ctx.customerCount != null ? Number(ctx.customerCount) : null;
+  const dayUnitPrice = ctx.dayUnitPrice != null ? Number(ctx.dayUnitPrice) : null;
+  const totalSales = Number(ctx.totalSales || 0);
+  const achievementRate = ctx.achievementRate;
+  const avgDailyCustomerCount = ctx.avgDailyCustomerCount != null ? Number(ctx.avgDailyCustomerCount) : null;
+  const avgUnitPrice = ctx.avgUnitPrice != null ? Number(ctx.avgUnitPrice) : null;
+  const avgDailySales = ctx.avgDailySales != null ? Number(ctx.avgDailySales) : null;
+
+  if (
+    customerCount == null ||
+    !Number.isFinite(customerCount) ||
+    dayUnitPrice == null ||
+    !Number.isFinite(dayUnitPrice) ||
+    avgDailyCustomerCount == null ||
+    !(avgDailyCustomerCount > 0) ||
+    avgUnitPrice == null ||
+    !(avgUnitPrice > 0)
+  ) {
+    return {
+      category: "判定不可",
+      comment: "集客人数または客単価のデータが不足しています。",
+    };
+  }
+
+  const countLow = customerCount < avgDailyCustomerCount * 0.85;
+  const countOk = customerCount >= avgDailyCustomerCount * 0.85;
+  const unitLow = dayUnitPrice < avgUnitPrice * 0.9;
+  const unitOk = dayUnitPrice >= avgUnitPrice * 0.9;
+
+  if (
+    achievementRate != null &&
+    achievementRate >= 70 &&
+    avgDailySales != null &&
+    avgDailySales > 0 &&
+    totalSales >= avgDailySales * 0.85
+  ) {
+    return {
+      category: "目標過大の可能性",
+      comment: "売上自体は平均水準ですが、目標設定が高めの可能性があります。",
+    };
+  }
+  if (countLow && unitLow) {
+    return {
+      category: "集客・単価不足型",
+      comment: "集客数・客単価の両面で改善余地があります。",
+    };
+  }
+  if (countLow && unitOk) {
+    return {
+      category: "集客不足型",
+      comment: "客単価は大きく悪くないため、集客数の底上げが課題です。",
+    };
+  }
+  if (countOk && unitLow) {
+    return {
+      category: "単価不足型",
+      comment: "集客は確保できているため、客単価・単価向上が課題です。",
+    };
+  }
+  return {
+    category: "判定不可",
+    comment: "分類条件に十分な差が出ていません。",
+  };
+}
+function buildUnderTargetCauseAnalysis_(underTargetRows, averages, resolveName) {
+  return [...(underTargetRows || [])]
+    .map((r) => {
+      const totalSales = Number(r?.metrics?.totalSales || 0);
+      const targetSales = Number(r?.metrics?.targetSales || 0);
+      const customerCount = pickMetricNullable(r?.metrics, CUSTOMER_COUNT_KEYS);
+      const dayUnitPrice =
+        unitPriceByCustomerCount_(totalSales, customerCount) ??
+        (r?.metrics?.customerUnitPrice != null ? Number(r.metrics.customerUnitPrice) : null);
+      const achievementRate = calcRate(totalSales, targetSales);
+      const shortfall = Math.max(0, targetSales - totalSales);
+      const classified = classifyUnderTargetDay_({
+        customerCount,
+        dayUnitPrice,
+        totalSales,
+        achievementRate,
+        avgDailyCustomerCount: averages.avgDailyCustomerCount,
+        avgUnitPrice: averages.customerUnitPrice,
+        avgDailySales: averages.avgDailySales,
+      });
+      return {
+        key: `${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}_cause`,
+        businessDate: r.businessDate,
+        eventName: resolveName(r),
+        totalSales,
+        targetSales,
+        shortfall,
+        achievementRate,
+        category: classified.category,
+        comment: classified.comment,
+      };
+    })
+    .sort((a, b) => Number(b.shortfall || 0) - Number(a.shortfall || 0))
+    .slice(0, 5);
 }
 function yoyBarTone_(row) {
   if (Number(row.currentSales || 0) <= 0) return "rgba(132,132,132,0.55)";
@@ -2528,6 +2696,15 @@ export default function SalesModule({ events = [], navigateBack }) {
       `売上構成：ドリンク ${pct(salesComposition.drinkRate)} / フード ${pct(salesComposition.foodRate)} / バンド飲食代 ${pct(salesComposition.bandFoodDrinkRate)} / 会場費 ${pct(salesComposition.venueRate)} / レンタル ${pct(salesComposition.rentalRate)} / その他 ${pct(salesComposition.otherRate)}`,
       `参考：バンドギャラ ${yen(bandGuaranteeSum)}（経費には含めていません）`,
     ];
+    const underTargetCauseAnalysis = buildUnderTargetCauseAnalysis_(
+      underTargetRows,
+      {
+        avgDailyCustomerCount: actualDayCount > 0 ? customerCountSum / actualDayCount : null,
+        customerUnitPrice,
+        avgDailySales,
+      },
+      (r) => resolveEventNameForAdmin(r, r.resolvedEventNames) || "イベント未登録"
+    );
 
     return {
       targetMonth,
@@ -2583,6 +2760,7 @@ export default function SalesModule({ events = [], navigateBack }) {
       costProfitBars,
       costProfitMax,
       monthlyHighlights,
+      underTargetCauseAnalysis,
       validTargetRows,
       underTargetRows,
       salesRankingTop5,
@@ -2779,6 +2957,10 @@ export default function SalesModule({ events = [], navigateBack }) {
   const dy = (v) => formatDisplayYen(v, taxMode);
   const compactDy = (v) => formatDisplayCompactYen(v, taxMode);
   const signedDy = (v) => formatSignedDisplayYen(v, taxMode);
+  const monthlyImprovementComments = useMemo(
+    () => buildMonthlyImprovementComments_(monthlyAnalysis, taxMode),
+    [monthlyAnalysis, taxMode]
+  );
 
   const switchToStaffMode = () => {
     setRoleMode("staff");
@@ -3199,6 +3381,31 @@ export default function SalesModule({ events = [], navigateBack }) {
             </div>
           </div>
 
+          <div style={analysisCardWrap("insight", vp.narrow)}>
+            <div style={analysisSecTitle("insight", ".5rem")}>月次改善コメント</div>
+            {monthlyImprovementComments.length === 0 ? (
+              <div style={{ fontSize: ".76rem", color: "rgba(240,232,208,0.5)" }}>コメントを生成するデータが不足しています</div>
+            ) : (
+              <ul
+                style={{
+                  margin: 0,
+                  paddingLeft: "1.15rem",
+                  display: "grid",
+                  gap: ".32rem",
+                  fontSize: vp.narrow ? ".8rem" : ".78rem",
+                  lineHeight: 1.55,
+                  color: "rgba(240,232,208,0.84)",
+                }}
+              >
+                {monthlyImprovementComments.map((line, i) => (
+                  <li key={`improvement_${i}`} style={{ wordBreak: "break-word" }}>
+                    {line}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
           <div style={analysisCardWrap("composition", vp.narrow)}>
             <div style={analysisSecTitle("composition", ".5rem")}>売上構成</div>
             <SalesCompositionLegend narrow={vp.narrow} />
@@ -3480,6 +3687,57 @@ export default function SalesModule({ events = [], navigateBack }) {
                     <div style={{ fontSize: ".64rem", color: "rgba(240,232,208,0.55)", marginTop: ".2rem" }}>※経費には含めていません</div>
                   </div>
                 </div>
+              </div>
+            )}
+          </div>
+
+          <div style={analysisCardWrap("causeAnalysis", vp.narrow)}>
+            <div style={analysisSecTitle("causeAnalysis", ".5rem")}>未達日の要因分析</div>
+            {monthlyAnalysis.underTargetCauseAnalysis.length === 0 ? (
+              <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.45)" }}>目標未達日はありません</div>
+            ) : (
+              <div style={{ display: "grid", gap: ".55rem" }}>
+                {monthlyAnalysis.underTargetCauseAnalysis.map((r) => (
+                  <div
+                    key={r.key}
+                    style={{
+                      padding: ".55rem .65rem",
+                      borderRadius: 5,
+                      border: `1px solid ${analysisRowBorder("causeAnalysis")}`,
+                      background: "rgba(0,0,0,0.18)",
+                    }}
+                  >
+                    <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)", marginBottom: ".18rem" }}>
+                      {r.businessDate}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: ".8rem",
+                        color: "#f0e8d0",
+                        fontWeight: 600,
+                        marginBottom: ".28rem",
+                        wordBreak: "break-word",
+                        display: "-webkit-box",
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: "vertical",
+                        overflow: "hidden",
+                      }}
+                    >
+                      {r.eventName}
+                    </div>
+                    <div style={{ fontSize: ".76rem", lineHeight: 1.5, color: "rgba(240,232,208,0.82)", marginBottom: ".22rem" }}>
+                      売上 <strong style={RANK_LIST_AMOUNT}>{dy(r.totalSales)}</strong>
+                      {" / "}
+                      目標 <strong style={RANK_LIST_SUB}>{dy(r.targetSales)}</strong>
+                      {" / "}
+                      不足 <strong style={RANK_LIST_SHORTFALL}>{dy(r.shortfall)}</strong>
+                    </div>
+                    <div style={{ fontSize: ".74rem", color: "rgba(212,168,138,0.92)", fontWeight: 600, marginBottom: ".12rem" }}>
+                      分類：{r.category}
+                    </div>
+                    <div style={{ fontSize: ".72rem", lineHeight: 1.45, color: "rgba(240,232,208,0.62)" }}>{r.comment}</div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
