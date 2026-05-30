@@ -31,6 +31,8 @@ const PREVIOUS_YEAR_SALES_2025_TOTAL = PREVIOUS_YEAR_SALES_2025.reduce((s, r) =>
 const PREVIOUS_YEAR_SALES_2025_MAP = Object.fromEntries(PREVIOUS_YEAR_SALES_2025.map((r) => [r.month, r.sales]));
 
 // ここに同系イベントカテゴリを追加（keywords を増やすだけで判定対象を拡張できます）
+// 同じ名前でなくても同系比較したいイベントは、ここにカテゴリとして追加する。
+// 将来的にはイベント管理側で category / seriesId を持たせる予定。
 // TODO: 将来的にはイベント管理側で category / seriesId を持たせ、resolveEventSeries_ ではその値を優先する。
 const EVENT_SERIES_FORBIDDEN_KEYWORDS = new Set([
   "band",
@@ -49,20 +51,9 @@ const EVENT_SERIES_FORBIDDEN_KEYWORDS = new Set([
 ]);
 const EVENT_SERIES_RULES = [
   {
-    id: "disco",
-    label: "DISCO系イベント",
-    keywords: [
-      "DISCO",
-      "DISCO NIGHT",
-      "DISCO BAND",
-      "HONEY BEE DISCO NIGHT",
-      "HONEY BEE DISCO NIGHT 2026",
-      "ディスコ",
-    ],
-  },
-  {
     id: "anison",
     label: "アニソン系イベント",
+    priority: 100,
     keywords: [
       "アニソン",
       "アニソンナイト",
@@ -74,26 +65,83 @@ const EVENT_SERIES_RULES = [
     ],
   },
   {
+    id: "disco",
+    label: "DISCO系イベント",
+    priority: 80,
+    keywords: [
+      "DISCO",
+      "DISCO NIGHT",
+      "HONEY BEE DISCO NIGHT",
+      "HONEY BEE DISCO NIGHT 2026",
+      "DISCO BAND",
+      "ディスコ",
+    ],
+  },
+  {
     id: "open_mic",
     label: "OPEN MIC系イベント",
+    priority: 70,
     keywords: ["OPEN MIC", "オープンマイク", "OPENMIC"],
   },
   {
     id: "jam_session",
     label: "Jam / Session系イベント",
+    priority: 70,
     keywords: ["JAM", "Jam", "Session", "SESSION", "セッション", "Shin's Jam", "Shins Jam"],
   },
   {
     id: "girls_collection",
     label: "GIRLS COLLECTION系イベント",
+    priority: 70,
     keywords: ["OFUNA GIRLS COLLECTION", "GIRLS COLLECTION", "ガールズコレクション"],
   },
   {
     id: "monday",
     label: "月曜日もやってMONDAY系イベント",
+    priority: 60,
     keywords: ["月曜日もやってMONDAY", "MONDAY"],
   },
+  {
+    id: "pagu",
+    label: "PAGU系イベント",
+    priority: 70,
+    keywords: ["PAGU", "PAGU音楽事務所", "PAGU音楽事務所LIVE", "PAGU事務所"],
+  },
+  {
+    id: "tamagawa_eiichi",
+    label: "玉川永一系イベント",
+    priority: 70,
+    keywords: [
+      "玉川永一",
+      "玉・川・永・一",
+      "玉 川 永 一",
+      "玉川永一＆小西",
+      "玉川永一&小西",
+      "玉川永一 小西",
+      "玉・川・永・一＆小・西",
+      "玉・川・永・一&小・西",
+    ],
+  },
+  {
+    id: "surfside",
+    label: "surfside系イベント",
+    priority: 70,
+    keywords: ["SURFSIDE", "THE SURFSIDE STOMP", "SURFSIDE STOMP", "surfside", "the surfside stomp"],
+  },
+  {
+    id: "standard_jazz",
+    label: "STANDARD JAZZ系イベント",
+    priority: 70,
+    keywords: ["STANDARD JAZZ", "STANDARD JAZZ LIVE", "Standard Jazz", "Standard Jazz Live"],
+  },
 ];
+const DISCO_STRONG_KEYWORDS = new Set([
+  "DISCO",
+  "DISCO NIGHT",
+  "DISCO BAND",
+  "HONEY BEE DISCO NIGHT",
+  "HONEY BEE DISCO NIGHT 2026",
+]);
 
 const S = {
   card: { background:"#111", border:"1px solid rgba(201,168,76,0.14)", borderRadius:6, padding:"1rem 1.1rem" },
@@ -1386,15 +1434,18 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison)
     dayBarRate != null &&
     (barTimeCount === 0 || (avgBarRate != null && dayBarRate < Math.max(5, avgBarRate * 0.7)));
   const countRatio = customerCount != null && avgCount != null && avgCount > 0 ? customerCount / avgCount : null;
-  const seriesLabel =
-    pastSimilarComparison?.matchKind === "series"
-      ? pastSimilarComparison.matchTypeLabel
-      : resolveEventSeries_({
-          sheetEventName: row.eventName,
-          eventName: row.eventName,
-          eventPerformContentFull: row.eventPerformContentFull,
-          performContentFull: row.eventPerformContentFull,
-        })?.label || "同系イベント";
+  const comparisonLabel =
+    pastSimilarComparison?.matchKind === "exactName"
+      ? "同じイベント名"
+      : pastSimilarComparison?.matchKind === "series"
+        ? pastSimilarComparison.matchTypeLabel
+        : resolveEventSeries_({
+            sheetEventName: row.eventName,
+            eventName: row.eventName,
+            eventPerformContentFull: row.eventPerformContentFull,
+            performContentFull: row.eventPerformContentFull,
+          })?.label || "同系イベント";
+  const seriesLabel = comparisonLabel;
   const pastAvg = pastSimilarComparison?.avg;
   const pastCount = pastSimilarComparison?.sampleCount || 0;
   const pastCustomerDiff =
@@ -1422,7 +1473,13 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison)
       conclusionParts.push("売上構成は月平均に近く、総合的な底上げで達成した可能性があります。");
     }
     if (pastCount > 0 && pastCustomerDiff != null && pastUnitDiff != null) {
-      if (pastCustomerDiff >= 0 && pastUnitDiff >= 0) {
+      if (pastSimilarComparison?.matchKind === "exactName") {
+        if (pastCustomerDiff >= 0 && pastUnitDiff >= 0) {
+          conclusionParts.push("同じイベント名の過去実績と比べて、集客・客単価ともに高く、好調な日でした。");
+        } else if (pastUnitDiff >= 0) {
+          conclusionParts.push("同じイベント名の過去実績と比べて客単価は高く、来店後の売上化が達成に効いています。");
+        }
+      } else if (pastCustomerDiff >= 0 && pastUnitDiff >= 0) {
         conclusionParts.push(`${seriesLabel}の過去平均より集客・客単価ともに高く、同系イベントとして好調な日でした。`);
       } else if (pastUnitDiff >= 0) {
         conclusionParts.push(`${seriesLabel}の過去平均より客単価は高く、来店後の売上化が達成に効いています。`);
@@ -1450,7 +1507,15 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison)
       );
     }
     if (pastCount > 0) {
-      if (pastCustomerDiff != null && pastCustomerDiff < -1 && pastUnitDiff != null && pastUnitDiff >= 0) {
+      if (pastSimilarComparison?.matchKind === "exactName") {
+        if (pastCustomerDiff != null && pastCustomerDiff < -1 && pastUnitDiff != null && pastUnitDiff >= 0) {
+          conclusionParts.push("同じイベント名の過去実績と比べて集客は弱いが客単価は高く、今回は来店後の売上化で補っている傾向です。");
+        } else if (pastCustomerDiff != null && pastCustomerDiff < -1) {
+          conclusionParts.push("同じイベント名の過去実績と比べて売上・集客とも弱く、今回固有の告知時期や出演者構成を確認してください。");
+        } else if (pastUnitDiff != null && pastUnitDiff >= 100) {
+          conclusionParts.push("同じイベント名の過去実績と比べて客単価が高く、来店後の飲食提案や滞在導線が機能しています。");
+        }
+      } else if (pastCustomerDiff != null && pastCustomerDiff < -1 && pastUnitDiff != null && pastUnitDiff >= 0) {
         conclusionParts.push(`${seriesLabel}の過去平均より集客は低いが客単価は高く、今回は来店後の売上化で補っている傾向です。`);
       } else if (pastCustomerDiff != null && pastCustomerDiff < -1) {
         conclusionParts.push(`${seriesLabel}の過去平均より売上・集客とも低く、告知時期や固定客への案内が課題です。`);
@@ -1463,7 +1528,12 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison)
   }
 
   let nextSeriesMemo = `次回の${seriesLabel}では、達成日の告知・出演者構成・来店後導線を記録し、再現ポイントとして残してください。`;
-  if (isAchieved) {
+  if (pastSimilarComparison?.matchKind === "exactName" && pastCount > 0) {
+    nextSeriesMemo = `次回の${primaryComparableEventNameRaw_(row) || seriesLabel}では、同じイベント名の過去実績で集客が取れた日の告知開始時期・出演者構成を確認してください。`;
+    if (unitHigh || foodHigh) {
+      nextSeriesMemo += " 今回のように客単価が取れている日は、まず来場人数の底上げを優先するのが効果的です。";
+    }
+  } else if (isAchieved) {
     const replicate = [];
     if (countHigh) replicate.push("集客が取れた告知開始時期と出演者構成");
     if (unitHigh || foodHigh) replicate.push("来店後の飲食提案・滞在導線");
@@ -1534,12 +1604,26 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison)
     },
   };
 }
-function DayAnalysisBlock({ analysis, taxMode, narrow }) {
+function DayAnalysisBlock({ analysis, taxMode, narrow, onSelectReferenceDay }) {
   if (!analysis) return null;
   const past = analysis.pastSimilarComparison;
   const fmtCount = (v) => (v != null ? `${num(v)}名` : "—");
   const fmtUnit = (v) => (v != null ? formatDisplayYen(v, taxMode) : "—");
   const fmtRate = (v) => (v != null ? pct(v) : "—");
+  const referenceChipStyle = {
+    display: "inline-block",
+    margin: ".12rem .18rem .12rem 0",
+    padding: ".14rem .38rem",
+    borderRadius: 999,
+    border: "1px solid rgba(201,168,76,0.24)",
+    background: "rgba(201,168,76,0.08)",
+    color: "rgba(240,232,208,0.78)",
+    font: "inherit",
+    fontSize: ".68rem",
+    lineHeight: 1.45,
+    cursor: onSelectReferenceDay ? "pointer" : "default",
+    textAlign: "left",
+  };
   const pastCompareRows =
     past?.sampleCount > 0
       ? [
@@ -1606,6 +1690,11 @@ function DayAnalysisBlock({ analysis, taxMode, narrow }) {
               </span>
             ) : null}
           </div>
+          {past.matchNote ? (
+            <div style={{ fontSize: ".68rem", color: "rgba(240,232,208,0.48)", marginBottom: ".18rem" }}>
+              {past.matchNote}
+            </div>
+          ) : null}
           {past.sampleCount === 0 && past.statusNote ? (
             <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)", marginBottom: ".28rem" }}>
               {past.statusNote}
@@ -1632,10 +1721,65 @@ function DayAnalysisBlock({ analysis, taxMode, narrow }) {
           ) : null}
           {past.matches?.length > 0 ? (
             <div style={{ marginBottom: ".28rem", fontSize: ".7rem", color: "rgba(240,232,208,0.52)", lineHeight: 1.45 }}>
-              参考実績：
-              {past.matches
-                .map((row) => `${(row.businessDate || "").slice(5).replace("-", "/")} ${row.eventName || row.sheetEventName || "—"}`)
-                .join(" / ")}
+              <div style={{ marginBottom: ".12rem" }}>
+                参考実績
+                {onSelectReferenceDay ? (
+                  <span style={{ marginLeft: ".25rem", color: "rgba(240,232,208,0.38)" }}>（クリックで営業レポートを表示）</span>
+                ) : null}
+                ：
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: ".08rem" }}>
+                {past.matches.map((row) => {
+                  const label = `${(row.businessDate || "").slice(5).replace("-", "/")} ${row.eventName || row.sheetEventName || "—"}`;
+                  const canSelect = onSelectReferenceDay && (row.rowKey || row.businessDate);
+                  if (!canSelect) {
+                    return (
+                      <span key={row.rowKey || label} style={referenceChipStyle}>
+                        {label}
+                      </span>
+                    );
+                  }
+                  return (
+                    <button
+                      key={row.rowKey || `${row.businessDate}_${label}`}
+                      type="button"
+                      style={referenceChipStyle}
+                      onClick={() => onSelectReferenceDay(row)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          onSelectReferenceDay(row);
+                        }
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = "rgba(201,168,76,0.16)";
+                        e.currentTarget.style.color = "rgba(240,232,208,0.92)";
+                        e.currentTarget.style.textDecoration = "underline";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = "rgba(201,168,76,0.08)";
+                        e.currentTarget.style.color = "rgba(240,232,208,0.78)";
+                        e.currentTarget.style.textDecoration = "none";
+                      }}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+          {past.debugInfo?.seriesCategory || past.debugInfo?.compareKey ? (
+            <div style={{ marginBottom: ".22rem", fontSize: ".58rem", color: "rgba(240,232,208,0.34)", lineHeight: 1.45 }}>
+              {past.debugInfo.resolveSource ? `判定元：${past.debugInfo.resolveSource}` : null}
+              {past.debugInfo.seriesCategory ? (
+                <span style={{ marginLeft: past.debugInfo.resolveSource ? ".45rem" : 0 }}>
+                  判定カテゴリ：{past.debugInfo.seriesCategory}
+                </span>
+              ) : null}
+              {past.debugInfo.compareKey ? (
+                <span style={{ marginLeft: ".45rem" }}>比較キー：{past.debugInfo.compareKey}</span>
+              ) : null}
             </div>
           ) : null}
           <div style={{ fontSize: narrow ? ".8rem" : ".76rem", lineHeight: 1.6, color: "rgba(240,232,208,0.84)", wordBreak: "break-word" }}>
@@ -2504,6 +2648,15 @@ function formatPerformDisplay(text, maxLen = 140) {
   if (full.length <= maxLen) return { display: full, full };
   return { display: `${full.slice(0, maxLen)}…`, full };
 }
+function normalizeEventNameForCompare_(text) {
+  if (text == null || text === undefined) return "";
+  let s = String(text).normalize("NFKC").trim().toLowerCase();
+  s = s.replace(/\bvol\.?\s*\d+\b/gi, "").replace(/\bvol\d+\b/gi, "");
+  s = s.replace(/[＆&]/g, "");
+  s = s.replace(/[・･]/g, "");
+  s = s.replace(/[〜～ｰー\-－―\s]/g, "");
+  return s.trim();
+}
 function normalizeEventSeriesText_(text) {
   return String(text || "")
     .normalize("NFKC")
@@ -2518,25 +2671,46 @@ function isForbiddenEventSeriesKeyword_(keyword) {
   if (normalized.length <= 4 && EVENT_SERIES_FORBIDDEN_KEYWORDS.has(normalized)) return true;
   return false;
 }
-function matchEventSeries_(text, rule) {
-  const normalized = normalizeEventSeriesText_(text);
-  if (!normalized || !rule?.keywords?.length) return false;
-  for (const keyword of rule.keywords) {
-    const normalizedKeyword = normalizeEventSeriesText_(keyword);
-    if (!normalizedKeyword || normalizedKeyword.length < 3) continue;
-    if (isForbiddenEventSeriesKeyword_(normalizedKeyword)) continue;
-    if (normalized.includes(normalizedKeyword)) return true;
+function matchEventSeriesKeyword_(searchText, keyword, rule, { performOnly = false } = {}) {
+  const normalized = normalizeEventSeriesText_(searchText);
+  const normalizedKeyword = normalizeEventSeriesText_(keyword);
+  if (!normalized || !normalizedKeyword || normalizedKeyword.length < 3) return false;
+  if (isForbiddenEventSeriesKeyword_(normalizedKeyword)) return false;
+  if (!normalized.includes(normalizedKeyword)) return false;
+
+  if (rule?.id === "disco") {
+    if (normalizedKeyword === "ディスコ" && performOnly) return false;
+    if (performOnly && !DISCO_STRONG_KEYWORDS.has(normalizedKeyword)) return false;
   }
-  return false;
+  return true;
 }
-function buildEventSeriesSearchText_(info) {
+function matchEventSeriesInText_(searchText, rule, options = {}) {
+  if (!searchText || !rule?.keywords?.length) return false;
+  return rule.keywords.some((keyword) => matchEventSeriesKeyword_(searchText, keyword, rule, options));
+}
+function resolveEventSeriesMatchesInText_(searchText, options = {}) {
+  if (!searchText) return [];
+  return EVENT_SERIES_RULES.filter((rule) => matchEventSeriesInText_(searchText, rule, options));
+}
+function pickHighestPrioritySeriesRule_(rules) {
+  if (!rules?.length) return null;
+  return [...rules].sort((a, b) => Number(b.priority || 0) - Number(a.priority || 0))[0];
+}
+function buildEventSeriesNameText_(info) {
   const event = info?.event || null;
-  const sheetName = String(info?.sheetEventName || info?.record?.sheetEventName || "").trim();
-  const resolvedName = String(info?.eventName || "").trim();
   return [
-    sheetName,
-    resolvedName,
+    info?.sheetEventName,
+    info?.record?.sheetEventName,
+    info?.eventName,
+    info?.eventTitle,
     event?.name,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+function buildEventSeriesPerformText_(info) {
+  const event = info?.event || null;
+  return [
     event?.perf,
     event?.performers,
     event?.desc,
@@ -2549,6 +2723,9 @@ function buildEventSeriesSearchText_(info) {
     .filter(Boolean)
     .join(" ");
 }
+function buildEventSeriesSearchText_(info) {
+  return [buildEventSeriesNameText_(info), buildEventSeriesPerformText_(info)].filter(Boolean).join(" ");
+}
 function resolveEventSeries_(rowOrEventInfo) {
   const info = rowOrEventInfo || {};
   const event = info.event || null;
@@ -2557,11 +2734,55 @@ function resolveEventSeries_(rowOrEventInfo) {
     const matchedRule = EVENT_SERIES_RULES.find((rule) => rule.id === explicitSeriesId);
     if (matchedRule) return matchedRule;
   }
-  const searchText = buildEventSeriesSearchText_(info);
-  for (const rule of EVENT_SERIES_RULES) {
-    if (matchEventSeries_(searchText, rule)) return rule;
+
+  const nameText = buildEventSeriesNameText_(info);
+  const nameMatch = pickHighestPrioritySeriesRule_(resolveEventSeriesMatchesInText_(nameText, { performOnly: false }));
+  if (nameMatch) return nameMatch;
+
+  const performText = buildEventSeriesPerformText_(info);
+  return pickHighestPrioritySeriesRule_(resolveEventSeriesMatchesInText_(performText, { performOnly: true }));
+}
+function collectComparableEventNameNorms_(row) {
+  const seen = new Set();
+  const out = [];
+  for (const raw of [row?.sheetEventName, row?.eventName, row?.event?.name]) {
+    const normalized = normalizeEventNameForCompare_(raw);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
   }
-  return null;
+  return out;
+}
+function primaryComparableEventNameNorm_(row) {
+  const raw = String(row?.sheetEventName || row?.eventName || row?.event?.name || "").trim();
+  return normalizeEventNameForCompare_(raw);
+}
+function primaryComparableEventNameRaw_(row) {
+  return String(row?.sheetEventName || row?.eventName || row?.event?.name || "").trim();
+}
+function eventNamesExactMatch_(left, right) {
+  const leftNorms = collectComparableEventNameNorms_(left);
+  const rightNorms = collectComparableEventNameNorms_(right);
+  if (!leftNorms.length || !rightNorms.length) return false;
+  return leftNorms.some((leftNorm) => rightNorms.includes(leftNorm));
+}
+function eventNamesPartialMatch_(left, right) {
+  const leftNorms = collectComparableEventNameNorms_(left).filter((norm) => norm.length >= 3);
+  const rightNorms = collectComparableEventNameNorms_(right).filter((norm) => norm.length >= 3);
+  if (!leftNorms.length || !rightNorms.length) return false;
+  return leftNorms.some((leftNorm) =>
+    rightNorms.some((rightNorm) => leftNorm.includes(rightNorm) || rightNorm.includes(leftNorm))
+  );
+}
+function hasNormalizedSpellingVariant_(selected, matches) {
+  const selectedRaw = primaryComparableEventNameRaw_(selected);
+  const selectedNorm = primaryComparableEventNameNorm_(selected);
+  if (!selectedNorm) return false;
+  return (matches || []).some((row) => {
+    const rowRaw = primaryComparableEventNameRaw_(row);
+    const rowNorm = primaryComparableEventNameNorm_(row);
+    return rowNorm === selectedNorm && rowRaw && selectedRaw && rowRaw !== selectedRaw;
+  });
 }
 function extractPerformerTokens_(text) {
   const normalized = normalizePerformText(text);
@@ -2599,9 +2820,14 @@ function recordToPastComparableDay_(record, events) {
   const foodDrinkSalesBase = record?.metrics?.foodDrinkSales != null ? Number(record.metrics.foodDrinkSales) : null;
   const foodDrinkSalesIncludingBand = foodDrinkSalesIncludingBand_(foodDrinkSalesBase, bandFoodDrinkSales);
   const idx = record?._idx != null ? record._idx : 0;
+  const sourceBlock = record?.sourceBlock ?? "";
+  const sourceColumn = record?.sourceColumn ?? "";
   return {
-    rowKey: `${record.businessDate}_${record.sourceBlock}_${record.sourceColumn}_${idx}`,
+    rowKey: `${record.businessDate}_${sourceBlock}_${sourceColumn}_${idx}`,
     businessDate: record.businessDate,
+    sourceBlock,
+    sourceColumn,
+    recordIdx: idx,
     sheetEventName: sheetName,
     eventName,
     event: matchedEvent,
@@ -2685,9 +2911,25 @@ function averagePastComparableMetrics_(matches) {
 }
 function findPastSimilarMatches_(selected, pool) {
   const candidates = (pool || []).filter((row) => row?.rowKey && row.rowKey !== selected?.rowKey);
+  const selectedPerformText =
+    selected?.eventPerformContentFull || selected?.performContentFull || selected?.eventPerformContent || selected?.performContent || "";
+  const compareKey = primaryComparableEventNameNorm_(selected);
   const selectedSeries = resolveEventSeries_(selected);
-  const selectedName = normText(selected?.eventName || selected?.sheetEventName || "");
-  const selectedPerformText = selected?.eventPerformContentFull || selected?.performContentFull || selected?.eventPerformContent || selected?.performContent || "";
+  const resolveSource = buildEventSeriesNameText_(selected) ? "イベント名" : "出演・内容";
+
+  const exactMatches = candidates.filter((row) => eventNamesExactMatch_(selected, row));
+  if (exactMatches.length) {
+    return {
+      matchTypeLabel: "同じイベント名",
+      matchKind: "exactName",
+      seriesRule: null,
+      matches: exactMatches,
+      compareKey,
+      matchNote: hasNormalizedSpellingVariant_(selected, exactMatches) ? "表記ゆれを含めて比較しています" : null,
+      resolveSource,
+      seriesCategory: selectedSeries?.label || null,
+    };
+  }
 
   if (selectedSeries) {
     const matches = candidates.filter((row) => {
@@ -2699,14 +2941,11 @@ function findPastSimilarMatches_(selected, pool) {
       matchKind: "series",
       seriesRule: selectedSeries,
       matches,
+      compareKey,
+      matchNote: null,
+      resolveSource,
+      seriesCategory: selectedSeries.label,
     };
-  }
-
-  if (selectedName) {
-    const matches = candidates.filter((row) => normText(row.eventName || row.sheetEventName || "") === selectedName);
-    if (matches.length) {
-      return { matchTypeLabel: "同じイベント名", matchKind: "exactName", seriesRule: null, matches };
-    }
   }
 
   const performerTokens = extractPerformerTokens_(selectedPerformText);
@@ -2718,7 +2957,16 @@ function findPastSimilarMatches_(selected, pool) {
       )
     );
     if (matches.length) {
-      return { matchTypeLabel: "同じ出演者を含む実績（参考）", matchKind: "performerSingle", seriesRule: null, matches };
+      return {
+        matchTypeLabel: "同じ出演者を含む実績（参考）",
+        matchKind: "performerSingle",
+        seriesRule: null,
+        matches,
+        compareKey,
+        matchNote: null,
+        resolveSource,
+        seriesCategory: null,
+      };
     }
   }
 
@@ -2730,21 +2978,91 @@ function findPastSimilarMatches_(selected, pool) {
       )
     );
     if (matches.length) {
-      return { matchTypeLabel: "同じ出演者組み合わせ", matchKind: "performerCombo", seriesRule: null, matches };
+      return {
+        matchTypeLabel: "同じ出演者組み合わせ",
+        matchKind: "performerCombo",
+        seriesRule: null,
+        matches,
+        compareKey,
+        matchNote: null,
+        resolveSource,
+        seriesCategory: null,
+      };
     }
   }
 
-  if (selectedName) {
-    const matches = candidates.filter((row) => {
-      const candidateName = normText(row.eventName || row.sheetEventName || "");
-      return candidateName && (candidateName.includes(selectedName) || selectedName.includes(candidateName));
-    });
+  if (compareKey.length >= 3) {
+    const matches = candidates.filter((row) => eventNamesPartialMatch_(selected, row));
     if (matches.length) {
-      return { matchTypeLabel: "イベント名の部分一致", matchKind: "partialName", seriesRule: null, matches };
+      return {
+        matchTypeLabel: "イベント名の部分一致",
+        matchKind: "partialName",
+        seriesRule: null,
+        matches,
+        compareKey,
+        matchNote: hasNormalizedSpellingVariant_(selected, matches) ? "表記ゆれを含めて比較しています" : null,
+        resolveSource,
+        seriesCategory: null,
+      };
     }
   }
 
-  return { matchTypeLabel: null, matchKind: null, seriesRule: null, matches: [] };
+  return { matchTypeLabel: null, matchKind: null, seriesRule: null, matches: [], compareKey, matchNote: null, resolveSource, seriesCategory: null };
+}
+function parseTrendRowKeyParts_(rowKey) {
+  const m = String(rowKey || "").match(/^(\d{4}-\d{2}-\d{2})_(.+)_([^_]+)_(\d+)$/);
+  if (!m) return null;
+  return { businessDate: m[1], sourceBlock: m[2], sourceColumn: m[3], recordIdx: m[4] };
+}
+function resolveTrendRowKeyForReference_(reference, trendRows) {
+  const rows = Array.isArray(trendRows) ? trendRows : [];
+  if (!reference || !rows.length) return "";
+
+  if (reference.rowKey) {
+    const exact = rows.find((r) => r.rowKey === reference.rowKey);
+    if (exact) return exact.rowKey;
+  }
+
+  const parsed = parseTrendRowKeyParts_(reference.rowKey);
+  const businessDate = reference.businessDate || parsed?.businessDate || "";
+  const sourceBlock = reference.sourceBlock ?? parsed?.sourceBlock ?? "";
+  const sourceColumn = reference.sourceColumn ?? parsed?.sourceColumn ?? "";
+  const recordIdx = reference.recordIdx ?? parsed?.recordIdx ?? "";
+
+  if (businessDate && sourceBlock !== "" && sourceColumn !== "" && recordIdx !== "") {
+    const structuralKey = `${businessDate}_${sourceBlock}_${sourceColumn}_${recordIdx}`;
+    const structural = rows.find((r) => r.rowKey === structuralKey);
+    if (structural) return structural.rowKey;
+  }
+
+  if (businessDate && sourceBlock !== "" && sourceColumn !== "") {
+    const structuralMatches = rows.filter((r) =>
+      String(r.rowKey || "").startsWith(`${businessDate}_${sourceBlock}_${sourceColumn}_`)
+    );
+    if (structuralMatches.length === 1) return structuralMatches[0].rowKey;
+  }
+
+  const refNorms = collectComparableEventNameNorms_(reference);
+  if (businessDate && refNorms.length) {
+    const byDateName = rows.filter((r) => {
+      if (r.businessDate !== businessDate) return false;
+      const rowNorms = collectComparableEventNameNorms_({
+        sheetEventName: r.eventName,
+        eventName: r.eventName,
+      });
+      return refNorms.some((norm) => rowNorms.includes(norm));
+    });
+    if (byDateName.length === 1) return byDateName[0].rowKey;
+    if (byDateName.length > 1 && sourceBlock !== "" && sourceColumn !== "") {
+      const narrowed = byDateName.filter((r) => {
+        const parts = parseTrendRowKeyParts_(r.rowKey);
+        return parts && parts.sourceBlock === sourceBlock && parts.sourceColumn === sourceColumn;
+      });
+      if (narrowed.length === 1) return narrowed[0].rowKey;
+    }
+  }
+
+  return reference.rowKey || "";
 }
 function buildPastSimilarComparisonComment_(selected, avg, matchInfo, options = {}) {
   const { pastMonthsDataLoaded = false, yearlyLoading = false } = options;
@@ -2778,6 +3096,26 @@ function buildPastSimilarComparisonComment_(selected, avg, matchInfo, options = 
     selected.customerUnitPrice != null && avg.customerUnitPrice != null
       ? Number(selected.customerUnitPrice) - Number(avg.customerUnitPrice)
       : null;
+  const foodDiff =
+    selected.foodDrinkRate != null && avg.foodDrinkRate != null
+      ? Number(selected.foodDrinkRate) - Number(avg.foodDrinkRate)
+      : null;
+
+  if (matchKind === "exactName") {
+    if (customerDiff != null && customerDiff < -1 && unitDiff != null && unitDiff >= 0) {
+      return "同じイベント名の過去実績と比べて、今回は集客が弱めです。イベント自体の傾向よりも、今回の告知時期や出演者構成の影響を確認してください。";
+    }
+    if (unitDiff != null && unitDiff >= 100) {
+      return "同じイベント名の過去実績と比べて、今回は客単価が高めです。来店後の飲食提案や終演後の滞在導線がうまく機能した可能性があります。";
+    }
+    if (salesDiff < 0 && customerDiff != null && customerDiff < -1) {
+      return "同じイベント名の過去実績と比べて、今回は売上・集客とも弱めです。今回固有の告知時期や出演者構成を確認してください。";
+    }
+    if (salesDiff >= 0 && unitDiff != null && unitDiff >= 0) {
+      return "同じイベント名の過去実績と比べて、今回は売上・客単価が高めです。再現できた告知・来店後導線を記録してください。";
+    }
+    return "同じイベント名の過去実績と比べて、今回の位置づけを確認してください。";
+  }
 
   if (matchKind === "series") {
     if (customerDiff != null && customerDiff < -1 && unitDiff != null && unitDiff >= 0) {
@@ -2788,6 +3126,17 @@ function buildPastSimilarComparisonComment_(selected, avg, matchInfo, options = 
     }
     if (unitDiff != null && unitDiff >= 100 && (customerDiff == null || Math.abs(customerDiff) <= 2)) {
       return `${seriesLabel}の過去平均より客単価が高めです。飲食提案や滞在導線は良い可能性があります。`;
+    }
+    if (
+      seriesRule?.id === "surfside" &&
+      Math.abs(salesDiff) <= Math.max(10000, Number(avg.totalSales || 0) * 0.1) &&
+      customerDiff != null &&
+      Math.abs(customerDiff) <= 3
+    ) {
+      return `${seriesLabel}の過去実績と比べて、今回は売上・集客ともに近い水準です。大きな崩れはないため、次回は飲食比率やバータイム比率の底上げを確認してください。`;
+    }
+    if (seriesRule?.id === "standard_jazz" && foodDiff != null && foodDiff >= 3) {
+      return `${seriesLabel}の過去実績と比べて、今回は飲食比率が高めです。客層に合ったフード・ドリンク提案が機能している可能性があります。`;
     }
     if (salesDiff >= 0 && unitDiff != null && unitDiff >= 0) {
       return `${seriesLabel}の過去実績と比べて、今回は売上・客単価が高めです。同系イベントとして再現ポイントを記録してください。`;
@@ -2822,6 +3171,14 @@ function buildPastSimilarComparison_(selected, pool, taxMode, options = {}) {
     matches: matchInfo.matches.slice(0, 3),
     avg,
     comment,
+    matchNote: matchInfo.matchNote || null,
+    compareKey: matchInfo.compareKey || null,
+    debugInfo: {
+      resolveSource: matchInfo.resolveSource || null,
+      seriesCategory: matchInfo.seriesCategory || matchInfo.seriesRule?.label || null,
+      compareKey: matchInfo.compareKey || null,
+      matchType: matchInfo.matchKind || null,
+    },
     statusNote:
       sampleCount > 0 ? null : matchInfo.matchKind === "series" ? "過去同系実績：未取得または該当なし" : null,
     pastMonthsDataLoaded: !!options.pastMonthsDataLoaded,
@@ -3392,6 +3749,7 @@ export default function SalesModule({ events = [], navigateBack }) {
   const [yearlyMonthData, setYearlyMonthData] = useState([]);
   const [selectedTrendRowKey, setSelectedTrendRowKey] = useState("");
   const dayReportRef = useRef(null);
+  const pendingReportReferenceRef = useRef(null);
   const [updatedAt, setUpdatedAt] = useState("");
   const currentBusinessDate = getCurrentBusinessDateForSales();
   const vp = useSalesViewport();
@@ -3884,6 +4242,20 @@ export default function SalesModule({ events = [], navigateBack }) {
       setSelectedTrendRowKey("");
       return;
     }
+    if (pendingReportReferenceRef.current) {
+      const resolvedKey = resolveTrendRowKeyForReference_(
+        pendingReportReferenceRef.current,
+        monthlyAnalysis.dailyTrendRows
+      );
+      if (resolvedKey && monthlyAnalysis.dailyTrendRows.some((r) => r.rowKey === resolvedKey)) {
+        pendingReportReferenceRef.current = null;
+        setSelectedTrendRowKey(resolvedKey);
+        window.setTimeout(() => {
+          dayReportRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 60);
+        return;
+      }
+    }
     const exists = monthlyAnalysis.dailyTrendRows.some((r) => r.rowKey === selectedTrendRowKey);
     if (!exists) {
       setSelectedTrendRowKey(monthlyAnalysis.dailyTrendRows[0].rowKey);
@@ -3976,6 +4348,17 @@ export default function SalesModule({ events = [], navigateBack }) {
     window.setTimeout(() => {
       dayReportRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 60);
+  };
+  const selectReferenceDayForReport_ = (row) => {
+    if (!row?.rowKey && !row?.businessDate) return;
+    const refMonth = normalizeMonth(String(row.businessDate || "").slice(0, 7));
+    if (refMonth && refMonth !== normalizeMonth(targetMonth)) {
+      pendingReportReferenceRef.current = row;
+      setTargetMonth(refMonth);
+      return;
+    }
+    const resolvedKey = resolveTrendRowKeyForReference_(row, monthlyAnalysis.dailyTrendRows);
+    if (resolvedKey) selectCauseDayForReport_(resolvedKey);
   };
   const yearlyAnalysis = useMemo(() => {
     if (!yearlyMonthData.length) return null;
@@ -4813,7 +5196,12 @@ export default function SalesModule({ events = [], navigateBack }) {
                     <div style={{ ...analysisNote({ marginTop: ".28rem" }, vp.narrow) }}>{BAR_TIME_UNIT_PRICE_NOTE}</div>
                   </div>
 
-                  <DayAnalysisBlock analysis={selectedDayAnalysis} taxMode={taxMode} narrow={vp.narrow} />
+                  <DayAnalysisBlock
+                    analysis={selectedDayAnalysis}
+                    taxMode={taxMode}
+                    narrow={vp.narrow}
+                    onSelectReferenceDay={selectReferenceDayForReport_}
+                  />
 
                   <div style={{ marginBottom: ".55rem" }}>
                     <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>C. 飲食内訳</div>
