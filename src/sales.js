@@ -798,16 +798,78 @@ function pickProgressWeakSide_(causeAnalysis) {
   if (unitWeak > customerWeak) return "unit";
   return "both";
 }
-function buildUnderTargetCauseAdvice_(causeAnalysis) {
+function resolveMonthPhase_(targetMonth, currentBusinessDate) {
+  const selected = normalizeMonth(targetMonth) || "";
+  const current = String(currentBusinessDate || "").slice(0, 7);
+  if (!selected || !current) {
+    return { endedMonth: false, currentMonth: true, futureMonth: false };
+  }
+  if (selected < current) return { endedMonth: true, currentMonth: false, futureMonth: false };
+  if (selected > current) return { endedMonth: false, currentMonth: false, futureMonth: true };
+  return { endedMonth: false, currentMonth: true, futureMonth: false };
+}
+function resolveProgressTier_(rate) {
+  if (rate == null || !Number.isFinite(Number(rate))) return "unknown";
+  if (rate >= 100) return "achieved";
+  if (rate >= 90) return "almost";
+  return "atRisk";
+}
+function buildAdviceContext_(analysis, taxMode, targetMonth, currentBusinessDate) {
+  const a = analysis || {};
+  const phase = resolveMonthPhase_(targetMonth, currentBusinessDate);
+  const tier = resolveProgressTier_(a.monthlyProgressRate);
+  return { analysis: a, taxMode, phase, tier };
+}
+function markCauseTopics_(topCat, covered) {
+  if (!topCat || !covered) return;
+  if (topCat.includes("集客")) covered.customer = true;
+  if (topCat.includes("単価")) covered.unit = true;
+}
+function buildUnderTargetCauseAdvice_(ctx, covered) {
+  const { analysis: a, phase, tier } = ctx;
+  const causeAnalysis = a.underTargetCauseAnalysis;
   const rows = (causeAnalysis || []).filter((r) => r?.category && r.category !== "判定不可");
   if (rows.length === 0) return null;
   const counts = countUnderTargetCategories_(causeAnalysis);
-  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const sorted = Object.entries(counts).sort((x, y) => y[1] - x[1]);
   const [topCat, topCount] = sorted[0] || [];
   if (!topCat || !topCount) return null;
-  const shouldShow = topCount >= 2 || topCount >= Math.ceil(rows.length / 2);
+
+  if (tier === "achieved") {
+    markCauseTopics_(topCat, covered);
+    const lightMessages = {
+      集客不足型:
+        "月間では達成していますが、一部未達日は集客不足型が見られました。次月の参考として、告知・予約のタイミングを確認してください。",
+      単価不足型:
+        "月間では達成していますが、一部未達日は単価不足型が見られました。来店後の注文導線を次月の改善参考にしてください。",
+      "集客・単価不足型":
+        "月間では達成していますが、一部未達日では集客・単価の両面に課題が見られました。次月の参考として傾向を確認してください。",
+      目標過大の可能性:
+        "月間では達成していますが、目標過大の可能性がある未達日もあります。次月の目標設定の参考にしてください。",
+    };
+    return lightMessages[topCat] || "月間では達成していますが、一部未達日の傾向も確認しておくと次月に活かせます。";
+  }
+
+  const shouldShow = topCount >= 2 || topCount >= Math.ceil(rows.length / 2) || tier === "atRisk";
   if (!shouldShow) return null;
-  const messages = {
+
+  markCauseTopics_(topCat, covered);
+
+  if (phase.endedMonth) {
+    const endedMessages = {
+      集客不足型:
+        "未達日は集客不足型が目立ちました。次月はイベント告知の開始時期、予約確認、出演者との集客共有を早めに設計してください。",
+      単価不足型:
+        "未達日は単価不足型が目立ちました。次月はドリンク追加、フード提案、セットメニューなど、来店後の注文導線を見直してください。",
+      "集客・単価不足型":
+        "未達日は集客・単価の両面で不足が目立ちました。次月は告知・予約導線と来店後の追加注文導線をセットで見直してください。",
+      目標過大の可能性:
+        "目標過大の可能性がある日もあります。次月の目標設定では、過去同系イベントの実績を基準に妥当性を確認してください。",
+    };
+    return endedMessages[topCat] || null;
+  }
+
+  const currentMessages = {
     集客不足型:
       "未達日は集客不足型が目立ちます。イベント前の告知頻度、予約確認、出演者との集客共有を強化してください。",
     単価不足型:
@@ -817,115 +879,203 @@ function buildUnderTargetCauseAdvice_(causeAnalysis) {
     目標過大の可能性:
       "未達の中には目標過大の可能性がある日もあります。過去同系イベントの実績を基準に、目標設定の妥当性を見直してください。",
   };
-  return messages[topCat] || null;
+  return currentMessages[topCat] || null;
 }
-function buildSalesProgressAdvice_(a, taxMode) {
+function buildSalesProgressAdvice_(ctx) {
+  const { analysis: a, taxMode, phase, tier } = ctx;
   if (!(Number(a.fullMonthTargetSalesSum || 0) > 0)) return null;
   const remaining = Math.max(0, Number(a.fullMonthTargetSalesSum || 0) - Number(a.totalSalesSum || 0));
   const rate = a.monthlyProgressRate;
-  const causeAnalysis = a.underTargetCauseAnalysis;
-  const weakSide = pickProgressWeakSide_(causeAnalysis);
-  const causeCounts = countUnderTargetCategories_(causeAnalysis);
+  const weakSide = pickProgressWeakSide_(a.underTargetCauseAnalysis);
+  const causeCounts = countUnderTargetCategories_(a.underTargetCauseAnalysis);
   const hasCustomerCause = (causeCounts["集客不足型"] || 0) + (causeCounts["集客・単価不足型"] || 0) > 0;
   const hasUnitCause = (causeCounts["単価不足型"] || 0) + (causeCounts["集客・単価不足型"] || 0) > 0;
 
-  if (rate != null && rate >= 100) {
-    return "月間目標は達成済みです。次は売上を作った要因を確認し、集客人数・客単価・飲食売上のどれが伸びたかを来月のイベント設計に活かしてください。";
-  }
-  if (rate != null && rate >= 90) {
-    let action =
-      "残り営業日は集客数を落とさないことに加え、ドリンク追加やフード提案で客単価を少し上げると達成が現実的になります。";
-    if (weakSide === "customer") {
-      action =
-        "残り営業日は集客数を落とさないことが最優先です。直近イベントの事前告知と予約確認を強化してください。";
-    } else if (weakSide === "unit") {
-      action =
-        "残り営業日は集客を維持しつつ、ドリンク追加やフード提案で客単価を少し上げると達成が現実的になります。";
+  if (tier === "achieved") {
+    if (phase.endedMonth) {
+      return "月間目標は達成済みです。次月に再現するため、売上を押し上げた要因が集客人数・客単価・飲食売上のどれだったかを確認してください。";
     }
-    return `売上は目標まで ${formatDisplayYen(remaining, taxMode)} で、達成圏内です。${action}`;
-  }
-  if (rate != null) {
-    if (hasCustomerCause && !hasUnitCause) {
-      return `月間進捗率は ${pct(rate)} で未達リスクがあります。未達日は集客不足型が目立つため、告知・予約導線と出演者への集客共有を優先してください。`;
+    if (phase.currentMonth) {
+      return "月間目標は達成済みです。残り営業日は上積み期間として、集客人数・客単価・飲食売上のどれが伸びているかを確認し、好調要因を維持してください。";
     }
-    if (hasUnitCause && !hasCustomerCause) {
-      return `月間進捗率は ${pct(rate)} で未達リスクがあります。未達日は単価不足型が目立つため、フード提案と追加注文導線を優先してください。`;
-    }
-    return `月間進捗率は ${pct(rate)} で未達リスクがあります。未達日の傾向を確認し、集客不足型が多ければ告知・予約導線、単価不足型が多ければフード提案と追加注文導線を優先してください。`;
+    return "月間目標は達成済みです。売上を押し上げた要因が集客人数・客単価・飲食売上のどれだったかを確認してください。";
   }
+
+  if (tier === "almost") {
+    if (phase.endedMonth) {
+      return `売上は目標に対して ${formatDisplayYen(remaining, taxMode)} 不足し、月間進捗率は ${pct(rate)} でした。大きく崩れてはいませんが、あと一歩届かなかった要因を未達日の分類から確認し、次月のイベント設計に反映してください。`;
+    }
+    if (phase.currentMonth) {
+      let action =
+        "残り営業日は集客数を落とさないことに加え、ドリンク追加やフード提案で客単価を少し上げると達成に近づきます。";
+      if (weakSide === "customer") {
+        action =
+          "残り営業日は集客数を落とさないことを優先し、直近イベントの予約確認とSNS再告知を強化してください。";
+      } else if (weakSide === "unit") {
+        action =
+          "残り営業日は集客を維持しつつ、ドリンク追加やフード提案で客単価を少し上げると達成に近づきます。";
+      }
+      return `売上は目標まで ${formatDisplayYen(remaining, taxMode)} で、達成圏内です。${action}`;
+    }
+    return `売上は目標に対して ${formatDisplayYen(remaining, taxMode)} 不足し、月間進捗率は ${pct(rate)} でした。未達日の分類から要因を確認し、次月のイベント設計に反映してください。`;
+  }
+
+  if (tier === "atRisk") {
+    if (phase.endedMonth) {
+      if (hasCustomerCause && !hasUnitCause) {
+        return `月間進捗率は ${pct(rate)} で、目標未達で着地しました。未達日は集客不足型が目立つため、次月は告知・予約導線と出演者への集客共有を改善テーマにしてください。`;
+      }
+      if (hasUnitCause && !hasCustomerCause) {
+        return `月間進捗率は ${pct(rate)} で、目標未達で着地しました。未達日は単価不足型が目立つため、次月はフード提案と追加注文導線を改善テーマにしてください。`;
+      }
+      return `月間進捗率は ${pct(rate)} で、目標未達で着地しました。未達日の要因を確認し、集客不足型が多ければ告知・予約導線、単価不足型が多ければフード提案と追加注文導線を次月の改善テーマにしてください。`;
+    }
+    if (phase.currentMonth) {
+      if (hasCustomerCause && !hasUnitCause) {
+        return `月間進捗率が ${pct(rate)} で、未達リスクがあります。未達日は集客不足型が目立つため、告知・予約導線と出演者への集客共有を優先してください。`;
+      }
+      if (hasUnitCause && !hasCustomerCause) {
+        return `月間進捗率が ${pct(rate)} で、未達リスクがあります。未達日は単価不足型が目立つため、フード提案と追加注文導線を優先してください。`;
+      }
+      return `月間進捗率が ${pct(rate)} で、未達リスクがあります。未達日の傾向を確認し、集客不足型が多ければ告知・予約導線、単価不足型が多ければフード提案と追加注文導線を優先してください。`;
+    }
+  }
+
   return null;
 }
-function buildYoyAdvice_(a) {
+function buildYoyAdvice_(ctx) {
+  const { analysis: a, phase, tier } = ctx;
   const yoyRate = a.priorYearMonth?.prevMonthRate;
   if (yoyRate == null) return null;
+
+  if (tier === "achieved" && yoyRate >= 110) {
+    return "前年同月比も好調です。大型イベントによる一時的な上振れなのか、通常営業の底上げなのかを分けて見ると、再現しやすい成功パターンが見つかります。";
+  }
   if (yoyRate >= 110) {
-    return `前年同月比は ${pct1(yoyRate)} と好調です。売上が伸びている一方で、集客増によるものか客単価上昇によるものかを分けて確認すると、再現しやすい成功パターンが見つかります。`;
+    const tail = phase.endedMonth
+      ? "次月に再現するため、集客増か客単価上昇かを分けて確認してください。"
+      : "集客増によるものか客単価上昇によるものかを分けて確認すると、再現しやすい成功パターンが見つかります。";
+    return `前年同月比は ${pct1(yoyRate)} と好調です。${tail}`;
   }
   if (yoyRate >= 90) {
+    if (phase.endedMonth) {
+      return `前年同月比は ${pct1(yoyRate)} で、前年並みを維持しました。ただし大きな上振れではないため、次月は集客人数・客単価・飲食比率のどれを伸ばすかを明確にしてください。`;
+    }
     return `前年同月比は ${pct1(yoyRate)} でほぼ横ばいです。売上維持はできていますが、集客人数・客単価・飲食比率のどれかを伸ばさないと大きな上振れは作りにくい状態です。`;
+  }
+  if (phase.endedMonth) {
+    return "前年同月を下回りました。前年より集客が落ちていたのか、客単価が落ちていたのかを確認し、次月は弱い方に施策を寄せてください。";
   }
   return "前年同月を下回っています。前年より集客が落ちているのか、客単価が落ちているのかを優先して確認し、弱い方に施策を寄せてください。";
 }
-function buildCustomerAdvice_(a) {
+function buildCustomerAdvice_(ctx, covered) {
+  const { analysis: a, phase, tier } = ctx;
   if (!(Number(a.customerCountSum || 0) > 0)) return null;
   const avgLabel = a.avgDailyCustomerCount != null ? `${num(a.avgDailyCustomerCount)}名` : "—";
   const base = `月間総集客人数は ${num(a.customerCountSum)}名、1日平均は ${avgLabel}です。`;
-  const progress = a.monthlyProgressRate;
-  const causeCounts = countUnderTargetCategories_(a.underTargetCauseAnalysis);
-  const customerCauseHeavy =
-    (causeCounts["集客不足型"] || 0) + (causeCounts["集客・単価不足型"] || 0) >= 2;
   const unitPriceCarrying =
     a.customerUnitPrice != null &&
     a.normalCustomerUnitPrice != null &&
     Number(a.customerUnitPrice) >= Number(a.normalCustomerUnitPrice);
 
-  if (progress != null && progress < 90) {
+  if (tier === "achieved") {
+    return `${base}売上達成に寄与した集客人数・客単価・飲食売上の内訳を確認し、次月に再現できるパターンを整理してください。`;
+  }
+
+  if (covered?.customer) {
+    if (covered?.unit || unitPriceCarrying) {
+      return `${base}客単価の水準も合わせて確認すると、次${phase.endedMonth ? "月" : ""}の改善テーマが整理しやすくなります。`;
+    }
+    return null;
+  }
+
+  if (tier === "atRisk") {
+    if (phase.endedMonth) {
+      return `${base}未達月の集客水準を把握し、次月の告知・予約設計の基準値として活用してください。`;
+    }
+    if (unitPriceCarrying) {
+      return `${base}売上進捗に対して客単価で補えている面もあるため、集客維持と単価向上の両面を見てください。`;
+    }
     return `${base}売上進捗に対して集客が十分でない可能性があるため、イベント前の予約確認・SNS再告知・出演者への集客共有を強化してください。`;
   }
-  if (progress != null && progress >= 90 && (unitPriceCarrying || progress >= 100) && !customerCauseHeavy) {
-    return `${base}売上進捗は高めですが、客単価で補えている可能性があるため、高単価イベントの特徴を成功パターンとして確認してください。`;
+
+  if (tier === "almost") {
+    if (phase.endedMonth) {
+      return `${base}あと一歩届かなかった月の集客水準を、次月のイベント設計の基準として確認してください。`;
+    }
+    if (unitPriceCarrying) {
+      return `${base}客単価で売上を支えている面があるため、残り営業日は集客維持と単価向上のバランスを意識してください。`;
+    }
+    return `${base}達成に向けて集客数を維持できるかが鍵になるため、直近イベントの予約確認とSNS再告知を優先してください。`;
   }
-  if (customerCauseHeavy) {
-    return `${base}未達日の傾向から集客不足が見られるため、イベント前の予約確認・SNS再告知・出演者への集客共有を強化してください。`;
-  }
+
   return `${base}集客と客単価のバランスを見ながら、未達日が出やすいイベントの事前準備を優先してください。`;
 }
-function buildBarTimeAdvice_(a) {
+function buildBarTimeAdvice_(ctx) {
+  const { analysis: a, phase, tier } = ctx;
   if (a.barTimeCustomerRate == null) return null;
   const rate = a.barTimeCustomerRate;
+
   if (rate < 5) {
+    if (phase.endedMonth) {
+      return `バータイム比率は ${pct(rate)} と低めでした。次月は終演後の一杯、出演者との交流、軽いフード提案など、ライブ後に残る理由をイベント設計に組み込んでください。`;
+    }
+    if (tier === "achieved") {
+      return `バータイム比率は ${pct(rate)} と低めですが、月間目標は達成済みです。さらなる上積み余地として、終演後の残留施策を検討してください。`;
+    }
     return `バータイム比率は ${pct(rate)} と低めです。ライブ後にすぐ退店している可能性があるため、終演後の一杯、出演者との交流、軽いフード提案など、残る理由を作る施策を検討してください。`;
   }
   if (rate >= 10) {
+    if (phase.endedMonth) {
+      return `バータイム比率は ${pct(rate)} と良好でした。ライブ後に残る流れが作れていた可能性があるため、該当イベントの終演時間・出演者導線・客層を成功パターンとして確認してください。`;
+    }
     return `バータイム比率は ${pct(rate)} と良好です。ライブ後に残る流れが作れている可能性があるため、該当イベントの終演時間・出演者導線・客層を成功パターンとして確認してください。`;
+  }
+  if (phase.endedMonth) {
+    return `バータイム比率は ${pct(rate)} で中間的でした。残留率が高い日と低い日を比較し、次月の終演後導線を見直してください。`;
   }
   return `バータイム比率は ${pct(rate)} で中間的です。イベント内容によって差が出やすいので、残留率が高い日と低い日を比較し、終演後の導線を見直してください。`;
 }
-function buildGrossProfitAdvice_(a) {
+function buildGrossProfitAdvice_(ctx) {
+  const { analysis: a, phase } = ctx;
   if (a.operatingGrossProfitRate == null) return null;
   const rate = a.operatingGrossProfitRate;
+  const when = phase.endedMonth ? "でした" : "です";
+
   if (rate >= 70) {
-    return `営業粗利率は ${pct1(rate)} と良好です。売上に対して仕入れ・経費は抑えられていますが、飲食比率が高い日でも粗利が維持できているか確認すると、より安全です。`;
+    return `営業粗利率は ${pct1(rate)} と良好${when}。売上に対して仕入れ・経費は抑えられていますが、飲食比率が高い日でも粗利が維持できているか確認すると、より安全です。`;
   }
   if (rate >= 60) {
-    return `営業粗利率は ${pct1(rate)} でやや注意です。仕入れ・経費が重い日がないか、フード売上に対してフード仕入れが上がりすぎていないかを確認してください。`;
+    const next = phase.endedMonth ? "次月は" : "";
+    return `営業粗利率は ${pct1(rate)} でやや注意${when}。${next}仕入れ・経費が重い日がないか、フード売上に対してフード仕入れが上がりすぎていないかを確認してください。`;
   }
-  return `営業粗利率は ${pct1(rate)} で注意が必要です。売上があっても手元に残りにくい状態のため、仕入れ・経費・値付け・ロスの確認を優先してください。`;
+  const next = phase.endedMonth ? "次月は" : "";
+  return `営業粗利率は ${pct1(rate)} で注意が必要${when}。${next}売上があっても手元に残りにくい状態のため、仕入れ・経費・値付け・ロスの確認を優先してください。`;
 }
-function buildMonthlyImprovementComments_(analysis, taxMode) {
-  const a = analysis || {};
-  const candidates = [
-    { priority: 0, text: buildUnderTargetCauseAdvice_(a.underTargetCauseAnalysis) },
-    { priority: 1, text: buildSalesProgressAdvice_(a, taxMode) },
-    { priority: 2, text: buildYoyAdvice_(a) },
-    { priority: 3, text: buildCustomerAdvice_(a) },
-    { priority: 4, text: buildBarTimeAdvice_(a) },
-    { priority: 5, text: buildGrossProfitAdvice_(a) },
-  ]
-    .filter((item) => item.text)
-    .sort((x, y) => x.priority - y.priority);
+function buildMonthlyImprovementComments_(analysis, taxMode, targetMonth, currentBusinessDate) {
+  const ctx = buildAdviceContext_(analysis, taxMode, targetMonth, currentBusinessDate);
+  if (ctx.phase.futureMonth) {
+    return ["この月はまだ実績が少ないため、月次改善アドバイスは実績反映後に表示します。"];
+  }
 
-  return candidates.slice(0, 5).map((item) => item.text);
+  const covered = { customer: false, unit: false };
+  const progress = buildSalesProgressAdvice_(ctx);
+  const cause = buildUnderTargetCauseAdvice_(ctx, covered);
+  const yoy = buildYoyAdvice_(ctx);
+  const customer = buildCustomerAdvice_(ctx, covered);
+  const bar = buildBarTimeAdvice_(ctx);
+  const gross = buildGrossProfitAdvice_(ctx);
+
+  let order;
+  if (ctx.tier === "achieved") {
+    order = [progress, yoy, customer, bar, gross, cause];
+  } else if (ctx.tier === "almost") {
+    order = [progress, cause, customer, bar, gross, yoy];
+  } else {
+    order = [progress, cause, customer, bar, gross, yoy];
+  }
+
+  return order.filter(Boolean).slice(0, 5);
 }
 function classifyUnderTargetDay_(ctx) {
   const customerCount = ctx.customerCount != null ? Number(ctx.customerCount) : null;
@@ -3056,8 +3206,8 @@ export default function SalesModule({ events = [], navigateBack }) {
   const compactDy = (v) => formatDisplayCompactYen(v, taxMode);
   const signedDy = (v) => formatSignedDisplayYen(v, taxMode);
   const monthlyImprovementComments = useMemo(
-    () => buildMonthlyImprovementComments_(monthlyAnalysis, taxMode),
-    [monthlyAnalysis, taxMode]
+    () => buildMonthlyImprovementComments_(monthlyAnalysis, taxMode, targetMonth, currentBusinessDate),
+    [monthlyAnalysis, taxMode, targetMonth, currentBusinessDate]
   );
 
   const switchToStaffMode = () => {
