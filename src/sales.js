@@ -142,6 +142,15 @@ const DISCO_STRONG_KEYWORDS = new Set([
   "HONEY BEE DISCO NIGHT",
   "HONEY BEE DISCO NIGHT 2026",
 ]);
+/** 店主催・定例（店側で進行・表示設計を握りやすい系） */
+const OWNER_RUN_SERIES_IDS = new Set([
+  "anison",
+  "disco",
+  "open_mic",
+  "jam_session",
+  "girls_collection",
+  "monday",
+]);
 
 const S = {
   card: { background:"#111", border:"1px solid rgba(201,168,76,0.14)", borderRadius:6, padding:"1rem 1.1rem" },
@@ -1451,74 +1460,382 @@ function buildDayDrinkFoodContext_(row, monthly, pastAvg) {
     hasData: drinkSales != null || foodSales != null,
   };
 }
-function drinkFoodSummaryPhrase_(df) {
+function drinkFoodSummaryPhrase_(df, runKind) {
   if (!df?.hasData) return "";
+  const orderHint =
+    runKind === "owner"
+      ? "タブレット/QRのおすすめ枠を見直してください。"
+      : "タブレット/QR注文画面のおすすめ表示を見直してください。";
   if (df.drinkWeak && !df.foodWeak) {
-    return "ドリンク売上は弱く、フードは大きく崩れていません。";
+    return `ドリンク売上は弱く、フードは大きく崩れていません。${orderHint}`;
   }
   if (!df.drinkWeak && df.foodWeak) {
-    return "フード売上は弱く、ドリンクは大きく崩れていません。";
+    return `フード売上は弱く、ドリンクは大きく崩れていません。${orderHint}`;
   }
   if (df.bothWeak) {
-    return "ドリンク・フードともに弱く、来場人数だけでなく注文のタイミングも課題です。";
+    return "ドリンク・フードともに弱く、注文画面で選びやすい表示になっているか確認してください。";
   }
   if (df.drinkStrong && df.foodStrong) {
-    return "ドリンク・フードともに取れています。";
+    return "ドリンク・フードともに取れています。同じおすすめ枠を次回も再現してください。";
   }
   return "";
 }
+function isCharterDay_(row, events) {
+  const names = [row?.eventName, row?.sheetEventName].filter(Boolean).join(" ");
+  if (/貸切|貸し切り/.test(names)) return true;
+  const dayEvents = eventsForDate(events, row?.businessDate);
+  if (dayEvents.some((ev) => isRentalLikeEvent(ev))) return true;
+  for (const ev of dayEvents) {
+    const type = String(ev?.type || ev?.category || ev?.status || "").trim();
+    if (/貸切|貸し切り/.test(type)) return true;
+  }
+  return false;
+}
+function isCharterComparableRow_(row) {
+  const names = `${row?.eventName || ""} ${row?.sheetEventName || ""}`;
+  return /貸切|貸し切り/.test(names);
+}
+function resolveDayEventRunKind_(row, events) {
+  if (isCharterDay_(row, events)) return "charter";
+  const series = resolveEventSeries_({
+    sheetEventName: row?.eventName,
+    eventName: row?.eventName,
+    eventPerformContentFull: row?.eventPerformContentFull,
+    performContentFull: row?.eventPerformContentFull,
+  });
+  if (series?.id && OWNER_RUN_SERIES_IDS.has(series.id)) return "owner";
+  if (series?.id) return "booking";
+  const nameText = buildEventSeriesNameText_({
+    sheetEventName: row?.eventName,
+    eventName: row?.eventName,
+  });
+  const ownerHint = resolveEventSeriesMatchesInText_(nameText, { performOnly: false }).some((r) =>
+    OWNER_RUN_SERIES_IDS.has(r.id)
+  );
+  if (ownerHint) return "owner";
+  return "booking";
+}
+function drinkOrderAdvice_(runKind, variant) {
+  const tablet =
+    "タブレット/QR注文画面の上位に、2杯目向けドリンク・高粗利ドリンク・終演後に頼みやすいカテゴリを出してください。";
+  const ownerExtra =
+    runKind === "owner"
+      ? " 店側で進行を握れる場合は、終演後おすすめ表示と合わせてMCの一言も使えます。"
+      : "";
+  if (variant === "weak") return tablet + ownerExtra;
+  if (variant === "strong") {
+    return "ドリンク売上が取れています。人気ドリンク・高粗利ドリンクをおすすめ枠に置いた表示が効いている可能性があるため、次回も同じ並びを再現してください。";
+  }
+  return tablet;
+}
+function foodOrderAdvice_(runKind, variant) {
+  const tablet =
+    "開演前に出しやすい軽食と、終演後につまみやすいメニューをタブレット/QRのおすすめ枠の上位に出してください。提供が早いメニューを優先表示すると選ばれやすくなります。";
+  if (variant === "weak") return tablet;
+  if (variant === "strong") {
+    return "フードが取れています。おすすめ枠のメニュー構成が客層に合っていた可能性があるため、次回も同じ2品を上位表示してください。";
+  }
+  return tablet;
+}
 function buildBarTimeJudgment_(ctx) {
-  const { barTimeCount, dayBarRate, avgBarRate, isAchieved, pastCustomerDiff, barLow } = ctx;
+  const { barTimeCount, dayBarRate, avgBarRate, isAchieved, pastCustomerDiff, barLow, runKind } = ctx;
   const gatheringWeak = pastCustomerDiff != null && pastCustomerDiff < -1;
   const barHigh = dayBarRate != null && avgBarRate != null && dayBarRate >= Math.max(12, avgBarRate * 1.15);
+  const tabletAfterShow =
+    "終演後にタブレット/QR画面で「終演後おすすめ」を出し、追加ドリンク・軽いつまみ・カラオケ/ダーツなど残る理由を画面上で見せてください。";
+  const ownerMcNote =
+    runKind === "owner"
+      ? " 店主催で進行を握れる場合のみ、終演前の一言案内と連動させてもよいです。"
+      : "";
 
   if (barTimeCount === 0) {
     return {
-      label: "終演後の残留",
-      text: "バータイム0名です。終演前MCで「終演後もバー営業しています」と伝え、出演者に10〜15分客席に残ってもらえるか事前に共有してください。",
-      nextSnippet:
-        "終演前MCでバー営業継続を案内し、終演後10分は出演者が客席に残る時間を作ってください。スタッフは終演直後に「もう1杯いかがですか」と声をかけ、軽いつまみを1品おすすめにしてください。",
+      label: "終演後の注文導線",
+      text: `バータイム0名です。${tabletAfterShow}${ownerMcNote}`,
+      nextSnippet: tabletAfterShow,
     };
   }
   if (barHigh) {
     return {
-      label: "終演後の残留",
-      text: "バータイム比率が高めです。終演後の交流が売上に効いている可能性があるため、MCの案内順・出演者の残留・スタッフの声かけをメモし、次回も同じ流れで再現してください。",
+      label: "終演後の注文導線",
+      text: "バータイム比率が高めです。終演後おすすめ表示の内容・並びが効いている可能性があるため、次回も同じ画面構成を再現してください。",
       nextSnippet: null,
     };
   }
   if (isAchieved && barLow) {
     return {
-      label: "終演後の残留",
-      text: "目標は達成していますが、終演後の残留は少なめです。優先度は低めですが、終演前MCで「この後も1杯飲めます」と一言入れると上積みになる可能性があります。",
-      nextSnippet: "余力があれば終演前MCでバー継続を一言入れ、終演直後にスタッフが一杯を声かけしてください。",
+      label: "終演後の注文導線",
+      text: `目標は達成していますが、終演後の追加注文は少なめです。${tabletAfterShow} 優先度は低めです。`,
+      nextSnippet: "終演後おすすめ枠に追加ドリンクと軽いつまみを2品だけ出してください。",
     };
   }
   if (!isAchieved && barLow && gatheringWeak) {
     return {
-      label: "終演後の残留",
-      text: "未達で集客も弱く、終演後の残留も少ない日です。終演後の一杯より先に、開催2週間前の予約確認と出演者への再告知依頼を行ってください。",
+      label: "終演後の注文導線",
+      text:
+        runKind === "booking"
+          ? "未達で集客も弱い日です。通常ブッキングでは、終演後の導線より先に予約数・目標設定・タブレットの来店前おすすめ表示を確認してください。"
+          : "未達で集客も弱い日です。終演後の表示より、来店前〜開演中の注文画面設計と予約・告知の確認を先にしてください。",
       nextSnippet: null,
     };
   }
   if (barLow && !gatheringWeak) {
     return {
-      label: "終演後の残留",
-      text: "来店人数はある一方、終演後の残留が弱い日です。終演後すぐに照明・BGMを撤収ムードにせず、終演前MC・出演者10分残留・スタッフの一杯声かけをセットで行ってください。",
-      nextSnippet:
-        "終演後10分はBGMを落としすぎず、出演者が客席に残る時間を作り、スタッフは「もう1杯いかがですか」と声をかけてください。",
+      label: "終演後の注文導線",
+      text: `来店人数はある一方、終演後の追加注文が弱い日です。${tabletAfterShow}`,
+      nextSnippet: tabletAfterShow,
     };
   }
   if (barLow) {
     return {
-      label: "終演後の残留",
-      text: "バータイム比率が低めです。終演前MCでバー営業継続を伝え、終演直後はスタッフが先に声をかけてください。",
-      nextSnippet: "終演前MCでバー営業継続を案内し、終演直後10分はスタッフが一杯とつまみ1品をおすすめにしてください。",
+      label: "終演後の注文導線",
+      text: `バータイム比率が低めです。${tabletAfterShow}`,
+      nextSnippet: tabletAfterShow,
     };
   }
   return null;
 }
-function buildSeriesComparisonComment_(seriesLabel, pastAvg, metrics, drinkFood) {
+function buildCharterPastComparison_(selected, pool, taxMode) {
+  if (!selected) return null;
+  const selectedDateKey = parseSalesDateKey_(selected.businessDate);
+  const charterPool = (pool || []).filter((row) => isCharterComparableRow_(row));
+  const pastMatches = filterPastComparableMatches_(charterPool, selectedDateKey);
+  const sampleCount = pastMatches.length;
+  const avg = sampleCount > 0 ? averagePastComparableMetrics_(pastMatches) : null;
+  const mk = (day, avgVal, fmt) => ({
+    past: avgVal != null ? fmt(avgVal) : "—",
+    today: day != null ? fmt(day) : "—",
+  });
+  const fmtYen = (v) => formatDisplayYen(v, taxMode);
+  const fmtCount = (v) => `${num(v)}名`;
+  const compareCards = [];
+  if (avg) {
+    if (avg.totalSales != null) {
+      compareCards.push({ label: "売上", ...mk(selected.totalSales, avg.totalSales, fmtYen) });
+    }
+    if (avg.customerCount != null && selected.customerCount != null) {
+      compareCards.push({ label: "人数", ...mk(selected.customerCount, avg.customerCount, fmtCount) });
+    }
+    if (avg.customerUnitPrice != null && selected.customerUnitPrice != null) {
+      compareCards.push({ label: "客単価", ...mk(selected.customerUnitPrice, avg.customerUnitPrice, fmtYen) });
+    }
+    if (avg.drinkSales != null && selected.drinkSales != null) {
+      compareCards.push({ label: "ドリンク売上", ...mk(selected.drinkSales, avg.drinkSales, fmtYen) });
+    }
+    if (avg.foodSales != null && selected.foodSales != null) {
+      compareCards.push({ label: "フード売上", ...mk(selected.foodSales, avg.foodSales, fmtYen) });
+    }
+    if (avg.operatingProfit != null && selected.operatingProfit != null) {
+      compareCards.push({ label: "営業利益", ...mk(selected.operatingProfit, avg.operatingProfit, fmtYen) });
+    }
+  }
+  let comment = null;
+  if (sampleCount > 0 && avg) {
+    const salesDiff = Number(selected.totalSales || 0) - Number(avg.totalSales || 0);
+    const countDiff =
+      selected.customerCount != null && avg.customerCount != null
+        ? Number(selected.customerCount) - Number(avg.customerCount)
+        : null;
+    if (salesDiff < -10000 && countDiff != null && countDiff < -3) {
+      comment = "過去貸切平均より売上・人数ともに低い日です。次回は予約時点の人数見込み・最低保証・飲食プランを先に決めてください。";
+    } else if (countDiff != null && countDiff >= 5 && salesDiff < 0) {
+      comment = "人数は多い一方、売上・単価が弱い日です。タブレット/QRのおすすめ枠で追加ドリンク・フードが選ばれているか確認してください。";
+    } else if (salesDiff >= 0) {
+      comment = "過去貸切平均を上回るか同水準です。人数・客単価・飲食構成を基準値として残してください。";
+    } else {
+      comment = "過去貸切平均と比べて位置づけを確認してください。人数×想定単価で次回の最低保証を組み立てるのが安全です。";
+    }
+  } else {
+    comment = "過去貸切実績がまだ少ないため、今回の人数・客単価・ドリンク/フード売上・営業利益を基準値として記録してください。";
+  }
+  return {
+    matchTypeLabel: "貸切実績",
+    sampleCount,
+    matches: pastMatches.slice(0, 3),
+    avg,
+    comment,
+    compareCards,
+    statusNote: sampleCount === 0 ? "過去貸切実績：該当なし" : null,
+  };
+}
+function buildCharterDayAnalysis_(row, monthly, taxMode, charterPast) {
+  const targetSales = Number(row.targetSales || 0);
+  const totalSales = Number(row.totalSales || 0);
+  const customerCount = row.customerCount != null ? Number(row.customerCount) : null;
+  const dayUnitPrice = row.customerUnitPrice != null ? Number(row.customerUnitPrice) : null;
+  const operatingProfit = row.operatingProfit != null ? Number(row.operatingProfit) : null;
+  const isAchieved = targetSales > 0 && row.achievementRate != null && row.achievementRate >= 100;
+  const pastAvg = charterPast?.avg;
+  const pastCount = charterPast?.sampleCount || 0;
+  const drinkFood = buildDayDrinkFoodContext_(row, monthly, pastAvg);
+  const countPhrase = customerCount != null ? `${num(customerCount)}名` : "—";
+  const unitPhrase = dayUnitPrice != null ? formatDisplayYen(dayUnitPrice, taxMode) : "—";
+
+  let businessSummary = "";
+  if (isAchieved) {
+    businessSummary = `この日は貸切として目標を達成しています。人数${countPhrase}・客単価${unitPhrase}で、貸切時間内の飲食売上が取れています。次回貸切でも人数規模・飲食単価・注文画面のおすすめ構成を基準値として残してください。`;
+  } else if (targetSales > 0) {
+    businessSummary = `この日は貸切として目標未達です。人数に対して客単価が低いのか、そもそも人数が足りないのかを分けて確認してください。次回は最低保証金額・人数見込み・飲食プランを予約時点で決めてください。`;
+    if (drinkFood.bothWeak) {
+      businessSummary += " ドリンク・フードともに弱い場合は、飲み放題か単品注文かを確認し、単品ならタブレット/QRのおすすめ枠を絞って表示してください。";
+    }
+  } else {
+    businessSummary =
+      "貸切の目標売上が未入力です。次回までに最低保証・人数見込み・想定客単価から目標を作ってください。";
+  }
+
+  const judgmentPoints = [];
+  if (operatingProfit != null && operatingProfit > 0) {
+    judgmentPoints.push({
+      label: "利益",
+      text: "貸切として営業利益が出ています。同規模の貸切は積極的に受けてよい水準です。",
+    });
+  } else if (operatingProfit != null && operatingProfit <= 0) {
+    judgmentPoints.push({
+      label: "利益",
+      text: "営業利益が出ていません。仕入れ・経費・最低保証とのバランスを、予約時点で再確認してください。",
+    });
+  }
+  if (pastCount > 0 && pastAvg?.totalSales != null && totalSales >= Number(pastAvg.totalSales) * 1.05) {
+    judgmentPoints.push({
+      label: "開催判断",
+      text: "過去貸切平均を上回る売上です。同規模の貸切は、今回実績を基準に受けてよい水準です。",
+    });
+  } else if (pastCount > 0 && pastAvg?.totalSales != null && totalSales < Number(pastAvg.totalSales) * 0.85) {
+    judgmentPoints.push({
+      label: "開催判断",
+      text: "過去貸切平均より売上が低い日です。人数見込み・最低保証・飲食プランのいずれかを次回変える必要があります。",
+    });
+  }
+  if (!isAchieved && targetSales > 0) {
+    judgmentPoints.push({
+      label: "目標設定",
+      text: "人数が読めない貸切は、固定目標より人数×想定単価で目標を作る方が安全です。最低保証との差も同時に確認してください。",
+    });
+  } else if (isAchieved && pastCount > 0) {
+    judgmentPoints.push({
+      label: "目標設定",
+      text: "今回実績を基準に、同規模貸切の最低保証・目標売上を設定できます。",
+    });
+  }
+  const refUnit = pastAvg?.customerUnitPrice ?? monthly.customerUnitPrice;
+  if (customerCount != null && dayUnitPrice != null && refUnit != null && dayUnitPrice < Number(refUnit) * 0.9) {
+    judgmentPoints.push({
+      label: "飲食単価",
+      text: "人数に対して客単価が低い日です。事前フードプラン・軽食セットの提案、またはタブレット上位のおすすめ枠で飲食単価を上げてください。",
+    });
+  }
+  if (drinkFood.drinkWeak) {
+    judgmentPoints.push({
+      label: "ドリンク",
+      text: "ドリンク売上が弱い日です。飲み放題か単品注文かを確認し、単品ならタブレット/QR画面上部に追加ドリンク・ボトル・ソフトドリンクを表示してください。",
+    });
+  }
+  if (drinkFood.foodWeak) {
+    judgmentPoints.push({
+      label: "フード",
+      text: "フード売上が弱い日です。当日任せにせず、事前に軽食セットまたは大皿フードを提案し、タブレットのおすすめ枠に出すと安定しやすいです。",
+    });
+  }
+
+  let nextAction = "次回貸切では、予約時点で人数見込み・最低保証金額・飲食プラン（飲み放題/単品）を確認してください。";
+  if (isAchieved && dayUnitPrice != null && (pastAvg?.customerUnitPrice == null || dayUnitPrice >= Number(pastAvg?.customerUnitPrice || 0))) {
+    nextAction = `次回貸切では、今回の人数・客単価・飲食構成を基準にしてください。人数60名以上なら、最低保証金額を今回実績に近づけてもよい可能性があります。`;
+  } else if (customerCount != null && customerCount >= 50 && drinkFood.foodWeak) {
+    nextAction =
+      "次回貸切では、事前に軽食セットまたは大皿フードを提案してください。人数が多い日はタブレット画面のおすすめを絞り、提供が早いメニューを上位に出してください。";
+  } else if (drinkFood.drinkWeak) {
+    nextAction =
+      "次回貸切では、飲み放題の有無を確認し、単品注文ならタブレット/QR画面上部に追加ドリンク・ボトル・ソフトドリンクを表示してください。";
+  } else if (!isAchieved) {
+    nextAction =
+      "次回貸切では、予約時点で人数見込み・最低保証・飲食プランを決めてください。人数が読めない場合は、人数×想定単価で目標を作り、固定の高い目標は避けてください。";
+  }
+
+  const referenceMetrics = [
+    {
+      label: "人数",
+      day: customerCount != null ? `${num(customerCount)}名` : "—",
+      ref:
+        pastAvg?.customerCount != null
+          ? `${num(Math.round(pastAvg.customerCount))}名`
+          : monthly.avgDailyCustomerCount != null
+            ? `${num(Math.round(monthly.avgDailyCustomerCount))}名`
+            : "—",
+      refLabel: pastAvg?.customerCount != null ? "過去貸切平均" : "月平均",
+    },
+    {
+      label: "客単価",
+      day: dayUnitPrice != null ? formatDisplayYen(dayUnitPrice, taxMode) : "—",
+      ref:
+        pastAvg?.customerUnitPrice != null
+          ? formatDisplayYen(pastAvg.customerUnitPrice, taxMode)
+          : monthly.customerUnitPrice != null
+            ? formatDisplayYen(monthly.customerUnitPrice, taxMode)
+            : "—",
+      refLabel: pastAvg?.customerUnitPrice != null ? "過去貸切平均" : "月平均",
+    },
+  ];
+  if (drinkFood.drinkSales != null) {
+    referenceMetrics.push({
+      label: "ドリンク売上",
+      day: formatDisplayYen(drinkFood.drinkSales, taxMode),
+      ref:
+        drinkFood.pastDrink != null
+          ? formatDisplayYen(drinkFood.pastDrink, taxMode)
+          : drinkFood.monthlyDrink != null
+            ? formatDisplayYen(drinkFood.monthlyDrink, taxMode)
+            : "—",
+      refLabel: drinkFood.pastDrink != null ? "過去貸切平均" : "月平均",
+    });
+  }
+  if (drinkFood.foodSales != null) {
+    referenceMetrics.push({
+      label: "フード売上",
+      day: formatDisplayYen(drinkFood.foodSales, taxMode),
+      ref:
+        drinkFood.pastFood != null
+          ? formatDisplayYen(drinkFood.pastFood, taxMode)
+          : drinkFood.monthlyFood != null
+            ? formatDisplayYen(drinkFood.monthlyFood, taxMode)
+            : "—",
+      refLabel: drinkFood.pastFood != null ? "過去貸切平均" : "月平均",
+    });
+  }
+  if (operatingProfit != null) {
+    referenceMetrics.push({
+      label: "営業利益",
+      day: formatDisplayYen(operatingProfit, taxMode),
+      ref:
+        pastAvg?.operatingProfit != null ? formatDisplayYen(pastAvg.operatingProfit, taxMode) : "—",
+      refLabel: "過去貸切平均",
+    });
+  }
+
+  return {
+    isCharterDay: true,
+    analysisMode: "charter",
+    businessSummary,
+    seriesComparisonComment: charterPast?.comment,
+    judgmentPoints: judgmentPoints.slice(0, 5),
+    nextAction,
+    referenceMetrics,
+    seriesCompareCards: charterPast?.compareCards || [],
+    pastSimilarComparison: {
+      matchTypeLabel: "貸切実績",
+      sampleCount: pastCount,
+      matches: charterPast?.matches || [],
+      avg: pastAvg,
+      comment: charterPast?.comment,
+      statusNote: charterPast?.statusNote,
+    },
+    charterPastComparison: charterPast,
+    isAchieved,
+    seriesLabel: "貸切",
+    eventRunKind: "charter",
+  };
+}
+function buildSeriesComparisonComment_(seriesLabel, pastAvg, metrics, drinkFood, runKind) {
   if (!pastAvg || !seriesLabel) return null;
   const { totalSales, customerCount, dayUnitPrice, targetSales, isAchieved } = metrics;
   const salesDiff = Number(totalSales || 0) - Number(pastAvg.totalSales || 0);
@@ -1531,27 +1848,38 @@ function buildSeriesComparisonComment_(seriesLabel, pastAvg, metrics, drinkFood)
       ? Number(dayUnitPrice) - Number(pastAvg.customerUnitPrice)
       : null;
   const nearPastAvg = Math.abs(salesDiff) <= Math.max(10000, Number(pastAvg.totalSales || 0) * 0.1);
-  const dfPhrase = drinkFoodSummaryPhrase_(drinkFood);
+  const dfPhrase = drinkFoodSummaryPhrase_(drinkFood, runKind);
+  const bookingGather =
+    runKind === "booking"
+      ? "通常ブッキングでは、出演者へのMC依頼より、タブレット/QRのおすすめ表示と予約・目標設定を中心に見てください。"
+      : "";
 
   if (salesDiff < -10000 && customerDiff != null && customerDiff < -1) {
-    return `${seriesLabel}平均より売上・集客ともに低いため、同じ出演者・同じ目標のまま再開催する場合は、出演者ごとの予約見込み人数を事前に確認してください。${dfPhrase}`;
+    return `${seriesLabel}平均より売上・集客ともに低い日です。${runKind === "booking" ? "再開催するなら、出演者への告知協力の事前共有と、店側の予約導線・目標設定を確認してください。" : "再開催するなら、固定客向けの次回案内とイベント専用おすすめ表示を確認してください。"}${dfPhrase}`;
   }
   if (customerDiff != null && customerDiff < -1 && unitDiff != null && unitDiff >= -100) {
-    return `集客は弱い一方で客単価は取れています。来店したお客様からの売上化はできているため、次回は値上げや追加注文より、開催2週間前の予約共有と1週間前の予約数確認を優先してください。${dfPhrase}`;
+    return `集客は弱い一方で客単価は取れています。来店後の注文画面設計は機能している可能性があるため、次回は${runKind === "booking" ? "出演者への告知協力と1週間前の予約数確認" : "固定客向け案内とイベント専用おすすめ表示"}を優先してください。${dfPhrase}`;
   }
   if (customerDiff != null && customerDiff >= -1 && unitDiff != null && unitDiff < -100) {
-    return `集客は取れていますが客単価が弱い日です。次回はドリンク2杯目の声かけ、終演後の一杯、フードのおすすめ2品を決めて、来店後の注文を増やしてください。${dfPhrase}`;
+    return `集客は取れていますが客単価が弱い日です。${drinkOrderAdvice_(runKind, "weak")} ${foodOrderAdvice_(runKind, "weak")}`;
   }
   if (nearPastAvg && !isAchieved && Number(targetSales || 0) > 0) {
-    return `売上は${seriesLabel}平均に近いため、イベント自体が大きく悪いとは言い切れません。次回目標は過去平均売上＋10〜15%程度から設定してください。${dfPhrase}`;
+    return `売上は${seriesLabel}平均に近いため、イベント内容だけが原因とは言い切れません。次回目標は過去平均売上＋10〜15%程度から設定してください。${bookingGather}`;
   }
   if (salesDiff >= 0 && unitDiff != null && unitDiff >= 0) {
-    return `${seriesLabel}平均より売上・客単価が高めです。告知文・出演者構成・終演後の声かけなど、今回うまくいった手順をメモして次回の基準にしてください。`;
+    return `${seriesLabel}平均より売上・客単価が高めです。タブレット/QRのおすすめ枠・予約導線など、今回うまくいった店側の設計をメモして次回の基準にしてください。`;
   }
-  return `${seriesLabel}平均と今回の差を確認し、次回の予約目標人数とドリンク・フードの声かけ文言を事前に決めてください。${dfPhrase}`;
+  return `${seriesLabel}平均と今回の差を確認し、次回までにタブレット/QRのおすすめ枠と目標設定を決めてください。${dfPhrase}`;
 }
-function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison) {
+function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison, analysisOptions = {}) {
   if (!row) return null;
+  const events = analysisOptions.events || [];
+  const pastComparablePool = analysisOptions.pastComparablePool || [];
+  if (isCharterDay_(row, events)) {
+    const charterPast = buildCharterPastComparison_(row, pastComparablePool, taxMode);
+    return buildCharterDayAnalysis_(row, monthly, taxMode, charterPast);
+  }
+  const runKind = resolveDayEventRunKind_(row, events);
   const targetSales = Number(row.targetSales || 0);
   const totalSales = Number(row.totalSales || 0);
   const achievementRate = row.achievementRate;
@@ -1595,10 +1923,10 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison)
   const nearPastAvg =
     pastSalesDiff != null && Math.abs(pastSalesDiff) <= Math.max(10000, Number(pastAvg?.totalSales || 0) * 0.1);
   const drinkFood = buildDayDrinkFoodContext_(row, monthly, pastAvg);
-  const dfPhrase = drinkFoodSummaryPhrase_(drinkFood);
+  const dfPhrase = drinkFoodSummaryPhrase_(drinkFood, runKind);
   const metricCtx = { totalSales, customerCount, dayUnitPrice, targetSales, isAchieved };
   const seriesComparisonComment =
-    pastCount > 0 ? buildSeriesComparisonComment_(seriesLabel, pastAvg, metricCtx, drinkFood) : null;
+    pastCount > 0 ? buildSeriesComparisonComment_(seriesLabel, pastAvg, metricCtx, drinkFood, runKind) : null;
   const barJudgment = buildBarTimeJudgment_({
     barTimeCount,
     dayBarRate,
@@ -1606,6 +1934,7 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison)
     isAchieved,
     pastCustomerDiff,
     barLow,
+    runKind,
   });
   const salesWellBelowPast =
     pastCount > 0 &&
@@ -1620,47 +1949,56 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison)
   if (pastCount > 0) {
     if (isAchieved) {
       businessSummary =
-        "この日は目標を達成しています。告知開始日・出演者構成・ドリンク2杯目の声かけ・終演後の一杯案内のうち、どこが効いたかをメモし、次回の手順書にしてください。";
+        "この日は目標を達成しています。タブレット/QRのおすすめ枠・予約導線・来店後の注文画面のうち、どこが効いたかをメモし、次回も同じ表示構成を使ってください。";
       if (dfPhrase) businessSummary += ` ${dfPhrase}`;
     } else if (salesWellBelowPast && gatheringWeak) {
-      businessSummary = `同系平均より売上・集客ともに低い日です。同じ目標・同じ出演者のまま再開催する場合は、出演者ごとの予約見込み人数を開催2週間前に確認してください。${dfPhrase}`;
+      businessSummary = `同系平均より売上・集客ともに低い日です。${runKind === "booking" ? "再開催するなら、出演者への告知協力の事前共有と、店側の予約導線・目標設定を確認してください。" : "再開催するなら、固定客向け案内とイベント専用おすすめ表示を見直してください。"}${dfPhrase}`;
     } else if (gatheringWeak && unitOkWithPast) {
       businessSummary =
-        "目標未達ですが、来店したお客様からの飲食売上は取れています。次回は値上げより、開催2週間前の予約目標共有と1週間前の予約数確認を先に行ってください。";
+        runKind === "booking"
+          ? "目標未達ですが、来店後の飲食売上は取れています。次回は値上げより、出演者への告知協力と1週間前の予約数確認を先に行い、タブレット/QRのおすすめ枠も維持してください。"
+          : "目標未達ですが、来店後の飲食売上は取れています。次回は固定客向け案内とイベント専用おすすめ表示を先に見直してください。";
       if (drinkFood.drinkWeak && !drinkFood.foodWeak) {
-        businessSummary += " ドリンクは弱いため、2杯目の声かけと終演後の一杯案内もセットで決めてください。";
+        businessSummary += ` ${drinkOrderAdvice_(runKind, "weak")}`;
       } else if (!drinkFood.drinkWeak && drinkFood.foodWeak) {
-        businessSummary += " フードは弱いため、開演前の軽食と終演後のつまみ2品をおすすめ表示してください。";
+        businessSummary += ` ${foodOrderAdvice_(runKind, "weak")}`;
       }
     } else if (gatheringOkWithPast && unitWeakWithPast) {
-      businessSummary =
-        "集客は取れていますが客単価が弱い日です。次回はドリンク2杯目、終演後の一杯、フードおすすめ2品の声かけ文言を事前に決めてください。";
+      businessSummary = `集客は取れていますが客単価が弱い日です。${drinkOrderAdvice_(runKind, "weak")}`;
     } else if (nearPastAvg && targetSales > 0) {
       businessSummary =
-        "売上は同系平均に近く、イベント内容だけが原因とは言い切れません。次回目標は過去平均売上＋10〜15%程度から設定し、出演者側の予約目標人数も事前に共有してください。";
+        "売上は同系平均に近く、イベント内容だけが原因とは言い切れません。次回目標は過去平均売上＋10〜15%程度から設定してください。";
     } else {
-      businessSummary = seriesComparisonComment || `同系イベントとして、予約数とドリンク・フードの声かけを次回までに決めておく日です。${dfPhrase}`;
+      businessSummary =
+        seriesComparisonComment ||
+        `同系イベントとして、タブレット/QRのおすすめ枠と目標設定を次回までに決めておく日です。${dfPhrase}`;
     }
   } else if (isAchieved) {
     businessSummary =
-      "目標は達成しています。過去同系実績がないため比較はできませんが、今回の売上・集客・ドリンク売上・フード売上を記録し、2回目以降の基準にしてください。";
+      "目標は達成しています。過去同系実績がないため比較はできませんが、今回の売上・集客・ドリンク売上・フード売上とおすすめ枠の構成を記録し、2回目以降の基準にしてください。";
   } else if (targetSales > 0) {
     businessSummary =
       "過去同系実績がないため同系比較はできません。今回の売上・集客・客単価・ドリンク売上・フード売上を基準値として残し、次回から比較できるようにしてください。";
   } else {
-    businessSummary = "目標が未入力です。次回までに目標売上と出演者ごとの予約目標人数を決めてください。";
+    businessSummary = "目標が未入力です。次回までに目標売上と、タブレット/QRで出すおすすめ枠の仮決めをしてください。";
   }
 
   const judgmentPoints = [];
   if (pastCount > 0 && salesWellBelowPast && gatheringWeak) {
     judgmentPoints.push({
       label: "開催判断",
-      text: "同系平均より売上・集客ともに大きく低いため、同じ出演者・同じ目標のまま再開催する場合は、目標を過去平均に近づけるか、出演者側の予約目標人数を事前に共有してください。",
+      text:
+        runKind === "booking"
+          ? "同系平均より売上・集客ともに大きく低い日です。同条件で再開催するなら、目標を過去平均に近づけるか、出演者への告知協力内容を事前に共有してください。"
+          : "同系平均より売上・集客ともに大きく低い日です。固定客向け案内とイベント専用おすすめ表示を見直してください。",
     });
   } else if (pastCount > 0 && gatheringWeak && unitOkWithPast) {
     judgmentPoints.push({
       label: "開催判断",
-      text: "売上は未達ですが客単価は取れています。イベント自体を止めるより、まず開催2週間前の予約共有と1週間前の予約確認を行う価値があります。",
+      text:
+        runKind === "booking"
+          ? "売上は未達ですが客単価は取れています。タブレット/QRの注文画面は機能している可能性があるため、告知協力と予約数確認を先に行う価値があります。"
+          : "売上は未達ですが客単価は取れています。来店後のおすすめ表示は機能している可能性があるため、固定客向け案内を先に見直す価値があります。",
     });
   } else if (pastCount > 0 && nearPastAvg && !isAchieved && targetSales > 0) {
     judgmentPoints.push({
@@ -1670,12 +2008,12 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison)
   } else if (isAchieved && pastCount > 0) {
     judgmentPoints.push({
       label: "開催判断",
-      text: "同系平均を上回るか達成しており、同じ告知・出演者・来店後の声かけを次回も使えます。",
+      text: "同系平均を上回るか達成しており、同じタブレット/QRおすすめ枠と予約導線を次回も使えます。",
     });
   } else if (pastCount === 0) {
     judgmentPoints.push({
       label: "開催判断",
-      text: "同系比較がまだできないため、今回の数値を記録し、2回目以降に開催判断の材料をそろえてください。",
+      text: "同系比較がまだできないため、今回の数値とおすすめ枠の構成を記録し、2回目以降に開催判断の材料をそろえてください。",
     });
   }
   if (!isAchieved && pastCount > 0 && nearPastAvg && targetSales > 0) {
@@ -1686,49 +2024,46 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison)
   } else if (salesWellBelowPast && targetSales > 0) {
     judgmentPoints.push({
       label: "目標設定",
-      text: "過去平均より大きく低い場合、目標を据え置くなら、出演者ごとの予約目標人数を開催2週間前に決めて共有してください。",
+      text:
+        runKind === "booking"
+          ? "過去平均より大きく低い場合、目標を据え置くなら、出演者への告知協力内容を事前に決めて共有してください。"
+          : "過去平均より大きく低い場合、目標を据え置くなら、固定客向け案内とおすすめ枠の見直しを先に行ってください。",
     });
   }
   if (gatheringWeak) {
     judgmentPoints.push({
       label: "集客",
-      text: "開催1週間前に予約数を確認し、足りなければ出演者へ再告知依頼を出してください。固定客向け投稿には「前回との違い」「今回の見どころ」を入れてください。",
+      text:
+        runKind === "booking"
+          ? "1週間前に予約数を確認し、足りなければ出演者へ告知協力を依頼してください。店側投稿と出演者投稿用の短い文案（見どころ3行）を用意してください。"
+          : "固定客向け投稿に「前回との違い」「今回の見どころ」を入れ、イベント専用おすすめ表示と合わせて来店前の認知を上げてください。",
     });
   } else if (!isAchieved && pastCount === 0) {
     judgmentPoints.push({
       label: "集客",
-      text: "初回イベントのため、次回は開催2週間前に出演者へ予約目標人数を共有し、1週間前に予約数を確認する運用にしてください。",
+      text:
+        runKind === "booking"
+          ? "初回イベントのため、次回は出演者への告知協力内容を事前に決め、1週間前に予約数を確認する運用にしてください。"
+          : "初回イベントのため、次回は固定客向け案内とイベント専用おすすめ表示の構成を記録してください。",
     });
   }
   if (drinkFood.hasData && drinkFood.drinkSales != null) {
     if (drinkFood.drinkWeak) {
-      judgmentPoints.push({
-        label: "ドリンク",
-        text: "ドリンク売上が弱い日です。1杯目提供後の2杯目声かけ、終演前MCでの一杯案内、出演者との乾杯タイミングを決めてください。",
-      });
+      judgmentPoints.push({ label: "ドリンク", text: drinkOrderAdvice_(runKind, "weak") });
     } else if (drinkFood.drinkStrong) {
-      judgmentPoints.push({
-        label: "ドリンク",
-        text: "ドリンク売上が取れています。終演後の一杯案内や2杯目の声かけが効いている可能性があるため、同じタイミングを次回も使ってください。",
-      });
+      judgmentPoints.push({ label: "ドリンク", text: drinkOrderAdvice_(runKind, "strong") });
     }
   }
   if (drinkFood.hasData && drinkFood.foodSales != null) {
     if (drinkFood.foodWeak) {
-      judgmentPoints.push({
-        label: "フード",
-        text: "フード売上が弱い日です。開演前に出せる軽食、終演後につまめるメニュー2品をおすすめ表示し、スタッフの声かけ文言も決めてください。",
-      });
+      judgmentPoints.push({ label: "フード", text: foodOrderAdvice_(runKind, "weak") });
     } else if (drinkFood.foodStrong) {
-      judgmentPoints.push({
-        label: "フード",
-        text: "フードが取れています。客層に合ったメニュー提案が効いている可能性があるため、今回のおすすめ2品を次回も同じように出してください。",
-      });
+      judgmentPoints.push({ label: "フード", text: foodOrderAdvice_(runKind, "strong") });
     }
   } else if (unitLow && !drinkFood.foodWeak) {
     judgmentPoints.push({
       label: "ドリンク・フード単価",
-      text: "客単価が弱い日です。ドリンク2杯目とフードおすすめ2品の声かけを、開演前・終演前・終演後の3タイミングで決めてください。",
+      text: `客単価が弱い日です。${drinkOrderAdvice_(runKind, "weak")} ${foodOrderAdvice_(runKind, "weak")}`,
     });
   }
   if (barJudgment) {
@@ -1736,27 +2071,30 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison)
   }
 
   const eventTag = seriesLabel === "同系イベント" ? "同系イベント" : seriesLabel;
-  let nextAction = `次回の${eventTag}では、今回の売上・集客・ドリンク売上・フード売上を記録し、2回目以降の比較に使えるようにしてください。`;
+  let nextAction = `次回の${eventTag}では、今回の売上・集客・ドリンク売上・フード売上とタブレット/QRおすすめ枠の構成を記録し、2回目以降の比較に使えるようにしてください。`;
   if (pastCount > 0 && gatheringWeak && unitOkWithPast) {
-    nextAction = `次回の${eventTag}では、開催2週間前に出演者へ予約目標人数を共有し、1週間前に予約数を確認してください。足りない場合は店側投稿だけでなく、出演者投稿用の短い告知文（見どころ3行）も渡してください。`;
+    nextAction =
+      runKind === "booking"
+        ? `次回の${eventTag}では、出演者への告知協力を事前に決め、1週間前に予約数を確認してください。足りない場合は店側投稿用と出演者投稿用の短い文案（見どころ3行）を用意してください。`
+        : `次回の${eventTag}では、固定客向け案内とイベント専用おすすめ表示を先に決めてください。`;
     if (drinkFood.drinkWeak) {
-      nextAction += " ドリンクは1杯目提供後に2杯目を声かけ、終演前MCで終演後の一杯を案内してください。";
+      nextAction += ` ${drinkOrderAdvice_(runKind, "weak")}`;
     }
     if (drinkFood.foodWeak) {
-      nextAction += " フードは開演前の軽食と終演後のつまみ2品をおすすめ表示し、声かけ文言を決めてください。";
+      nextAction += ` ${foodOrderAdvice_(runKind, "weak")}`;
     }
   } else if (pastCount > 0 && gatheringOkWithPast && unitWeakWithPast) {
-    nextAction = `次回の${eventTag}では、ドリンク2杯目の声かけ、終演後の一杯、フードおすすめ2品を決め、スタッフ全員が同じ文言で案内してください。値上げや新メニューより、来店後の注文を増やす方が先です。`;
+    nextAction = `次回の${eventTag}では、タブレット/QRのおすすめ枠に2杯目向けドリンク・終演後ドリンク・フード2品を決め、来店後に自然に選ばれる表示にしてください。`;
   } else if (pastCount > 0 && nearPastAvg && !isAchieved && targetSales > 0) {
-    nextAction = `次回の${eventTag}では、過去平均売上＋10〜15%を目標の起点にし、出演者ごとの予約目標人数も開催2週間前に共有してください。`;
+    nextAction = `次回の${eventTag}では、過去平均売上＋10〜15%を目標の起点にし、おすすめ枠の構成も今回を基準にしてください。`;
   } else if (isAchieved && pastCount > 0) {
-    nextAction = `次回の${eventTag}では、今回使った告知開始日・出演者構成・ドリンク2杯目の声かけ・終演後の一杯案内をチェックリスト化し、同じ順番で実行してください。`;
+    nextAction = `次回の${eventTag}では、今回のタブレット/QRおすすめ枠・予約導線・終演後おすすめ表示をチェックリスト化し、同じ順番で再現してください。`;
   } else if (pastCount > 0 && salesWellBelowPast) {
-    nextAction = `次回の${eventTag}を開催するなら、出演者ごとの予約見込み人数を事前に聞き、目標に届かない場合は目標売上か出演者構成のどちらかを変えてください。同系平均から大きく乖離している日は、同じ条件での再開催は慎重に判断してください。`;
+    nextAction = `次回の${eventTag}を開催するなら、${runKind === "booking" ? "告知協力と目標設定" : "固定客案内とおすすめ枠"}を変えるか、目標売上を過去平均に近づけてください。同系平均から大きく乖離している日は、同じ条件での再開催は慎重に判断してください。`;
   } else if (pastCount === 0) {
-    nextAction = `次回の${eventTag}では、今回の売上・集客・ドリンク売上・フード売上を記録してください。開催2週間前の予約共有と1週間前の予約確認の運用も、このタイミングで決めておくと次回から使えます。`;
+    nextAction = `次回の${eventTag}では、今回の売上・集客・ドリンク売上・フード売上とおすすめ枠の構成を記録してください。`;
   }
-  if (barJudgment?.nextSnippet && !nextAction.includes(barJudgment.nextSnippet.slice(0, 12))) {
+  if (barJudgment?.nextSnippet && !nextAction.includes("終演後おすすめ") && !nextAction.includes("タブレット")) {
     nextAction += ` ${barJudgment.nextSnippet}`;
   }
 
@@ -1808,6 +2146,8 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison)
       : [];
 
   return {
+    isCharterDay: false,
+    analysisMode: "live",
     businessSummary,
     seriesComparisonComment,
     judgmentPoints: judgmentPoints.slice(0, 5),
@@ -1817,10 +2157,12 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison)
     pastSimilarComparison,
     isAchieved,
     seriesLabel,
+    eventRunKind: runKind,
   };
 }
 function DayAnalysisBlock({ analysis, taxMode, narrow, onSelectReferenceDay }) {
   if (!analysis) return null;
+  const isCharter = !!analysis.isCharterDay;
   const past = analysis.pastSimilarComparison;
   const referenceChipStyle = {
     display: "inline-block",
@@ -1873,7 +2215,7 @@ function DayAnalysisBlock({ analysis, taxMode, narrow, onSelectReferenceDay }) {
 
       <div style={{ ...sectionCardStyle, marginBottom: ".38rem", borderColor: "rgba(201,168,76,0.28)", background: "rgba(201,168,76,0.06)" }}>
         <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.88)", marginBottom: ".18rem", fontWeight: 600 }}>
-          A. 経営判断サマリー
+          {isCharter ? "A. 貸切営業サマリー" : "A. 経営判断サマリー"}
         </div>
         <div style={{ fontSize: narrow ? ".84rem" : ".8rem", lineHeight: 1.65, color: "rgba(240,232,208,0.92)", ...DAY_ANALYSIS_TEXT }}>
           {analysis.businessSummary}
@@ -1882,7 +2224,7 @@ function DayAnalysisBlock({ analysis, taxMode, narrow, onSelectReferenceDay }) {
 
       <div style={{ ...sectionCardStyle, marginBottom: ".38rem", borderColor: "rgba(201,168,76,0.22)", background: "rgba(201,168,76,0.04)" }}>
         <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.88)", marginBottom: ".22rem", fontWeight: 600 }}>
-          B. 同系イベント比較
+          {isCharter ? "B. 貸切実績比較" : "B. 同系イベント比較"}
         </div>
         <div style={{ fontSize: narrow ? ".78rem" : ".76rem", color: "rgba(201,168,76,0.88)", marginBottom: ".18rem", fontWeight: 600, ...DAY_ANALYSIS_TEXT }}>
           比較タイプ：{past?.matchTypeLabel || analysis.seriesLabel || "—"}
@@ -1908,7 +2250,7 @@ function DayAnalysisBlock({ analysis, taxMode, narrow, onSelectReferenceDay }) {
               <div key={card.label} style={metricCardStyle}>
                 <div style={{ fontSize: ".66rem", color: "rgba(201,168,76,0.78)", marginBottom: ".1rem" }}>{card.label}</div>
                 <div style={{ fontSize: narrow ? ".78rem" : ".74rem", lineHeight: 1.5, color: "rgba(240,232,208,0.84)" }}>
-                  過去平均 {card.past}
+                  {isCharter ? "過去貸切平均" : "過去平均"} {card.past}
                 </div>
                 <div style={{ fontSize: narrow ? ".78rem" : ".74rem", lineHeight: 1.5, color: "rgba(240,232,208,0.92)", fontWeight: 600 }}>
                   今回 {card.today}
@@ -1991,7 +2333,7 @@ function DayAnalysisBlock({ analysis, taxMode, narrow, onSelectReferenceDay }) {
 
       <div style={{ ...sectionCardStyle, marginBottom: ".38rem", borderColor: "rgba(201,168,76,0.22)", background: "rgba(0,0,0,0.18)" }}>
         <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.88)", marginBottom: ".14rem", fontWeight: 600 }}>
-          D. 次回アクション
+          {isCharter ? "D. 次回貸切へのメモ" : "D. 次回アクション"}
         </div>
         <div style={{ fontSize: narrow ? ".8rem" : ".76rem", lineHeight: 1.6, color: "rgba(240,232,208,0.86)", ...DAY_ANALYSIS_TEXT }}>
           {analysis.nextAction}
@@ -3053,6 +3395,7 @@ function recordToPastComparableDay_(record, events) {
     foodDrinkRate: calcRate(foodDrinkSalesIncludingBand, totalSales),
     drinkSales: record?.metrics?.drinkSales != null ? Number(record.metrics.drinkSales) : null,
     foodSales: record?.metrics?.foodSales != null ? Number(record.metrics.foodSales) : null,
+    operatingProfit: record?.metrics?.operatingProfit != null ? Number(record.metrics.operatingProfit) : null,
     targetSales: Number(record?.metrics?.targetSales || 0),
     achievementRate: calcRate(totalSales, record?.metrics?.targetSales),
   };
@@ -3089,6 +3432,7 @@ function trendRowToPastComparableDay_(row, events) {
     foodDrinkRate: calcRate(row.foodDrinkSalesIncludingBand, row.totalSales),
     drinkSales: row.drinkSales,
     foodSales: row.foodSales,
+    operatingProfit: row.operatingProfit,
     achievementRate: row.achievementRate,
     totalSales: row.totalSales,
     targetSales: row.targetSales,
@@ -3107,6 +3451,8 @@ function averagePastComparableMetrics_(matches) {
   let drinkSamples = 0;
   let foodSalesSum = 0;
   let foodSalesSamples = 0;
+  let profitSum = 0;
+  let profitSamples = 0;
   for (const row of matches) {
     salesSum += Number(row.totalSales || 0);
     if (row.customerCount != null) {
@@ -3129,6 +3475,10 @@ function averagePastComparableMetrics_(matches) {
       foodSalesSum += Number(row.foodSales || 0);
       foodSalesSamples += 1;
     }
+    if (row.operatingProfit != null) {
+      profitSum += Number(row.operatingProfit || 0);
+      profitSamples += 1;
+    }
   }
   const n = matches.length;
   return {
@@ -3138,6 +3488,7 @@ function averagePastComparableMetrics_(matches) {
     foodDrinkRate: foodRateSamples > 0 ? foodRateSum / foodRateSamples : null,
     drinkSales: drinkSamples > 0 ? drinkSum / drinkSamples : null,
     foodSales: foodSalesSamples > 0 ? foodSalesSum / foodSalesSamples : null,
+    operatingProfit: profitSamples > 0 ? profitSum / profitSamples : null,
     sampleCount: n,
   };
 }
@@ -4636,9 +4987,10 @@ export default function SalesModule({ events = [], navigateBack }) {
         avgFoodSales: dayCount > 0 ? Number(monthlyAnalysis.foodSalesSum || 0) / dayCount : null,
       },
       taxMode,
-      selectedPastSimilarComparison
+      selectedPastSimilarComparison,
+      { events, pastComparablePool }
     );
-  }, [selectedTrendRow, monthlyAnalysis, taxMode, selectedPastSimilarComparison]);
+  }, [selectedTrendRow, monthlyAnalysis, taxMode, selectedPastSimilarComparison, events, pastComparablePool]);
   const selectCauseDayForReport_ = (rowKey) => {
     if (!rowKey) return;
     setSelectedTrendRowKey(rowKey);
