@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const SALES_API_URL = "/api/sales";
 const SALES_ROLE_MODE_KEY = "honeybee:salesRoleMode";
@@ -1192,7 +1192,7 @@ function classifyUnderTargetDay_(ctx) {
   ) {
     return {
       category: "判定不可",
-      comment: "集客人数または客単価のデータが不足しています。",
+      comment: "集客人数または客単価のデータが不足しているため、分類の根拠が不足しています。",
     };
   }
 
@@ -1210,30 +1210,30 @@ function classifyUnderTargetDay_(ctx) {
   ) {
     return {
       category: "目標過大の可能性",
-      comment: "売上自体は平均水準ですが、目標設定が高めの可能性があります。",
+      comment: "売上は月平均に近い一方で目標に届いていません。イベント規模に対して目標設定が高かった可能性があります。",
     };
   }
   if (countLow && unitLow) {
     return {
       category: "集客・単価不足型",
-      comment: "集客数・客単価の両面で改善余地があります。",
+      comment: "集客人数と客単価の両方が月平均を下回っています。イベント告知と来店後の注文導線を両方見直す必要があります。",
     };
   }
   if (countLow && unitOk) {
     return {
       category: "集客不足型",
-      comment: "客単価は大きく悪くないため、集客数の底上げが課題です。",
+      comment: "集客人数が月平均を下回っています。客単価は大きく崩れていないため、課題は来店前の集客設計です。",
     };
   }
   if (countOk && unitLow) {
     return {
       category: "単価不足型",
-      comment: "集客は確保できているため、客単価・単価向上が課題です。",
+      comment: "集客人数は月平均に近い一方で、客単価が低めです。来店後の追加注文、フード提案、ドリンク2杯目の導線を確認してください。",
     };
   }
   return {
     category: "判定不可",
-    comment: "分類条件に十分な差が出ていません。",
+    comment: "分類条件に十分な差が出ていません。根拠数字を確認し、手動で要因を判断してください。",
   };
 }
 function buildUnderTargetCauseAnalysis_(underTargetRows, averages, resolveName) {
@@ -1242,11 +1242,15 @@ function buildUnderTargetCauseAnalysis_(underTargetRows, averages, resolveName) 
       const totalSales = Number(r?.metrics?.totalSales || 0);
       const targetSales = Number(r?.metrics?.targetSales || 0);
       const customerCount = pickMetricNullable(r?.metrics, CUSTOMER_COUNT_KEYS);
+      const bandFoodDrinkSales = pickMetricNullable(r?.metrics, BAND_FOOD_DRINK_SALES_KEYS);
+      const foodDrinkSalesBase = r?.metrics?.foodDrinkSales != null ? Number(r.metrics.foodDrinkSales) : null;
+      const foodDrinkSalesIncludingBand = foodDrinkSalesIncludingBand_(foodDrinkSalesBase, bandFoodDrinkSales);
       const dayUnitPrice =
         unitPriceByCustomerCount_(totalSales, customerCount) ??
         (r?.metrics?.customerUnitPrice != null ? Number(r.metrics.customerUnitPrice) : null);
       const achievementRate = calcRate(totalSales, targetSales);
       const shortfall = Math.max(0, targetSales - totalSales);
+      const foodDrinkRate = calcRate(foodDrinkSalesIncludingBand, totalSales);
       const classified = classifyUnderTargetDay_({
         customerCount,
         dayUnitPrice,
@@ -1258,18 +1262,234 @@ function buildUnderTargetCauseAnalysis_(underTargetRows, averages, resolveName) 
       });
       return {
         key: `${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}_cause`,
+        rowKey: `${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}`,
         businessDate: r.businessDate,
         eventName: resolveName(r),
         totalSales,
         targetSales,
         shortfall,
         achievementRate,
+        customerCount,
+        avgDailyCustomerCount: averages.avgDailyCustomerCount,
+        dayUnitPrice,
+        avgUnitPrice: averages.customerUnitPrice,
+        foodDrinkRate,
+        avgFoodDrinkRate: averages.avgFoodDrinkRate,
         category: classified.category,
         comment: classified.comment,
       };
     })
     .sort((a, b) => Number(b.shortfall || 0) - Number(a.shortfall || 0))
     .slice(0, 5);
+}
+function buildSelectedDayAnalysis_(row, monthly, taxMode) {
+  if (!row) return null;
+  const targetSales = Number(row.targetSales || 0);
+  const totalSales = Number(row.totalSales || 0);
+  const achievementRate = row.achievementRate;
+  const shortfall = Math.max(0, targetSales - totalSales);
+  const customerCount = row.customerCount != null ? Number(row.customerCount) : null;
+  const dayUnitPrice = row.customerUnitPrice != null ? Number(row.customerUnitPrice) : null;
+  const avgCount = monthly.avgDailyCustomerCount != null ? Number(monthly.avgDailyCustomerCount) : null;
+  const avgUnit = monthly.customerUnitPrice != null ? Number(monthly.customerUnitPrice) : null;
+  const dayFoodRate = calcRate(row.foodDrinkSalesIncludingBand, totalSales);
+  const avgFoodRate = monthly.avgFoodDrinkRate;
+  const dayBarRate = row.barTimeCustomerRate;
+  const avgBarRate = monthly.barTimeCustomerRate;
+
+  let achievementStatus = "目標データがありません。";
+  if (targetSales > 0) {
+    if (achievementRate != null && achievementRate >= 100) {
+      achievementStatus = `目標を達成しています。達成率は ${pct(achievementRate)} です。`;
+    } else {
+      achievementStatus = `目標に対して ${formatDisplayYen(shortfall, taxMode)} 不足しています。達成率は ${pct(achievementRate)} です。`;
+    }
+  }
+
+  let customerEval = "集客人数データがありません。";
+  if (customerCount != null && avgCount != null && avgCount > 0) {
+    if (customerCount < avgCount * 0.85) {
+      customerEval = "集客人数が月平均を大きく下回っています。来店前の告知・予約導線が主な課題です。";
+    } else if (customerCount >= avgCount * 1.05) {
+      customerEval = "集客人数は月平均を上回っています。集客面は好調です。";
+    } else {
+      customerEval = "集客人数は月平均に近い水準です。";
+    }
+  }
+
+  let unitPriceEval = "客単価データがありません。";
+  if (dayUnitPrice != null && avgUnit != null && avgUnit > 0) {
+    if (dayUnitPrice < avgUnit * 0.9) {
+      unitPriceEval = "客単価が月平均より低めです。来店後の追加注文導線が課題です。";
+    } else if (dayUnitPrice >= avgUnit * 1.05) {
+      unitPriceEval = "客単価は月平均を上回っています。来店後の購買力は好調です。";
+    } else {
+      unitPriceEval = "客単価は月平均に近いため、来店後の購買力は大きく崩れていません。";
+    }
+  }
+
+  let foodDrinkEval = "飲食比率データがありません。";
+  if (dayFoodRate != null && avgFoodRate != null) {
+    if (dayFoodRate >= avgFoodRate + 3) {
+      foodDrinkEval = "飲食比率は月平均より高めです。来店したお客様からの飲食売上は比較的取れています。";
+    } else if (dayFoodRate <= avgFoodRate - 3) {
+      foodDrinkEval = "飲食比率は月平均より低めです。飲食メニュー提案やセット導線に改善余地があります。";
+    } else {
+      foodDrinkEval = "飲食比率は月平均に近い水準です。";
+    }
+  }
+
+  let barTimeEval = "バータイムデータがありません。";
+  if (dayBarRate != null && avgBarRate != null) {
+    if (dayBarRate >= Math.max(10, avgBarRate + 2)) {
+      barTimeEval = "バータイム比率は月平均より高めです。終演後の滞在導線が機能している可能性があります。";
+    } else if (dayBarRate < Math.max(5, avgBarRate * 0.7)) {
+      barTimeEval = "バータイム人数が少ないため、終演後の滞在導線には改善余地があります。";
+    } else {
+      barTimeEval = "バータイム比率は月平均に近い水準です。";
+    }
+  }
+
+  const countLow = customerCount != null && avgCount != null && customerCount < avgCount * 0.85;
+  const countOk = customerCount != null && avgCount != null && customerCount >= avgCount * 0.85;
+  const unitLow = dayUnitPrice != null && avgUnit != null && dayUnitPrice < avgUnit * 0.9;
+  let improvementMemo = "次回同系イベントでは、達成日のイベント構成を参考に改善点を整理してください。";
+  if (countLow && unitLow) {
+    improvementMemo =
+      "この日は集客・客単価の両面が課題です。次回同系イベントでは、事前告知と来店後の注文導線をセットで見直してください。";
+  } else if (countLow && !unitLow) {
+    improvementMemo =
+      "この日は単価より集客が課題です。次回同系イベントでは、事前告知・出演者との集客共有・予約確認を早めに設計してください。";
+  } else if (countOk && unitLow) {
+    improvementMemo =
+      "この日は集客より客単価が課題です。次回同系イベントでは、フード提案・追加ドリンク・セットメニューの導線を強化してください。";
+  } else if (targetSales > 0 && achievementRate != null && achievementRate >= 70 && totalSales >= (monthly.avgDailySales || 0) * 0.85) {
+    improvementMemo =
+      "売上は月平均に近い一方で目標未達です。次回同系イベントでは、過去実績を基準に目標設定の妥当性を確認してください。";
+  } else if (achievementRate != null && achievementRate >= 100) {
+    improvementMemo =
+      "目標達成日です。集客・客単価・飲食・バータイムのどれが効いたかを記録し、同系イベントに横展開してください。";
+  }
+
+  return {
+    achievementStatus,
+    customerEval,
+    unitPriceEval,
+    foodDrinkEval,
+    barTimeEval,
+    improvementMemo,
+    comparisons: {
+      customerCount,
+      avgDailyCustomerCount: avgCount,
+      dayUnitPrice,
+      avgUnitPrice: avgUnit,
+      dayFoodRate,
+      avgFoodRate,
+      dayBarRate,
+      avgBarRate,
+    },
+  };
+}
+function DayAnalysisBlock({ analysis, taxMode, narrow }) {
+  if (!analysis) return null;
+  const c = analysis.comparisons || {};
+  const fmtCount = (v) => (v != null ? `${num(v)}名` : "—");
+  const fmtUnit = (v) => (v != null ? formatDisplayYen(v, taxMode) : "—");
+  const fmtRate = (v) => (v != null ? pct(v) : "—");
+  const compareRows = [
+    { label: "集客", day: fmtCount(c.customerCount), avg: fmtCount(c.avgDailyCustomerCount) },
+    { label: "客単価", day: fmtUnit(c.dayUnitPrice), avg: fmtUnit(c.avgUnitPrice) },
+    { label: "飲食比率", day: fmtRate(c.dayFoodRate), avg: fmtRate(c.avgFoodRate) },
+    { label: "バータイム比率", day: fmtRate(c.dayBarRate), avg: fmtRate(c.avgBarRate) },
+  ];
+  const evalRows = [
+    { label: "達成状況", text: analysis.achievementStatus },
+    { label: "集客評価", text: analysis.customerEval },
+    { label: "客単価評価", text: analysis.unitPriceEval },
+    { label: "飲食評価", text: analysis.foodDrinkEval },
+    { label: "バータイム評価", text: analysis.barTimeEval },
+    { label: "改善メモ", text: analysis.improvementMemo },
+  ];
+  return (
+    <div style={{ marginBottom: ".55rem" }}>
+      <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>
+        この日の分析
+      </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: narrow ? "1fr" : "repeat(2, minmax(0, 1fr))",
+          gap: narrow ? ".28rem" : ".22rem .65rem",
+          marginBottom: ".42rem",
+          padding: ".45rem .55rem",
+          borderRadius: 5,
+          border: "1px solid rgba(201,168,76,0.16)",
+          background: "rgba(0,0,0,0.14)",
+          fontSize: narrow ? ".8rem" : ".76rem",
+          lineHeight: 1.5,
+          color: "rgba(240,232,208,0.82)",
+        }}
+      >
+        {compareRows.map((r) => (
+          <div key={r.label} style={{ wordBreak: "break-word" }}>
+            {r.label} {r.day} / 月平均 {r.avg}
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "grid", gap: ".32rem" }}>
+        {evalRows.map((r) => (
+          <div
+            key={r.label}
+            style={{
+              padding: ".38rem .5rem",
+              borderRadius: 4,
+              border: `1px solid ${analysisRowBorder("dayReport")}`,
+              background: "rgba(0,0,0,0.12)",
+            }}
+          >
+            <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.82)", marginBottom: ".12rem", fontWeight: 600 }}>
+              {r.label}
+            </div>
+            <div style={{ fontSize: narrow ? ".8rem" : ".76rem", lineHeight: 1.55, color: "rgba(240,232,208,0.84)", wordBreak: "break-word" }}>
+              {r.text}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+function UnderTargetCauseEvidence({ row, taxMode, narrow }) {
+  const fmtCount = (v) => (v != null ? `${num(v)}名` : "—");
+  const fmtUnit = (v) => (v != null ? formatDisplayYen(v, taxMode) : "—");
+  const rows = [
+    { label: "集客", day: fmtCount(row.customerCount), avg: fmtCount(row.avgDailyCustomerCount) },
+    { label: "客単価", day: fmtUnit(row.dayUnitPrice), avg: fmtUnit(row.avgUnitPrice) },
+    { label: "飲食比率", day: row.foodDrinkRate != null ? pct(row.foodDrinkRate) : "—", avg: row.avgFoodDrinkRate != null ? pct(row.avgFoodDrinkRate) : "—" },
+    { label: "達成率", day: row.achievementRate != null ? pct(row.achievementRate) : "—", avg: null },
+  ];
+  return (
+    <div style={{ marginBottom: ".22rem" }}>
+      <div style={{ fontSize: ".7rem", color: "rgba(240,232,208,0.58)", marginBottom: ".16rem" }}>根拠：</div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: narrow ? "1fr" : "repeat(2, minmax(0, 1fr))",
+          gap: narrow ? ".18rem" : ".16rem .55rem",
+          fontSize: narrow ? ".76rem" : ".74rem",
+          lineHeight: 1.45,
+          color: "rgba(240,232,208,0.72)",
+        }}
+      >
+        {rows.map((r) => (
+          <div key={r.label} style={{ wordBreak: "break-word" }}>
+            {r.label} {r.day}
+            {r.avg != null ? ` / 月平均 ${r.avg}` : ""}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 function yoyBarTone_(row) {
   if (Number(row.currentSales || 0) <= 0) return "rgba(132,132,132,0.55)";
@@ -2631,6 +2851,7 @@ export default function SalesModule({ events = [], navigateBack }) {
   const [yearlyLoading, setYearlyLoading] = useState(false);
   const [yearlyMonthData, setYearlyMonthData] = useState([]);
   const [selectedTrendRowKey, setSelectedTrendRowKey] = useState("");
+  const dayReportRef = useRef(null);
   const [updatedAt, setUpdatedAt] = useState("");
   const currentBusinessDate = getCurrentBusinessDateForSales();
   const vp = useSalesViewport();
@@ -3044,6 +3265,7 @@ export default function SalesModule({ events = [], navigateBack }) {
         avgDailyCustomerCount: actualDayCount > 0 ? customerCountSum / actualDayCount : null,
         customerUnitPrice,
         avgDailySales,
+        avgFoodDrinkRate: calcRate(foodDrinkSalesIncludingBandSum, totalSalesSum),
       },
       (r) => resolveEventNameForAdmin(r, r.resolvedEventNames) || "イベント未登録"
     );
@@ -3126,6 +3348,27 @@ export default function SalesModule({ events = [], navigateBack }) {
     () => monthlyAnalysis.dailyTrendRows.find((r) => r.rowKey === selectedTrendRowKey) || null,
     [monthlyAnalysis.dailyTrendRows, selectedTrendRowKey]
   );
+  const selectedDayAnalysis = useMemo(() => {
+    if (!selectedTrendRow) return null;
+    return buildSelectedDayAnalysis_(
+      selectedTrendRow,
+      {
+        avgDailyCustomerCount: monthlyAnalysis.avgDailyCustomerCount,
+        customerUnitPrice: monthlyAnalysis.customerUnitPrice,
+        avgFoodDrinkRate: calcRate(monthlyAnalysis.foodDrinkSalesIncludingBandSum, monthlyAnalysis.totalSalesSum),
+        barTimeCustomerRate: monthlyAnalysis.barTimeCustomerRate,
+        avgDailySales: monthlyAnalysis.avgDailySales,
+      },
+      taxMode
+    );
+  }, [selectedTrendRow, monthlyAnalysis, taxMode]);
+  const selectCauseDayForReport_ = (rowKey) => {
+    if (!rowKey) return;
+    setSelectedTrendRowKey(rowKey);
+    window.setTimeout(() => {
+      dayReportRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 60);
+  };
   const yearlyAnalysis = useMemo(() => {
     if (!yearlyMonthData.length) return null;
     const monthRows = yearlyMonthData.map((item) => {
@@ -3901,7 +4144,10 @@ export default function SalesModule({ events = [], navigateBack }) {
               </div>
             )}
             {selectedTrendRow && (
-              <div style={{ marginTop: ".75rem", borderTop: "1px dashed rgba(175,180,190,0.2)", paddingTop: ".7rem" }}>
+              <div
+                ref={dayReportRef}
+                style={{ marginTop: ".75rem", borderTop: "1px dashed rgba(175,180,190,0.2)", paddingTop: ".7rem" }}
+              >
                 <div style={analysisCardWrap("dayReport", vp.narrow)}>
                   <div style={{ ...analysisSecTitle("dayReport"), fontSize: ".86rem", fontWeight: 700, letterSpacing: ".06em", textTransform: "none" }}>選択日の営業レポート</div>
 
@@ -3958,6 +4204,8 @@ export default function SalesModule({ events = [], navigateBack }) {
                     </div>
                     <div style={{ ...analysisNote({ marginTop: ".28rem" }, vp.narrow) }}>{BAR_TIME_UNIT_PRICE_NOTE}</div>
                   </div>
+
+                  <DayAnalysisBlock analysis={selectedDayAnalysis} taxMode={taxMode} narrow={vp.narrow} />
 
                   <div style={{ marginBottom: ".55rem" }}>
                     <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>C. 飲食内訳</div>
@@ -4055,11 +4303,30 @@ export default function SalesModule({ events = [], navigateBack }) {
                 {monthlyAnalysis.underTargetCauseAnalysis.map((r) => (
                   <div
                     key={r.key}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => selectCauseDayForReport_(r.rowKey)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        selectCauseDayForReport_(r.rowKey);
+                      }
+                    }}
                     style={{
                       padding: ".55rem .65rem",
                       borderRadius: 5,
                       border: `1px solid ${analysisRowBorder("causeAnalysis")}`,
                       background: "rgba(0,0,0,0.18)",
+                      cursor: r.rowKey ? "pointer" : "default",
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!r.rowKey) return;
+                      e.currentTarget.style.background = "rgba(201,168,76,0.08)";
+                      e.currentTarget.style.borderColor = "rgba(201,168,76,0.32)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = "rgba(0,0,0,0.18)";
+                      e.currentTarget.style.borderColor = analysisRowBorder("causeAnalysis");
                     }}
                   >
                     <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)", marginBottom: ".18rem" }}>
@@ -4087,10 +4354,16 @@ export default function SalesModule({ events = [], navigateBack }) {
                       {" / "}
                       不足 <strong style={RANK_LIST_SHORTFALL}>{dy(r.shortfall)}</strong>
                     </div>
-                    <div style={{ fontSize: ".74rem", color: "rgba(212,168,138,0.92)", fontWeight: 600, marginBottom: ".12rem" }}>
+                    <div style={{ fontSize: ".74rem", color: "rgba(212,168,138,0.92)", fontWeight: 600, marginBottom: ".14rem" }}>
                       分類：{r.category}
                     </div>
-                    <div style={{ fontSize: ".72rem", lineHeight: 1.45, color: "rgba(240,232,208,0.62)" }}>{r.comment}</div>
+                    <UnderTargetCauseEvidence row={r} taxMode={taxMode} narrow={vp.narrow} />
+                    <div style={{ fontSize: ".72rem", lineHeight: 1.45, color: "rgba(240,232,208,0.62)", marginBottom: ".12rem" }}>
+                      コメント：{r.comment}
+                    </div>
+                    {r.rowKey ? (
+                      <div style={{ fontSize: ".66rem", color: "rgba(201,168,76,0.62)" }}>クリックで営業レポートを表示</div>
+                    ) : null}
                   </div>
                 ))}
               </div>
