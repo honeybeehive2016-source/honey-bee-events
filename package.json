@@ -15,7 +15,7 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "react-scripts build",
+    "build": "react-scripts build && node scripts/verify-reserve-meta.cjs",
     "generate-pwa-icons": "node tools/generate-pwa-icons.cjs",
     "obsidian-log": "node tools/update-obsidian-changelog.cjs",
     "test": "react-scripts test",

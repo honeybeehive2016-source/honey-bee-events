@@ -1,4 +1,4 @@
-/** Vercel Edge Middleware: ?reserve=1 の HTML をサーバー側で予約用 OGP に差し替え（JS 不要） */
+/** 予約URL用 OGP（middleware / ビルド検証で共通） */
 const RESERVE_TITLE = "大船 HONEY BEE ご予約フォーム";
 const RESERVE_DESC = "ライブ・イベントのご予約はこちらから";
 
@@ -24,27 +24,8 @@ function patchHtmlForReserve(html, pageUrl) {
   return out;
 }
 
-export default async function middleware(request) {
-  const url = new URL(request.url);
-  if (url.searchParams.get("reserve") !== "1") return;
-  if (url.pathname !== "/" && url.pathname !== "/index.html") return;
-
-  const indexRes = await fetch(new URL("/index.html", url.origin).toString(), {
-    headers: { "accept-encoding": "identity" },
-  });
-  if (!indexRes.ok) return;
-
-  const html = patchHtmlForReserve(await indexRes.text(), url.href);
-
-  return new Response(html, {
-    status: 200,
-    headers: {
-      "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "public, max-age=0, must-revalidate",
-    },
-  });
-}
-
-export const config = {
-  matcher: ["/"],
+module.exports = {
+  RESERVE_TITLE,
+  RESERVE_DESC,
+  patchHtmlForReserve,
 };
