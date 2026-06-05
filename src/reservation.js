@@ -2271,9 +2271,9 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
       <div style={{padding:".75rem 1rem",background:"rgba(201,168,76,0.05)",border:"1px solid rgba(201,168,76,0.15)",borderRadius:5,marginTop:"1.5rem",fontSize:".75rem",color:"rgba(240,232,208,0.7)",lineHeight:1.6}}>
         <div style={{color:"#c9a84c",marginBottom:".25rem",fontSize:".68rem",letterSpacing:".1em"}}>📝 お客様用予約フォーム：</div>
         <div style={{display:"flex",gap:".5rem",alignItems:"center",flexWrap:"wrap"}}>
-          <code style={{background:"#0a0a0a",padding:".25rem .5rem",borderRadius:3,fontSize:".72rem"}}>{window.location.origin}/?reserve=1</code>
+          <code style={{background:"#0a0a0a",padding:".25rem .5rem",borderRadius:3,fontSize:".72rem"}}>{window.location.origin}/reserve</code>
           <button style={{...S.btn("sm"),padding:".25rem .55rem",fontSize:".58rem"}} onClick={()=>{
-            navigator.clipboard.writeText(window.location.origin + "/?reserve=1");
+            navigator.clipboard.writeText(window.location.origin + "/reserve");
             alert("URLをコピーしました");
           }}>コピー</button>
         </div>

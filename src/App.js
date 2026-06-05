@@ -1487,8 +1487,8 @@ ${hasPoster ? `\n【ポスター画像も添付しています】\n画像から�
   const sortedEvents=[...events].sort((a,b)=>(a.date||"").localeCompare(b.date||""));
   const currentOut=outputs&&activeOut!=="wix"&&activeOut!=="flyer"?outputs[activeOut]:"";
 
-  // お客様用予約フォーム：URLに ?reserve=1 が含まれていたら表示
-  const isCustomerReservationMode = typeof window !== "undefined" && window.location.search.includes("reserve=1");
+  // お客様用予約フォーム：/reserve または ?reserve=1
+  const isCustomerReservationMode = isCustomerReservationUrl();
   if (isCustomerReservationMode) {
     return <CustomerReservationForm events={events}/>;
   }

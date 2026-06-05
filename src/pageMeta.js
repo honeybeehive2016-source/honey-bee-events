@@ -28,5 +28,7 @@ export function applyPageMeta(profile) {
 
 export function isCustomerReservationUrl() {
   if (typeof window === "undefined") return false;
+  const path = (window.location.pathname || "").replace(/\/+$/, "") || "/";
+  if (path === "/reserve") return true;
   return /(?:^|[?&])reserve=1(?:&|$)/.test(window.location.search);
 }
