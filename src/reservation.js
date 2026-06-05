@@ -239,6 +239,52 @@ function resolveTargetArtistValue(value, event) {
   if (v && options.includes(v)) return v;
   return TARGET_ARTIST_NONE;
 }
+/** CSVインポート用：出演者名の部分一致も許容し、値があれば targetArtist に保存 */
+function matchTargetArtistFromImport(raw, event) {
+  const v = String(raw || "").trim();
+  if (!v) return resolveTargetArtistValue("", event);
+  const options = getTargetArtistOptions(event);
+  if (options.length <= 1) return options[0] || TARGET_ARTIST_NONE;
+  if (options.includes(v)) return v;
+  const vLow = v.toLowerCase();
+  for (const opt of options) {
+    if (opt === TARGET_ARTIST_NONE) continue;
+    const oLow = opt.toLowerCase();
+    if (oLow === vLow || oLow.includes(vLow) || vLow.includes(oLow)) return opt;
+  }
+  if (isMultiArtistEvent(event)) return v;
+  return resolveTargetArtistValue(v, event);
+}
+const TARGET_ARTIST_CSV_HEADER_HINTS = [
+  "targetartist",
+  "target_artist",
+  "artist",
+  "ご予約アーティスト",
+  "予約アーティスト",
+  "お目当ての出演者をご選択ください",
+  "お目当ての出演者",
+  "お目当てアーティスト",
+  "お目当て",
+];
+function isTargetArtistCsvHeader(header) {
+  const norm = String(header || "").replace(/[\s　]/g, "").toLowerCase();
+  return TARGET_ARTIST_CSV_HEADER_HINTS.some((k) => {
+    const key = k.replace(/[\s　]/g, "").toLowerCase();
+    return norm === key || norm.includes(key);
+  });
+}
+function matchReservationBulkDeleteFilters(r, filters) {
+  if (!r || r._deleted) return false;
+  if (filters.date && r.date !== filters.date) return false;
+  if (filters.eventName && String(r.eventName || "").trim() !== String(filters.eventName).trim()) return false;
+  if (filters.source && r.source !== filters.source) return false;
+  if (filters.sourceDetail) {
+    const needle = String(filters.sourceDetail).trim();
+    const hay = String(r.sourceDetail || "").trim();
+    if (!hay.includes(needle)) return false;
+  }
+  return true;
+}
 
 /** スタッフ向け予約受付ステータス注意（open / 未設定は null） */
 function getStaffBookingStatusNotice(ev) {
@@ -515,6 +561,14 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   const [showLinkCheck, setShowLinkCheck] = useState(false);
   const [linkCheckResult, setLinkCheckResult] = useState(null);
   const [linkCheckExpand, setLinkCheckExpand] = useState(null); // "past" | "future" | null
+  const [showBulkDelete, setShowBulkDelete] = useState(false);
+  const [bulkDeleteFilters, setBulkDeleteFilters] = useState({
+    date: "",
+    eventName: "",
+    source: "",
+    sourceDetail: "",
+  });
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   useEffect(() => {
     const TRASH_TTL = 30 * 24 * 60 * 60 * 1000;
@@ -690,15 +744,23 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
     phone:     ["電話番号","電話","TEL","tel","phone","Phone","連絡先","携帯","携帯電話"],
     email:     ["メールアドレス","メール","email","Email","mail","Mail","e-mail","E-mail"],
     note:      ["備考","コメント","メッセージ","ご要望","備考欄","note","Note","memo","Memo","その他","ひとこと"],
-    event:     ["イベント名","イベント","ライブ名","ライブ","公演名","アーティスト","演目","公演"],
+    event:     ["イベント名","イベント","ライブ名","ライブ","公演名","演目","公演"],
+    targetArtist: TARGET_ARTIST_CSV_HEADER_HINTS,
     timestamp: ["タイムスタンプ","受付日時","申込日時","timestamp","Timestamp","購入日時","申込日","送信日時"],
   };
 
   const autoDetectCols = (header) => {
-    const find = (keys) => {
+    const find = (keys, { skipTargetArtistCol } = {}) => {
       for (let i = 0; i < header.length; i++) {
+        if (skipTargetArtistCol && isTargetArtistCsvHeader(header[i])) continue;
         const h = header[i].replace(/[\s　]/g, "").toLowerCase();
         if (keys.some(k => h.includes(k.replace(/[\s　]/g, "").toLowerCase()))) return i;
+      }
+      return -1;
+    };
+    const findTargetArtistCol = () => {
+      for (let i = 0; i < header.length; i++) {
+        if (isTargetArtistCsvHeader(header[i])) return i;
       }
       return -1;
     };
@@ -709,7 +771,8 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
       phone:     find(COL_KEYWORDS.phone),
       email:     find(COL_KEYWORDS.email),
       note:      find(COL_KEYWORDS.note),
-      event:     find(COL_KEYWORDS.event),
+      event:     find(COL_KEYWORDS.event, { skipTargetArtistCol: true }),
+      targetArtist: findTargetArtistCol(),
       timestamp: find(COL_KEYWORDS.timestamp),
     };
   };
@@ -733,6 +796,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
       const peopleNum = parseInt(peopleRaw.replace(/[^\d]/g, ""), 10);
       const eventName = map.event >= 0 ? (cells[map.event] || "").trim() : "";
       const linkedEvent = findEventByDateAndName(events, date, eventName);
+      const rawTargetArtist = map.targetArtist >= 0 ? (cells[map.targetArtist] || "").trim() : "";
       const reservationData = {
         eventName,
         date,
@@ -744,7 +808,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
         source:       "form",
         sourceDetail: "CSVインポート",
         staff:        "",
-        targetArtist: resolveTargetArtistValue("", linkedEvent),
+        targetArtist: matchTargetArtistFromImport(rawTargetArtist, linkedEvent),
         arrivedCount: 0,
         arrived:      false,
         arrivedAt:    "",
@@ -890,6 +954,47 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
     if (!target) return;
     const { _id, ...data } = target;
     await setDoc(doc(db, "reservations", id), { ...data, _deleted: true, _deletedAt: Date.now() });
+  };
+
+  const bulkDeleteTargets = allReservations.filter((r) => matchReservationBulkDeleteFilters(r, bulkDeleteFilters));
+  const bulkDeleteCanSpecify =
+    !!String(bulkDeleteFilters.date || "").trim() || !!String(bulkDeleteFilters.eventName || "").trim();
+
+  const handleBulkDelete = async () => {
+    if (!bulkDeleteCanSpecify) {
+      alert("日付またはイベント名のどちらかを指定してください。");
+      return;
+    }
+    const targets = allReservations.filter((r) => matchReservationBulkDeleteFilters(r, bulkDeleteFilters));
+    if (targets.length === 0) {
+      alert("条件に一致する予約がありません。");
+      return;
+    }
+    if (!window.confirm(`条件に一致する予約 ${targets.length}件をゴミ箱へ移動します。よろしいですか？`)) return;
+    setBulkDeleting(true);
+    let ok = 0;
+    const errors = [];
+    for (const target of targets) {
+      try {
+        const { _id, ...data } = target;
+        await setDoc(doc(db, "reservations", target._id), {
+          ...data,
+          _deleted: true,
+          _deletedAt: Date.now(),
+          deletedReason: "bulk delete",
+        });
+        ok++;
+      } catch (e) {
+        errors.push(`${target.customerName || target._id}：${e.message || e}`);
+      }
+    }
+    setBulkDeleting(false);
+    if (errors.length > 0) {
+      alert(`${ok}件をゴミ箱へ移動しました。\n${errors.length}件でエラーがありました。`);
+    } else {
+      alert(`${ok}件をゴミ箱へ移動しました。`);
+      setShowBulkDelete(false);
+    }
   };
 
   const openCancelModal = (id) => {
@@ -1646,6 +1751,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
           <button style={{...S.btn("sm"),padding:".4rem .8rem"}} onClick={handleLinkCheck}>📊 紐付き確認</button>
           <button style={{...S.btn("sm"),padding:".4rem .8rem"}} onClick={()=>setShowExport(true)}>📤 CSV出力</button>
           <button style={{...S.btn("sm"),padding:".4rem .8rem"}} onClick={()=>setShowImport(true)}>📥 CSVインポート</button>
+          <button style={{...S.btn("sm"),padding:".4rem .8rem"}} onClick={()=>setShowBulkDelete(true)}>🗑 一括削除</button>
           <button style={{...S.btn("sm"),padding:".4rem .8rem"}} onClick={()=>setShowTrash(true)}>🗑 ゴミ箱{trashReservations.length>0?` (${trashReservations.length})`:""}</button>
           <button style={S.btn("gold")} onClick={startNew}>＋ 電話予約を追加</button>
         </div>
@@ -2100,6 +2206,60 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
         </div>
       )}
 
+      {/* 一括削除モーダル */}
+      {showBulkDelete && (
+        <div style={{position:"fixed",top:0,left:0,width:"100%",height:"100%",background:"rgba(0,0,0,0.85)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}} onClick={()=>!bulkDeleting && setShowBulkDelete(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#0d0d0d",border:"1px solid rgba(226,75,74,0.35)",borderRadius:8,padding:"1.5rem",maxWidth:520,width:"100%",maxHeight:"85vh",overflowY:"auto"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1rem"}}>
+              <div style={{fontFamily:"Georgia,serif",fontSize:"1rem",color:"#e24b4a",letterSpacing:".15em"}}>🗑 予約の一括削除</div>
+              <button style={S.btn("sm")} onClick={()=>!bulkDeleting && setShowBulkDelete(false)} disabled={bulkDeleting}>閉じる</button>
+            </div>
+            <div style={{fontSize:".76rem",color:"rgba(240,232,208,0.75)",lineHeight:1.7,marginBottom:"1rem"}}>
+              条件に一致する予約をゴミ箱へ移動します（物理削除しません）。<br/>
+              <strong style={{color:"#f4a261"}}>日付またはイベント名のどちらかは必須</strong>です。全件削除はできません。
+            </div>
+            <div style={{display:"grid",gap:".65rem",marginBottom:"1rem"}}>
+              <Field label="日付（任意だが、イベント名とどちらか必須）">
+                <input type="date" style={S.inp} value={bulkDeleteFilters.date} onChange={e=>setBulkDeleteFilters(f=>({...f,date:e.target.value}))} />
+              </Field>
+              <Field label="イベント名（任意だが、日付とどちらか必須）">
+                <input style={S.inp} list="bulk-delete-event-names" value={bulkDeleteFilters.eventName} onChange={e=>setBulkDeleteFilters(f=>({...f,eventName:e.target.value}))} placeholder="例：須澤紀信Pre.「一歌千瞬」" />
+                <datalist id="bulk-delete-event-names">
+                  {[...new Set(allReservations.map(r=>r.eventName).filter(Boolean))].sort().map(name=>(
+                    <option key={name} value={name} />
+                  ))}
+                </datalist>
+              </Field>
+              <Field label="予約経路 source（任意）">
+                <select style={S.inp} value={bulkDeleteFilters.source} onChange={e=>setBulkDeleteFilters(f=>({...f,source:e.target.value}))}>
+                  <option value="">（指定なし）</option>
+                  {SOURCE_OPTIONS.map(s=><option key={s.value} value={s.value}>{s.label}</option>)}
+                </select>
+              </Field>
+              <Field label="経路詳細 sourceDetail（任意・部分一致）">
+                <input style={S.inp} value={bulkDeleteFilters.sourceDetail} onChange={e=>setBulkDeleteFilters(f=>({...f,sourceDetail:e.target.value}))} placeholder="例：アーティスト提供PDF / CSVインポート" />
+              </Field>
+            </div>
+            <div style={{padding:".65rem .8rem",background:"rgba(226,75,74,0.1)",border:"1px solid rgba(226,75,74,0.28)",borderRadius:5,marginBottom:"1rem",fontSize:".78rem",color:"rgba(240,232,208,0.85)"}}>
+              対象：<strong style={{color: bulkDeleteTargets.length > 0 ? "#f4a261" : "rgba(240,232,208,0.55)"}}>{bulkDeleteTargets.length}件</strong>
+              {!bulkDeleteCanSpecify ? (
+                <span style={{marginLeft:".5rem",color:"rgba(244,162,97,0.85)"}}>（日付またはイベント名を指定してください）</span>
+              ) : null}
+            </div>
+            <div style={{display:"flex",gap:".5rem",justifyContent:"flex-end"}}>
+              <button style={S.btn("ghost")} onClick={()=>setShowBulkDelete(false)} disabled={bulkDeleting}>キャンセル</button>
+              <button
+                style={{...S.btn("gold"), background:"#8b2e2e", opacity: bulkDeleting || !bulkDeleteCanSpecify || bulkDeleteTargets.length === 0 ? 0.45 : 1}}
+                disabled={bulkDeleting || !bulkDeleteCanSpecify || bulkDeleteTargets.length === 0}
+                onClick={handleBulkDelete}
+              >
+                {bulkDeleting ? "処理中..." : `ゴミ箱へ移動（${bulkDeleteTargets.length}件）`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* CSVインポートモーダル */}
       {showImport && (
         <div style={{position:"fixed",top:0,left:0,width:"100%",height:"100%",background:"rgba(0,0,0,0.85)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}} onClick={()=>!importing && setShowImport(false)}>
@@ -2145,6 +2305,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                 {v:"email", l:"📧 メール"},
                 {v:"note",  l:"📝 備考"},
                 {v:"event", l:"🎵 イベント名"},
+                {v:"targetArtist", l:"🎤 ご予約アーティスト"},
                 {v:"timestamp",l:"🕐 タイムスタンプ"},
                 {v:"-1",    l:"（無視）"},
               ];
