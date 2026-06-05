@@ -12,6 +12,7 @@ import SeatLayoutModule from "./seatLayout";
 import SalesModule from "./sales";
 import { BOOKING_STATUS_OPTIONS, effectiveBookingStatus } from "./eventBooking";
 import { getBusinessDate } from "./businessDate";
+import { applyPageMeta, isCustomerReservationUrl } from "./pageMeta";
 
 const DAYS = ["日","月","火","水","木","金","土"];
 const MONTH_NAMES = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
@@ -934,6 +935,10 @@ export default function App() {
     if (view !== "staffDay") return;
     loadStaffDay();
   }, [view, loadStaffDay]);
+
+  useEffect(() => {
+    applyPageMeta(isCustomerReservationUrl() ? "reserve" : "admin");
+  }, []);
 
   // Firestore リアルタイム同期
   useEffect(() => {
