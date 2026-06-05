@@ -83,10 +83,30 @@ export function getRoleLabel(role) {
 
 // マネージャー（時間表示しない人）リスト
 const MANAGER_NAMES = ["渡辺佑樹"];
-// 完全にスキップする行
-const SKIP_NAMES = ["バンド", "日", "曜"];
+/** 勤務表のスタッフ名列（「日」「曜」「バンド」と同じ列）の行ラベルで、人名ではないもの */
+const SHIFT_ROW_LABELS = new Set([
+  "バンド", "日", "曜",
+  "リハ", "リハーサル",
+  "MTG",
+  "出演",
+  "司会", "PA", "厨房",
+  "メモ", "備考",
+]);
 // 「出演」だけ拾う行（出勤としては扱わない）
 const PERFORMER_ONLY_NAMES = ["社長"];
+
+function isShiftStaffName(name) {
+  const n = String(name || "").trim();
+  if (!n) return false;
+  if (SHIFT_ROW_LABELS.has(n)) return false;
+  if (/^\d{1,2}$/.test(n)) return false;
+  return true;
+}
+
+function getStaffNameFromShiftRow(row, nameCol) {
+  if (!row || nameCol < 0) return "";
+  return String(row[nameCol] || "").trim();
+}
 
 export function isManager(name) {
   return MANAGER_NAMES.includes(name);
@@ -163,7 +183,7 @@ export function parseShiftCSV(csvText) {
         dataEnd++;
       }
       blocks.push({
-        dateRow, dayRow, bandRow, dateMap, dataStart, dataEnd,
+        dateRow, dayRow, bandRow, dateMap, dataStart, dataEnd, nameCol: findIdx,
       });
       i = dataEnd - 1;
     }
@@ -179,16 +199,9 @@ export function parseShiftCSV(csvText) {
     for (let r = block.dataStart; r < block.dataEnd; r++) {
       const row = rows[r];
       if (!row) continue;
-      // 名前は最初の非空セル（B列が多い）
-      let name = "";
-      for (let c = 0; c < row.length; c++) {
-        const v = (row[c]||"").trim();
-        if (v && !Object.values(block.dateMap).map(String).includes(v)) {
-          name = v; break;
-        }
-      }
-      if (!name) continue;
-      if (SKIP_NAMES.includes(name)) continue;
+      // スタッフ名は「日」「曜」「バンド」と同じ列（nameCol）のみから取得
+      const name = getStaffNameFromShiftRow(row, block.nameCol);
+      if (!isShiftStaffName(name)) continue;
       const isPerformerOnlyRow = PERFORMER_ONLY_NAMES.includes(name);
 
       // スタッフ順序を記録
@@ -1103,7 +1116,7 @@ export function getOrderedStaffNames(shifts) {
   for (const monthData of sortedShifts) {
     const list = monthData.staffOrder || [];
     for (const name of list) {
-      if (!seen.has(name)) {
+      if (!seen.has(name) && isShiftStaffName(name)) {
         order.push(name);
         seen.add(name);
       }
@@ -1112,7 +1125,7 @@ export function getOrderedStaffNames(shifts) {
     if ((!monthData.staffOrder || monthData.staffOrder.length === 0) && monthData.shiftByDate) {
       Object.values(monthData.shiftByDate).forEach(entries => {
         (entries || []).forEach(e => {
-          if (e.name && !seen.has(e.name)) {
+          if (e.name && !seen.has(e.name) && isShiftStaffName(e.name)) {
             order.push(e.name);
             seen.add(e.name);
           }
