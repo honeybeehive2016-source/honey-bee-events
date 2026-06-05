@@ -211,6 +211,34 @@ function findEventByDateAndName(events, date, eventName) {
   if (!date || !eventName) return null;
   return events.find(e => e.date === date && e.name === eventName) || null;
 }
+function normalizeEventNameForMatch_(name) {
+  return String(name || "")
+    .replace(/[\s　]/g, "")
+    .replace(/[「」『』""'’‘]/g, "")
+    .replace(/pre\.?/gi, "presents")
+    .toLowerCase();
+}
+/** CSVインポート用：イベント名の表記ゆれ・当日1件のみでも紐付け */
+function findEventForImport_(events, date, eventName) {
+  const exact = findEventByDateAndName(events, date, eventName);
+  if (exact) return exact;
+  if (!date) return null;
+  const dayEvents = (events || []).filter((e) => e.date === date && !isRentalEventName(e.name));
+  if (!eventName) {
+    return dayEvents.length === 1 ? dayEvents[0] : null;
+  }
+  const norm = normalizeEventNameForMatch_(eventName);
+  const fuzzyExact = dayEvents.find((e) => normalizeEventNameForMatch_(e.name) === norm);
+  if (fuzzyExact) return fuzzyExact;
+  const fuzzyPartial = dayEvents.find((e) => {
+    const en = normalizeEventNameForMatch_(e.name);
+    return en.includes(norm) || norm.includes(en);
+  });
+  return fuzzyPartial || null;
+}
+function normalizeCsvHeader_(header) {
+  return String(header || "").replace(/^\uFEFF/, "").replace(/[\s　]/g, "").toLowerCase();
+}
 /** イベント名に「貸切」「貸し切り」を含むか（お客様フォームと同じ判定。電話予約の候補から除外する） */
 function isRentalEventName(name) {
   return /貸切|貸し切り/.test(String(name || ""));
@@ -239,12 +267,14 @@ function resolveTargetArtistValue(value, event) {
   if (v && options.includes(v)) return v;
   return TARGET_ARTIST_NONE;
 }
-/** CSVインポート用：出演者名の部分一致も許容し、値があれば targetArtist に保存 */
+/** CSVインポート用：CSV値を targetArtist に保存（通常フォームと同じフィールド） */
 function matchTargetArtistFromImport(raw, event) {
   const v = String(raw || "").trim();
-  if (!v) return resolveTargetArtistValue("", event);
+  if (!v || v === TARGET_ARTIST_NONE) {
+    return event ? resolveTargetArtistValue("", event) : TARGET_ARTIST_NONE;
+  }
+  if (!event) return v;
   const options = getTargetArtistOptions(event);
-  if (options.length <= 1) return options[0] || TARGET_ARTIST_NONE;
   if (options.includes(v)) return v;
   const vLow = v.toLowerCase();
   for (const opt of options) {
@@ -252,26 +282,45 @@ function matchTargetArtistFromImport(raw, event) {
     const oLow = opt.toLowerCase();
     if (oLow === vLow || oLow.includes(vLow) || vLow.includes(oLow)) return opt;
   }
-  if (isMultiArtistEvent(event)) return v;
-  return resolveTargetArtistValue(v, event);
+  return v;
 }
 const TARGET_ARTIST_CSV_HEADER_HINTS = [
-  "targetartist",
-  "target_artist",
-  "artist",
-  "ご予約アーティスト",
-  "予約アーティスト",
   "お目当ての出演者をご選択ください",
   "お目当ての出演者",
   "お目当てアーティスト",
+  "ご予約アーティスト",
+  "予約アーティスト",
+  "targetartist",
+  "target_artist",
   "お目当て",
+  "artist",
 ];
 function isTargetArtistCsvHeader(header) {
-  const norm = String(header || "").replace(/[\s　]/g, "").toLowerCase();
+  const norm = normalizeCsvHeader_(header);
   return TARGET_ARTIST_CSV_HEADER_HINTS.some((k) => {
     const key = k.replace(/[\s　]/g, "").toLowerCase();
     return norm === key || norm.includes(key);
   });
+}
+function findTargetArtistCsvColIndex_(header) {
+  for (let i = 0; i < header.length; i++) {
+    if (isTargetArtistCsvHeader(header[i])) return i;
+  }
+  return -1;
+}
+function buildTargetArtistDetectionInfo_(map, headers, previewRows) {
+  if (map.targetArtist < 0) {
+    return { detected: false, label: "未検出", samples: [] };
+  }
+  const label = headers[map.targetArtist] || `列${map.targetArtist + 1}`;
+  const samples = (previewRows || [])
+    .map((row) => String(row[map.targetArtist] || "").trim())
+    .filter(Boolean)
+    .slice(0, 3);
+  return { detected: true, label, samples };
+}
+function normalizePhoneForMatch_(raw) {
+  return String(raw || "").trim().replace(/[^\d]/g, "");
 }
 function matchReservationBulkDeleteFilters(r, filters) {
   if (!r || r._deleted) return false;
@@ -685,8 +734,13 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
   };
 
   // ===== CSVインポート（Googleフォーム書き出し対応） =====
-  // CSVの1行を簡易的にパース（クォート対応）
-  const parseCSVLine = (line) => {
+  const detectCsvDelimiter_ = (firstLine) => {
+    const tabCount = (firstLine.match(/\t/g) || []).length;
+    const commaCount = (firstLine.match(/,/g) || []).length;
+    return tabCount > commaCount ? "\t" : ",";
+  };
+  // CSVの1行を簡易的にパース（クォート対応・タブ区切り対応）
+  const parseCSVLine = (line, delimiter = ",") => {
     const cells = [];
     let cur = "";
     let inQuote = false;
@@ -699,7 +753,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
         } else cur += ch;
       } else {
         if (ch === '"') inQuote = true;
-        else if (ch === ',') { cells.push(cur); cur = ""; }
+        else if (ch === delimiter) { cells.push(cur); cur = ""; }
         else cur += ch;
       }
     }
@@ -758,12 +812,6 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
       }
       return -1;
     };
-    const findTargetArtistCol = () => {
-      for (let i = 0; i < header.length; i++) {
-        if (isTargetArtistCsvHeader(header[i])) return i;
-      }
-      return -1;
-    };
     return {
       date:      find(COL_KEYWORDS.date),
       name:      find(COL_KEYWORDS.name),
@@ -772,20 +820,37 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
       email:     find(COL_KEYWORDS.email),
       note:      find(COL_KEYWORDS.note),
       event:     find(COL_KEYWORDS.event, { skipTargetArtistCol: true }),
-      targetArtist: findTargetArtistCol(),
+      targetArtist: findTargetArtistCsvColIndex_(header),
       timestamp: find(COL_KEYWORDS.timestamp),
     };
   };
 
+  const buildImportMultiArtistWarning_ = (lines, map, delimiter) => {
+    if (map.targetArtist >= 0) return null;
+    for (let r = 1; r < Math.min(lines.length, 21); r++) {
+      if (!lines[r].trim()) continue;
+      const cells = parseCSVLine(lines[r], delimiter);
+      const date = normalizeDate(map.date >= 0 ? (cells[map.date] || "") : "");
+      if (!date) continue;
+      const eventName = map.event >= 0 ? (cells[map.event] || "").trim() : "";
+      const linked = findEventForImport_(events, date, eventName);
+      if (linked && isMultiArtistEvent(linked)) {
+        return `複数出演者イベント（${linked.name || date}）ですが、ご予約アーティスト列が検出されていません。取り込み前に列の割り当てを確認してください。`;
+      }
+    }
+    return null;
+  };
+
   // マッピングを使って実際に取り込む（自動検出・手動共通）
-  const doImportWithMap = async (lines, map) => {
+  const doImportWithMap = async (lines, map, delimiter = ",") => {
     setImporting(true);
     setColMappingPending(null);
     let okCount = 0;
+    let targetArtistSaved = 0;
     const errors = [];
     for (let r = 1; r < lines.length; r++) {
       if (!lines[r].trim()) continue;
-      const cells = parseCSVLine(lines[r]);
+      const cells = parseCSVLine(lines[r], delimiter);
       const customerName = map.name >= 0 ? (cells[map.name] || "").trim() : "";
       const date = normalizeDate(map.date >= 0 ? (cells[map.date] || "") : "");
       if (!customerName || !date) {
@@ -795,10 +860,12 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
       const peopleRaw = map.people >= 0 ? (cells[map.people] || "").trim() : "1";
       const peopleNum = parseInt(peopleRaw.replace(/[^\d]/g, ""), 10);
       const eventName = map.event >= 0 ? (cells[map.event] || "").trim() : "";
-      const linkedEvent = findEventByDateAndName(events, date, eventName);
+      const linkedEvent = findEventForImport_(events, date, eventName);
       const rawTargetArtist = map.targetArtist >= 0 ? (cells[map.targetArtist] || "").trim() : "";
+      const targetArtist = matchTargetArtistFromImport(rawTargetArtist, linkedEvent);
+      if (rawTargetArtist && targetArtist && targetArtist !== TARGET_ARTIST_NONE) targetArtistSaved++;
       const reservationData = {
-        eventName,
+        eventName: eventName || linkedEvent?.name || "",
         date,
         customerName,
         people:       peopleNum > 0 ? peopleNum : 1,
@@ -808,7 +875,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
         source:       "form",
         sourceDetail: "CSVインポート",
         staff:        "",
-        targetArtist: matchTargetArtistFromImport(rawTargetArtist, linkedEvent),
+        targetArtist,
         arrivedCount: 0,
         arrived:      false,
         arrivedAt:    "",
@@ -829,11 +896,80 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
         errors.push(`${r+1}行目：保存失敗（${e.message || e}）`);
       }
     }
-    setImportResult({ ok: okCount, errors });
+    setImportResult({ ok: okCount, errors, targetArtistSaved, mode: "import" });
     setImporting(false);
   };
 
-  // CSVファイルを読み込む（自動検出 → 必要なら手動マッピング画面へ）
+  const doRepairTargetArtistFromCsv = async (lines, map, delimiter = ",") => {
+    setImporting(true);
+    setColMappingPending(null);
+    let okCount = 0;
+    let notFound = 0;
+    let skipped = 0;
+    const errors = [];
+    if (map.targetArtist < 0) {
+      setImportResult({ ok: 0, errors: ["ご予約アーティスト列が未検出のため補正できません"], mode: "repair" });
+      setImporting(false);
+      return;
+    }
+    for (let r = 1; r < lines.length; r++) {
+      if (!lines[r].trim()) continue;
+      const cells = parseCSVLine(lines[r], delimiter);
+      const customerName = map.name >= 0 ? (cells[map.name] || "").trim() : "";
+      const date = normalizeDate(map.date >= 0 ? (cells[map.date] || "") : "");
+      const rawTargetArtist = (cells[map.targetArtist] || "").trim();
+      if (!customerName || !date) {
+        skipped++;
+        continue;
+      }
+      if (!rawTargetArtist) {
+        skipped++;
+        continue;
+      }
+      const eventName = map.event >= 0 ? (cells[map.event] || "").trim() : "";
+      const phone = map.phone >= 0 ? normalizePhone(cells[map.phone] || "") : "";
+      const linkedEvent = findEventForImport_(events, date, eventName);
+      const targetArtist = matchTargetArtistFromImport(rawTargetArtist, linkedEvent);
+      const csvEventNorm = normalizeEventNameForMatch_(eventName);
+      const linkedEventNorm = normalizeEventNameForMatch_(linkedEvent?.name);
+      const phoneNorm = normalizePhoneForMatch_(phone);
+      const candidates = allReservations.filter((res) => {
+        if (res._deleted) return false;
+        if (res.date !== date) return false;
+        if (String(res.customerName || "").trim() !== customerName) return false;
+        if (normalizePhoneForMatch_(res.phone) !== phoneNorm) return false;
+        const resEventNorm = normalizeEventNameForMatch_(res.eventName);
+        if (!csvEventNorm && !resEventNorm) return true;
+        if (!csvEventNorm || !resEventNorm) return true;
+        return resEventNorm === csvEventNorm || resEventNorm === linkedEventNorm;
+      });
+      if (candidates.length === 0) {
+        notFound++;
+        continue;
+      }
+      if (candidates.length > 1) {
+        errors.push(`${r + 1}行目：一致予約が複数あります（${customerName}）`);
+        continue;
+      }
+      try {
+        await setDoc(doc(db, "reservations", candidates[0]._id), { targetArtist }, { merge: true });
+        okCount++;
+      } catch (e) {
+        errors.push(`${r + 1}行目：補正失敗（${e.message || e}）`);
+      }
+    }
+    setImportResult({
+      ok: okCount,
+      errors,
+      notFound,
+      skipped,
+      targetArtistSaved: okCount,
+      mode: "repair",
+    });
+    setImporting(false);
+  };
+
+  // CSVファイルを読み込む（検出結果を確認してから取り込み）
   const handleImportCSV = async (file) => {
     if (!file) return;
     setImporting(true);
@@ -841,7 +977,6 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
     setColMappingPending(null);
     try {
       const text = await file.text();
-      // BOM除去
       const clean = text.replace(/^\uFEFF/, "");
       const lines = clean.split(/\r?\n/).filter(l => l.trim().length > 0);
       if (lines.length < 2) {
@@ -849,16 +984,18 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
         setImporting(false);
         return;
       }
-      const header = parseCSVLine(lines[0]);
+      const delimiter = detectCsvDelimiter_(lines[0]);
+      const header = parseCSVLine(lines[0], delimiter);
       const map = autoDetectCols(header);
-      if (map.date >= 0 && map.name >= 0) {
-        setImporting(false);
-        await doImportWithMap(lines, map);
-        return;
-      }
-      // 必須列が見つからない → 手動マッピング画面へ
-      const preview = lines.slice(1, 6).map(l => parseCSVLine(l));
-      setColMappingPending({ headers: header, preview, lines, map });
+      const preview = lines.slice(1, 6).map((l) => parseCSVLine(l, delimiter));
+      setColMappingPending({
+        headers: header,
+        preview,
+        lines,
+        map,
+        delimiter,
+        autoDetected: map.date >= 0 && map.name >= 0,
+      });
     } catch (e) {
       console.error("CSVインポートエラー:", e);
       setImportResult({ ok: 0, errors: [`読み込み失敗：${e.message || e}`] });
@@ -2295,7 +2432,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
               </div>
             )}
 
-            {/* 手動列マッピング画面 */}
+            {/* 取り込み前確認（自動検出・手動マッピング共通） */}
             {colMappingPending && !importing && !importResult && (()=>{
               const FIELD_OPTS = [
                 {v:"date",  l:"📅 日付（必須）"},
@@ -2310,16 +2447,50 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                 {v:"-1",    l:"（無視）"},
               ];
               const pending = colMappingPending;
-              const updateMap = (field, idx) => {
-                setColMappingPending(p => ({ ...p, map: { ...p.map, [field]: idx } }));
-              };
+              const delimiter = pending.delimiter || ",";
+              const artistDetect = buildTargetArtistDetectionInfo_(pending.map, pending.headers, pending.preview);
+              const multiArtistWarn = buildImportMultiArtistWarning_(pending.lines, pending.map, delimiter);
               const missingRequired = pending.map.date < 0 || pending.map.name < 0;
               return (
                 <div>
-                  <div style={{fontSize:".78rem",color:"#f4a261",marginBottom:".75rem",padding:".5rem .75rem",background:"rgba(244,162,97,0.1)",border:"1px solid rgba(244,162,97,0.3)",borderRadius:4}}>
-                    ⚠️ 列名を自動検出できませんでした。各列に何のデータが入っているかを指定してください。<br/>
-                    <span style={{color:"#e24b4a",fontWeight:600}}>「日付」と「名前」は必須です。</span>
+                  {pending.autoDetected ? (
+                    <div style={{fontSize:".78rem",color:"#7ec87e",marginBottom:".75rem",padding:".5rem .75rem",background:"rgba(126,200,127,0.1)",border:"1px solid rgba(126,200,127,0.35)",borderRadius:4,lineHeight:1.6}}>
+                      ✅ 列名を自動検出しました。内容を確認してから取り込んでください。
+                    </div>
+                  ) : (
+                    <div style={{fontSize:".78rem",color:"#f4a261",marginBottom:".75rem",padding:".5rem .75rem",background:"rgba(244,162,97,0.1)",border:"1px solid rgba(244,162,97,0.3)",borderRadius:4}}>
+                      ⚠️ 列名を自動検出できませんでした。各列に何のデータが入っているかを指定してください。<br/>
+                      <span style={{color:"#e24b4a",fontWeight:600}}>「日付」と「名前」は必須です。</span>
+                    </div>
+                  )}
+
+                  <div style={{
+                    fontSize:".78rem",
+                    marginBottom:".75rem",
+                    padding:".5rem .75rem",
+                    borderRadius:4,
+                    lineHeight:1.6,
+                    color: artistDetect.detected ? "#7ec87e" : "#f4a261",
+                    background: artistDetect.detected ? "rgba(126,200,127,0.08)" : "rgba(244,162,97,0.1)",
+                    border: `1px solid ${artistDetect.detected ? "rgba(126,200,127,0.35)" : "rgba(244,162,97,0.35)"}`,
+                  }}>
+                    {artistDetect.detected ? (
+                      <>
+                        🎤 ご予約アーティスト列を検出：<strong>{artistDetect.label}</strong>
+                        {artistDetect.samples.length > 0 && (
+                          <span style={{color:"rgba(240,232,208,0.75)"}}>（例：{artistDetect.samples.join(" / ")}）</span>
+                        )}
+                      </>
+                    ) : (
+                      <>⚠️ ご予約アーティスト列：未検出（手動で「🎤 ご予約アーティスト」を割り当ててください）</>
+                    )}
                   </div>
+
+                  {multiArtistWarn && (
+                    <div style={{fontSize:".75rem",color:"#e24b4a",marginBottom:".75rem",padding:".5rem .75rem",background:"rgba(226,75,74,0.12)",border:"1px solid rgba(226,75,74,0.35)",borderRadius:4,lineHeight:1.6}}>
+                      ⚠️ {multiArtistWarn}
+                    </div>
+                  )}
 
                   {/* プレビューテーブル */}
                   <div style={{overflowX:"auto",marginBottom:".75rem"}}>
@@ -2379,14 +2550,24 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                     })}
                   </div>
 
-                  <div style={{display:"flex",gap:".5rem",justifyContent:"flex-end"}}>
+                  <div style={{display:"flex",gap:".5rem",justifyContent:"flex-end",flexWrap:"wrap"}}>
                     <button style={S.btn("ghost")} onClick={()=>setColMappingPending(null)}>← やり直す</button>
+                    {artistDetect.detected && (
+                      <button
+                        style={S.btn("ghost")}
+                        disabled={missingRequired}
+                        title="既存予約の targetArtist のみを CSV と照合して補正します（削除・上書きなし）"
+                        onClick={()=>doRepairTargetArtistFromCsv(pending.lines, pending.map, delimiter)}
+                      >
+                        🔧 既存予約のアーティストを補正
+                      </button>
+                    )}
                     <button
                       style={{...S.btn("gold"), opacity: missingRequired ? 0.4 : 1}}
                       disabled={missingRequired}
-                      onClick={()=>doImportWithMap(pending.lines, pending.map)}
+                      onClick={()=>doImportWithMap(pending.lines, pending.map, delimiter)}
                     >
-                      {missingRequired ? "日付と名前の列を指定してください" : "▶ インポート開始"}
+                      {missingRequired ? "日付と名前の列を指定してください" : "▶ 新規インポート開始"}
                     </button>
                   </div>
                 </div>
@@ -2397,8 +2578,21 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
               <div>
                 <div style={{padding:"1rem",background:importResult.ok>0?"rgba(126,200,127,0.12)":"rgba(226,75,74,0.12)",border:`1px solid ${importResult.ok>0?"rgba(126,200,127,0.4)":"rgba(226,75,74,0.4)"}`,borderRadius:5,marginBottom:"1rem"}}>
                   <div style={{fontSize:".95rem",color:importResult.ok>0?"#7ec87e":"#ff8a89",fontWeight:600,marginBottom:".25rem"}}>
-                    {importResult.ok > 0 ? `✅ ${importResult.ok}件 取り込み完了` : "❌ 取り込みに失敗しました"}
+                    {importResult.mode === "repair"
+                      ? (importResult.ok > 0 ? `✅ ${importResult.ok}件 アーティスト補正完了` : "❌ アーティスト補正に失敗しました")
+                      : (importResult.ok > 0 ? `✅ ${importResult.ok}件 取り込み完了` : "❌ 取り込みに失敗しました")}
                   </div>
+                  {importResult.mode === "repair" && (
+                    <div style={{fontSize:".72rem",color:"rgba(240,232,208,0.75)",lineHeight:1.6,marginTop:".25rem"}}>
+                      {importResult.notFound > 0 && <div>・一致する既存予約なし：{importResult.notFound}行</div>}
+                      {importResult.skipped > 0 && <div>・スキップ（名前・日付・アーティスト空）：{importResult.skipped}行</div>}
+                    </div>
+                  )}
+                  {importResult.targetArtistSaved > 0 && (
+                    <div style={{fontSize:".72rem",color:"rgba(126,200,127,0.9)",marginTop:".35rem"}}>
+                      🎤 ご予約アーティスト反映：{importResult.targetArtistSaved}件
+                    </div>
+                  )}
                   {importResult.errors.length > 0 && (
                     <div style={{fontSize:".72rem",color:"rgba(240,232,208,0.7)",marginTop:".5rem",lineHeight:1.6}}>
                       <div style={{color:"rgba(244,162,97,0.85)",marginBottom:".25rem"}}>⚠️ {importResult.errors.length}件のスキップ・エラー：</div>
