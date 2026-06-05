@@ -1261,12 +1261,16 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
 
   /** カレンダー日付詳細・リスト共通の予約カード（スマホは hb-res-card の CSS のみ） */
   const renderHbReservationCard = (r, {
-    showArtistBadge,
+    groupEvent = null,
     showStaff = false,
     showEvent = false,
     noteTruncate = false,
     compactPad = false,
   }) => {
+    const evForCard = groupEvent || findEventForImport_(events, r.date, r.eventName);
+    const showArtistBadge = !!(evForCard && isMultiArtistEvent(evForCard));
+    const artistLabel = normalizeTargetArtist(r.targetArtist);
+    const isNoneArtist = artistLabel === TARGET_ARTIST_NONE;
     const isCancelled = !!r.cancelled;
     const peopleN = getPeopleCount(r.people);
     const noteRaw = String(r.note || "").trim();
@@ -1324,6 +1328,9 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
     );
 
     const metaBadgeStyle = { padding: ".1rem .4rem", background: "rgba(126,200,227,0.13)", borderRadius: 2, fontSize: ".62rem", color: "#7ec8e3" };
+    const artistBadgeStyle = isNoneArtist
+      ? { padding: ".1rem .4rem", background: "rgba(244,162,97,0.12)", borderRadius: 2, fontSize: ".62rem", color: "rgba(244,162,97,0.88)" }
+      : metaBadgeStyle;
 
     return (
       <div key={r._id} className="hb-res-card" style={cardBase}>
@@ -1365,8 +1372,8 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
           {(showArtistBadge || !!seatStr || (showStaff && r.staff)) && (
             <div className="hb-res-card__meta-row">
               {showArtistBadge && (
-                <span className="hb-res-card__meta-line" style={metaBadgeStyle}>
-                  🎤 {normalizeTargetArtist(r.targetArtist)}
+                <span className="hb-res-card__meta-line" style={artistBadgeStyle}>
+                  🎤 {artistLabel}
                 </span>
               )}
               {!!seatStr && (
@@ -2121,18 +2128,6 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                   }
                 }
 
-                const renderReservationCard = (r) => {
-                  const evForCard = findEventByDateAndName(events, calSelectedDate, r.eventName);
-                  const showArtistBadge = !!(evForCard && isMultiArtistEvent(evForCard));
-                  return renderHbReservationCard(r, {
-                    showArtistBadge,
-                    showStaff: false,
-                    showEvent: false,
-                    noteTruncate: false,
-                    compactPad: true,
-                  });
-                };
-
                 return groups.map((g, gi) => {
                   const activeInGroup = g.reservations.filter(isActiveReservation);
                   const totalP = activeInGroup.reduce((s,r)=>s+Number(r.people||0),0);
@@ -2205,7 +2200,13 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                         <div style={{textAlign:"center",padding:"1rem",color:"rgba(240,232,208,0.4)",fontSize:".78rem",background:"#111",borderRadius:5}}>
                           {dayEvents.length > 1 ? "このイベントの予約はまだありません" : "この日の予約はありません"}
                         </div>
-                      ) : g.reservations.map(renderReservationCard)}
+                      ) : g.reservations.map((r) => renderHbReservationCard(r, {
+                        groupEvent: g.event,
+                        showStaff: false,
+                        showEvent: false,
+                        noteTruncate: false,
+                        compactPad: true,
+                      }))}
                     </div>
                   );
                 });
@@ -2254,17 +2255,12 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                 {cancelCount > 0 && <span style={{color:"rgba(136,136,140,0.85)",marginLeft:".35rem"}}>· キャンセル {cancelCount}件</span>}
               </span>
             </div>
-            {dayReservations.map(r => {
-              const evList = findEventByDateAndName(events, r.date, r.eventName);
-              const showListArtist = !!(evList && isMultiArtistEvent(evList));
-              return renderHbReservationCard(r, {
-                showArtistBadge: showListArtist,
-                showStaff: true,
-                showEvent: true,
-                noteTruncate: true,
-                compactPad: false,
-              });
-            })}
+            {dayReservations.map(r => renderHbReservationCard(r, {
+              showStaff: true,
+              showEvent: true,
+              noteTruncate: true,
+              compactPad: false,
+            }))}
           </div>
         );
       })}
