@@ -140,6 +140,14 @@ function normalizeDateStrings(arr) {
   return out;
 }
 
+const KITCHEN_TARGET_MODES = [
+  { k: "today", l: "当日" },
+  { k: "nextday", l: "明日" },
+  { k: "single", l: "日付指定" },
+  { k: "multi", l: "複数日" },
+  { k: "range", l: "期間" },
+];
+
 /** sortOrder 昇順。無いものは末尾相当として createdAt → _id で安定化 */
 function compareIncomingKitchenNotes(a, b) {
   const pa =
@@ -303,6 +311,9 @@ export default function KitchenNotesModule() {
   }, []);
 
   const computeTargetDates = () => {
+    if (kitchenSendMode === "today") {
+      return [selectedDate];
+    }
     if (kitchenSendMode === "nextday") {
       return [shiftDate(selectedDate, 1)];
     }
@@ -485,6 +496,9 @@ export default function KitchenNotesModule() {
   };
 
   const computeEditTargetDates = () => {
+    if (displayEditMode === "today") {
+      return [selectedDate];
+    }
     if (displayEditMode === "nextday") {
       return [shiftDate(selectedDate, 1)];
     }
@@ -676,15 +690,15 @@ export default function KitchenNotesModule() {
                       <div style={{ marginTop:".55rem", padding:".55rem .65rem", background:"#0a0a0a", border:`1px solid ${cv.border}`, borderRadius:4 }}>
                         <div style={{ fontSize:".62rem", color:"rgba(126,200,127,0.75)", marginBottom:".4rem", letterSpacing:".08em" }}>📅 表示日（編集）</div>
                         <div style={{ display:"flex", flexWrap:"wrap", gap:".35rem", marginBottom:".45rem" }}>
-                          {[
-                            { k:"nextday", l:"明日" },
-                            { k:"single", l:"日付指定" },
-                            { k:"multi", l:"複数日" },
-                            { k:"range", l:"期間" },
-                          ].map(m => (
+                          {KITCHEN_TARGET_MODES.map(m => (
                             <button key={m.k} type="button" onClick={() => setDisplayEditMode(m.k)} style={{ padding:".22rem .55rem", borderRadius:3, border:`1px solid ${displayEditMode === m.k ? "#7ec8b8" : "rgba(126,200,127,0.25)"}`, background: displayEditMode === m.k ? "#7ec8b8" : "transparent", color: displayEditMode === m.k ? "#0a0a0a" : "rgba(126,200,127,0.75)", fontSize:".62rem", cursor:"pointer", fontFamily:"inherit", letterSpacing:".05em" }}>{m.l}</button>
                           ))}
                         </div>
+                        {displayEditMode === "today" && (
+                          <div style={{ fontSize:".65rem", color:"rgba(240,232,208,0.55)", marginBottom:".35rem" }}>
+                            → 当日（{fmtDate(selectedDate)}）の厨房共有に表示
+                          </div>
+                        )}
                         {displayEditMode === "nextday" && (
                           <div style={{ fontSize:".65rem", color:"rgba(240,232,208,0.55)", marginBottom:".35rem" }}>
                             → 翌日（{fmtDate(shiftDate(selectedDate, 1))}）に表示
@@ -825,15 +839,16 @@ export default function KitchenNotesModule() {
       <div style={{ padding:".75rem .9rem", background:"#0d0d0d", border:"1px solid rgba(126,200,127,0.15)", borderRadius:5, marginBottom:".75rem" }}>
         <div style={{ fontSize:".62rem", color:"rgba(126,200,127,0.75)", marginBottom:".5rem", letterSpacing:".1em" }}>📅 送り先（投稿日は {fmtDate(selectedDate)}）</div>
         <div style={{ display:"flex", flexWrap:"wrap", gap:".4rem", marginBottom:".5rem" }}>
-          {[
-            { k:"nextday", l:"明日" },
-            { k:"single", l:"日付指定" },
-            { k:"multi", l:"複数日" },
-            { k:"range", l:"期間" },
-          ].map(m => (
+          {KITCHEN_TARGET_MODES.map(m => (
             <button key={m.k} type="button" onClick={() => setKitchenSendMode(m.k)} style={{ padding:".3rem .7rem", borderRadius:3, border:`1px solid ${kitchenSendMode === m.k ? "#7ec8b8" : "rgba(126,200,127,0.25)"}`, background: kitchenSendMode === m.k ? "#7ec8b8" : "transparent", color: kitchenSendMode === m.k ? "#0a0a0a" : "rgba(126,200,127,0.75)", fontSize:".65rem", cursor:"pointer", fontFamily:"inherit", letterSpacing:".05em" }}>{m.l}</button>
           ))}
         </div>
+
+        {kitchenSendMode === "today" && (
+          <div style={{ fontSize:".7rem", color:"rgba(240,232,208,0.6)" }}>
+            → 当日（{fmtDate(selectedDate)}）の厨房共有に表示
+          </div>
+        )}
 
         {kitchenSendMode === "nextday" && (
           <div style={{ fontSize:".7rem", color:"rgba(240,232,208,0.6)" }}>
