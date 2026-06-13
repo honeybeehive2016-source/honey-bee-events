@@ -132,6 +132,14 @@ function normalizeHandoverTargetDates(arr) {
   return [...set].sort();
 }
 
+const HANDOVER_TARGET_MODES = [
+  { k: "today", l: "当日" },
+  { k: "nextday", l: "明日" },
+  { k: "single", l: "日付指定" },
+  { k: "multi", l: "複数日" },
+  { k: "range", l: "期間" },
+];
+
 function HandoverAttachmentsBlock({ attachments, compact }) {
   const list = Array.isArray(attachments) ? attachments : [];
   if (list.length === 0) return null;
@@ -442,7 +450,7 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], sh
   const [newHandoverNote, setNewHandoverNote] = useState("");
   const [newHandoverAuthor, setNewHandoverAuthor] = useState("");
   const [showHistory, setShowHistory] = useState(false);
-  const [handoverMode, setHandoverMode] = useState("nextday"); // nextday | single | multi | range
+  const [handoverMode, setHandoverMode] = useState("nextday"); // today | nextday | single | multi | range
   const [handoverDate, setHandoverDate] = useState("");
   const [handoverDates, setHandoverDates] = useState([]); // multi
   const [handoverRangeStart, setHandoverRangeStart] = useState("");
@@ -454,7 +462,7 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], sh
   const [editingHandoverText, setEditingHandoverText] = useState("");
   const [savingHandoverEditId, setSavingHandoverEditId] = useState("");
   const [editingTargetHandoverId, setEditingTargetHandoverId] = useState("");
-  const [editTargetMode, setEditTargetMode] = useState("multi"); // nextday | single | multi | range
+  const [editTargetMode, setEditTargetMode] = useState("multi"); // today | nextday | single | multi | range
   const [editTargetDate, setEditTargetDate] = useState("");
   const [editTargetDates, setEditTargetDates] = useState([]);
   const [editTargetRangeStart, setEditTargetRangeStart] = useState("");
@@ -749,6 +757,9 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], sh
 
   // モードに応じて targetDates を計算
   const computeTargetDates = () => {
+    if (handoverMode === "today") {
+      return [selectedDate];
+    }
     if (handoverMode === "nextday") {
       return [shiftDate(selectedDate, 1)];
     }
@@ -833,6 +844,9 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], sh
   };
 
   const computeEditTargetDates = () => {
+    if (editTargetMode === "today") {
+      return [selectedDate];
+    }
     if (editTargetMode === "nextday") {
       return [shiftDate(selectedDate, 1)];
     }
@@ -1176,15 +1190,15 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], sh
                     <div style={{marginTop:".5rem",padding:".65rem .75rem",background:"#111",border:"1px solid rgba(244,162,97,0.25)",borderRadius:5}}>
                       <div style={{fontSize:".62rem",color:"rgba(244,162,97,0.85)",marginBottom:".45rem",letterSpacing:".1em"}}>📅 表示日変更</div>
                       <div style={{display:"flex",flexWrap:"wrap",gap:".4rem",marginBottom:".5rem"}}>
-                        {[
-                          {k:"nextday",l:"明日"},
-                          {k:"single",l:"日付指定"},
-                          {k:"multi",l:"複数日"},
-                          {k:"range",l:"期間"},
-                        ].map(m => (
+                        {HANDOVER_TARGET_MODES.map(m => (
                           <button key={m.k} type="button" onClick={()=>setEditTargetMode(m.k)} style={{padding:".3rem .7rem",borderRadius:3,border:"1px solid "+(editTargetMode===m.k?"#f4a261":"rgba(244,162,97,0.2)"),background:editTargetMode===m.k?"#f4a261":"transparent",color:editTargetMode===m.k?"#0a0a0a":"rgba(244,162,97,0.7)",fontSize:".65rem",cursor:"pointer",fontFamily:"inherit",letterSpacing:".05em"}}>{m.l}</button>
                         ))}
                       </div>
+                      {editTargetMode === "today" && (
+                        <div style={{fontSize:".7rem",color:"rgba(240,232,208,0.6)"}}>
+                          → 当日（{fmtDate(selectedDate)}）の本日の営業画面に表示
+                        </div>
+                      )}
                       {editTargetMode === "nextday" && (
                         <div style={{fontSize:".7rem",color:"rgba(240,232,208,0.6)"}}>
                           → 翌日（{fmtDate(shiftDate(selectedDate, 1))}）に表示
@@ -1588,15 +1602,16 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], sh
       <div style={{padding:".75rem .9rem",background:"#0d0d0d",border:"1px solid rgba(244,162,97,0.15)",borderRadius:5,marginBottom:".75rem"}}>
         <div style={{fontSize:".62rem",color:"rgba(244,162,97,0.7)",marginBottom:".5rem",letterSpacing:".1em"}}>📅 送り先</div>
         <div style={{display:"flex",flexWrap:"wrap",gap:".4rem",marginBottom:".5rem"}}>
-          {[
-            {k:"nextday",l:"明日"},
-            {k:"single",l:"日付指定"},
-            {k:"multi",l:"複数日"},
-            {k:"range",l:"期間"},
-          ].map(m => (
+          {HANDOVER_TARGET_MODES.map(m => (
             <button key={m.k} onClick={()=>setHandoverMode(m.k)} style={{padding:".3rem .7rem",borderRadius:3,border:"1px solid "+(handoverMode===m.k?"#f4a261":"rgba(244,162,97,0.2)"),background:handoverMode===m.k?"#f4a261":"transparent",color:handoverMode===m.k?"#0a0a0a":"rgba(244,162,97,0.7)",fontSize:".65rem",cursor:"pointer",fontFamily:"inherit",letterSpacing:".05em"}}>{m.l}</button>
           ))}
         </div>
+
+        {handoverMode === "today" && (
+          <div style={{fontSize:".7rem",color:"rgba(240,232,208,0.6)"}}>
+            → 当日（{fmtDate(selectedDate)}）の本日の営業画面に表示
+          </div>
+        )}
 
         {handoverMode === "nextday" && (
           <div style={{fontSize:".7rem",color:"rgba(240,232,208,0.6)"}}>
@@ -1816,15 +1831,15 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], sh
                   <div style={{marginTop:".5rem",padding:".65rem .75rem",background:"#111",border:"1px solid rgba(244,162,97,0.25)",borderRadius:5}}>
                     <div style={{fontSize:".62rem",color:"rgba(244,162,97,0.85)",marginBottom:".45rem",letterSpacing:".1em"}}>📅 表示日変更</div>
                     <div style={{display:"flex",flexWrap:"wrap",gap:".4rem",marginBottom:".5rem"}}>
-                      {[
-                        {k:"nextday",l:"明日"},
-                        {k:"single",l:"日付指定"},
-                        {k:"multi",l:"複数日"},
-                        {k:"range",l:"期間"},
-                      ].map(m => (
+                      {HANDOVER_TARGET_MODES.map(m => (
                         <button key={m.k} type="button" onClick={()=>setEditTargetMode(m.k)} style={{padding:".3rem .7rem",borderRadius:3,border:"1px solid "+(editTargetMode===m.k?"#f4a261":"rgba(244,162,97,0.2)"),background:editTargetMode===m.k?"#f4a261":"transparent",color:editTargetMode===m.k?"#0a0a0a":"rgba(244,162,97,0.7)",fontSize:".65rem",cursor:"pointer",fontFamily:"inherit",letterSpacing:".05em"}}>{m.l}</button>
                       ))}
                     </div>
+                    {editTargetMode === "today" && (
+                      <div style={{fontSize:".7rem",color:"rgba(240,232,208,0.6)"}}>
+                        → 当日（{fmtDate(selectedDate)}）の本日の営業画面に表示
+                      </div>
+                    )}
                     {editTargetMode === "nextday" && (
                       <div style={{fontSize:".7rem",color:"rgba(240,232,208,0.6)"}}>
                         → 翌日（{fmtDate(shiftDate(selectedDate, 1))}）に表示
