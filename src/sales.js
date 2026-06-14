@@ -151,6 +151,10 @@ const OWNER_RUN_SERIES_IDS = new Set([
   "girls_collection",
   "monday",
 ]);
+/** タブレット/QR注文：テスト運用開始日（この日を含む） */
+const TABLET_ORDER_TEST_START_DATE = "2026-05-23";
+/** タブレット/QR注文：本格運用前提の開始日（この日を含む） */
+const TABLET_ORDER_FULL_START_DATE = "2026-06-01";
 
 const S = {
   card: { background:"#111", border:"1px solid rgba(201,168,76,0.14)", borderRadius:6, padding:"1rem 1.1rem" },
@@ -1174,6 +1178,71 @@ function buildMonthlyComparisonComment_(ctx) {
 
   return null;
 }
+function isCustomerFocusedUnderTargetCause_(topCat, weakSide) {
+  if (topCat === "集客不足型" || topCat === "集客・単価不足型") return true;
+  if (!topCat && weakSide === "customer") return true;
+  return false;
+}
+function hasRegularSeriesEventInCauseAnalysis_(causeAnalysis) {
+  const pattern = /DISCO|アニソン|Jam|MONDAY|定例/i;
+  return (causeAnalysis || []).some((r) => pattern.test(String(r?.eventName || "")));
+}
+function buildOrderUnitPriceAddonForCustomerAction_(orderPhase) {
+  if (orderPhase === "before_tablet") {
+    return " 集客対策に加え、卓上メニューやおすすめ表示でドリンク・フードが目に入る状態を作ってください。";
+  }
+  if (orderPhase === "tablet_test") {
+    return " 集客対策に加え、タブレット/QR注文（テスト運用）のおすすめ枠にドリンク2品・提供が早いフード2品を出してください。";
+  }
+  return " 集客対策に加え、注文画面のおすすめ枠にドリンク2品・提供が早いフード2品を出してください。";
+}
+function buildCustomerAcquisitionActionComment_(ctx, used) {
+  const { analysis: a, phase, tier } = ctx;
+  if (tier === "achieved" || phase.futureMonth) return null;
+
+  const topCat = dominantUnderTargetCategory_(a.underTargetCauseAnalysis);
+  const weakSide = pickProgressWeakSide_(a.underTargetCauseAnalysis);
+
+  if (topCat === "目標過大の可能性" || topCat === "単価不足型") return null;
+  if (!isCustomerFocusedUnderTargetCause_(topCat, weakSide)) return null;
+
+  const isDualCause = topCat === "集客・単価不足型";
+  const orderPhase = resolveOrderOperationPhase_(a.currentBusinessDate);
+  const hasRegularSeries = hasRegularSeriesEventInCauseAnalysis_(a.underTargetCauseAnalysis);
+  const futureDayCount = Number(a.futureDayCount || 0);
+  const diagnosis =
+    topCat === "集客・単価不足型"
+      ? "未達日は集客不足に加え、来店後の単価も月平均を下回る日が目立ちます。"
+      : "未達日の多くは集客不足型です。";
+
+  used.customer = true;
+  used.customerAction = true;
+  if (isDualCause) used.unit = true;
+
+  if (phase.currentMonth) {
+    const futureLead =
+      futureDayCount > 0
+        ? `本日以降の予定が${futureDayCount}件あるため、全件を同じ密度で告知するより、`
+        : "残り予定が少なくても、直近7日以内の開催日は";
+    const regularHint = hasRegularSeries
+      ? " DISCO/アニソン/Jam/MONDAYなど定例系は固定客へ次回日程をLINE・店頭で案内し、"
+      : "";
+    let text = `${diagnosis}${futureLead}開催1週間前時点で予約数が目標の7割未満のイベントを優先してください。${regularHint}今月中の集客対応：①残りイベントの予約数確認 ②7割未満の日を抽出 ③出演者へ「現在○名・目標○名・あと○名」と告知用短文を共有 ④店側は開催3〜5日前に出演者名・見どころ・残席感・初来店歓迎を入れて再投稿（予約URLは投稿上部へ）。`;
+    if (isDualCause) text += buildOrderUnitPriceAddonForCustomerAction_(orderPhase);
+    return text;
+  }
+
+  if (phase.endedMonth) {
+    let text = `${diagnosis}この月は集客不足で着地しました。次月はイベント登録時点で出演者ごとの見込み人数を入れ、開催1週間前に予約数が弱いイベントだけ再告知対象にしてください。出演者には「現在予約数・目標・不足人数」とそのまま使える告知文を渡し、店側投稿はスケジュール告知ではなく来店理由（誰が出るか・雰囲気・初めてでも入りやすいか）を書いてください。`;
+    if (hasRegularSeries) {
+      text += " 定例系イベントは前回参加者へ次回日程と「前回との違い」を伝えてください。";
+    }
+    if (isDualCause) text += buildOrderUnitPriceAddonForCustomerAction_(orderPhase);
+    return text;
+  }
+
+  return null;
+}
 function buildCauseOrSuccessComment_(ctx, used) {
   const { analysis: a, tier } = ctx;
   const topCat = dominantUnderTargetCategory_(a.underTargetCauseAnalysis);
@@ -1205,13 +1274,13 @@ function buildCauseOrSuccessComment_(ctx, used) {
 
   const detailed = {
     集客不足型:
-      "未達日の多くは集客不足型ですが、客単価は月平均を大きく下回っていません。来たお客様からの売上は作れているため、課題はイベント前の集客設計です。詳細は「未達日の要因分析」で、集客不足型の日を確認してください。",
+      "未達日の多くは集客不足型です。客単価は月平均を大きく下崩れていないため、来店後よりイベント前の集客が課題です。",
     単価不足型:
       "未達日は単価不足型が目立ちます。集客数は大きく崩れていないため、課題は来店後の注文導線です。フード提案、追加ドリンク、セットメニューを優先してください。詳細は「未達日の要因分析」で、単価不足型の日を確認してください。",
     "集客・単価不足型":
-      "未達日は集客・単価の両面で不足が目立ちます。告知・予約導線と来店後の追加注文導線の両方が必要です。詳細は「未達日の要因分析」で確認してください。",
+      "未達日は集客不足に加え、来店後の単価も月平均を下回る日が目立ちます。予約確認・出演者共有と、来店後の注文導線の両方が必要です。",
     目標過大の可能性:
-      "目標過大の可能性がある日が複数あります。売上自体は月平均に近いため、目標設定がイベント規模に対して高すぎた可能性があります。次月は過去同系イベントの平均売上を基準に目標を見直してください。",
+      "目標過大の可能性がある日が複数あります。売上自体は月平均に近いため、集客施策より過去同系イベントの平均売上を基準にした目標見直しを優先してください。",
   };
 
   if (topCat === "目標過大の可能性") {
@@ -1260,10 +1329,10 @@ function buildMonthlyActionComment_(ctx, used) {
     return "好調要因の再現のため、「売上TOP5」「飲食売上TOP10」「選択日の営業レポート」をセットで見比べ、集客・客単価・飲食のどれが効いたかを整理してください。";
   }
 
-  if (used.customer && !used.unit) {
+  if (used.customer && !used.unit && !used.customerAction) {
     return phase.endedMonth
-      ? "次月はイベント告知の開始時期、予約確認、出演者との集客共有を早めに設計してください。"
-      : "残り営業日は告知・予約導線と出演者への集客共有を優先してください。詳細は「未達日の要因分析」を参照してください。";
+      ? "次月はイベント登録時点で出演者ごとの見込み人数を入れ、開催1週間前に予約数が弱いイベントだけ再告知対象にしてください。"
+      : "残り営業日は、開催1週間前時点で予約数が目標の7割未満のイベントを優先し、出演者へ不足人数と告知用短文を共有してください。";
   }
 
   if (used.unit && !used.customer) {
@@ -1272,10 +1341,10 @@ function buildMonthlyActionComment_(ctx, used) {
       : "残り営業日はフード提案と追加注文導線を優先してください。詳細は「未達日の要因分析」を参照してください。";
   }
 
-  if (weakSide === "customer") {
+  if (weakSide === "customer" && !used.customerAction) {
     return phase.endedMonth
-      ? "次月はイベントごとの予約数と出演者側の集客共有を優先してください。"
-      : "残り営業日は集客数を落とさず、直近イベントの予約確認とSNS再告知を優先してください。";
+      ? "次月は開催1週間前に予約数を確認し、目標の7割未満の日だけ出演者へ再告知用短文を渡してください。"
+      : "残り営業日は、予約数が弱いイベントを優先し、出演者名・見どころ・残席感を入れた店側再投稿を開催3〜5日前に行ってください。";
   }
 
   if (weakSide === "unit") {
@@ -1300,11 +1369,12 @@ function buildMonthlyImprovementComments_(analysis, taxMode, targetMonth, curren
     return ["この月はまだ実績が少ないため、月次分析コメントは実績反映後に表示します。"];
   }
 
-  const used = { customer: false, unit: false, bar: false, targetHigh: false };
+  const used = { customer: false, unit: false, bar: false, targetHigh: false, customerAction: false };
   const conclusion = buildMonthlyConclusionComment_(ctx);
   const comparison = buildMonthlyComparisonComment_(ctx);
   const causeOrSuccess = buildCauseOrSuccessComment_(ctx, used);
-  const action = buildMonthlyActionComment_(ctx, used);
+  const customerAction = buildCustomerAcquisitionActionComment_(ctx, used);
+  const action = customerAction || buildMonthlyActionComment_(ctx, used);
 
   return [conclusion, comparison, causeOrSuccess, action].filter(Boolean).slice(0, 4);
 }
@@ -1460,12 +1530,30 @@ function buildDayDrinkFoodContext_(row, monthly, pastAvg) {
     hasData: drinkSales != null || foodSales != null,
   };
 }
-function drinkFoodSummaryPhrase_(df, runKind) {
+function resolveOrderOperationPhase_(businessDate) {
+  const dateKey = parseSalesDateKey_(businessDate);
+  if (!dateKey) return "before_tablet";
+  if (dateKey < TABLET_ORDER_TEST_START_DATE) return "before_tablet";
+  if (dateKey < TABLET_ORDER_FULL_START_DATE) return "tablet_test";
+  return "tablet_full";
+}
+function drinkFoodSummaryPhrase_(df, runKind, orderPhase) {
   if (!df?.hasData) return "";
-  const orderHint =
-    runKind === "owner"
-      ? "タブレット/QRのおすすめ枠を見直してください。"
-      : "タブレット/QR注文画面のおすすめ表示を見直してください。";
+  const phase = orderPhase || "before_tablet";
+  let orderHint = "";
+  if (phase === "before_tablet") {
+    orderHint =
+      runKind === "owner"
+        ? "メニュー表のおすすめ欄・卓上POP・提供しやすいメニュー構成を見直してください。"
+        : "メニュー表のおすすめ欄・卓上POP・スタッフ側で決めたおすすめメニューを見直してください。";
+  } else if (phase === "tablet_test") {
+    orderHint = "タブレット/QR注文（テスト運用）のおすすめ表示・並び順を見直してください。";
+  } else {
+    orderHint =
+      runKind === "owner"
+        ? "タブレット/QRのおすすめ枠を見直してください。"
+        : "タブレット/QR注文画面のおすすめ表示を見直してください。";
+  }
   if (df.drinkWeak && !df.foodWeak) {
     return `ドリンク売上は弱く、フードは大きく崩れていません。${orderHint}`;
   }
@@ -1473,9 +1561,21 @@ function drinkFoodSummaryPhrase_(df, runKind) {
     return `フード売上は弱く、ドリンクは大きく崩れていません。${orderHint}`;
   }
   if (df.bothWeak) {
+    if (phase === "before_tablet") {
+      return "ドリンク・フードともに弱く、メニュー構成・提供スピード・卓上POPで選びやすくなっているか確認してください。";
+    }
+    if (phase === "tablet_test") {
+      return "ドリンク・フードともに弱く、テスト運用中の注文画面で選びやすい表示になっているか確認してください。";
+    }
     return "ドリンク・フードともに弱く、注文画面で選びやすい表示になっているか確認してください。";
   }
   if (df.drinkStrong && df.foodStrong) {
+    if (phase === "before_tablet") {
+      return "ドリンク・フードともに取れています。同じメニュー表のおすすめ欄・卓上POPを次回も再現してください。";
+    }
+    if (phase === "tablet_test") {
+      return "ドリンク・フードともに取れています。テスト運用中のおすすめ表示を次回も再現してください。";
+    }
     return "ドリンク・フードともに取れています。同じおすすめ枠を次回も再現してください。";
   }
   return "";
@@ -1515,7 +1615,28 @@ function resolveDayEventRunKind_(row, events) {
   if (ownerHint) return "owner";
   return "booking";
 }
-function drinkOrderAdvice_(runKind, variant) {
+function drinkOrderAdvice_(runKind, variant, orderPhase) {
+  const phase = orderPhase || "before_tablet";
+  const ownerMc =
+    runKind === "owner" ? " 店主催で進行を握れる場合は、終演前の一言案内も使えます。" : "";
+  if (phase === "before_tablet") {
+    if (variant === "weak") {
+      return `メニュー表のおすすめ欄と卓上POPで、2杯目向けドリンク・高粗利ドリンク・終演後に頼みやすいドリンクを見せてください。スタッフ側でおすすめを事前に決めておくと再現しやすいです。${ownerMc}`;
+    }
+    if (variant === "strong") {
+      return "ドリンク売上が取れています。メニュー表のおすすめ欄・卓上POPの構成が効いている可能性があるため、次回も同じ並びを再現してください。";
+    }
+    return "メニュー表のおすすめ欄・卓上POPでドリンクの見せ方を確認してください。";
+  }
+  if (phase === "tablet_test") {
+    if (variant === "weak") {
+      return `タブレット/QR注文（テスト運用）の画面で、2杯目向けドリンク・高粗利ドリンク・終演後に頼みやすいカテゴリが選ばれているか確認してください。${ownerMc}`;
+    }
+    if (variant === "strong") {
+      return "ドリンク売上が取れています。テスト運用中のおすすめ表示の並びが効いている可能性があるため、次回も同じ構成を再現してください。";
+    }
+    return "タブレット/QR注文（テスト運用）のドリンクおすすめ表示を確認してください。";
+  }
   const tablet =
     "タブレット/QR注文画面の上位に、2杯目向けドリンク・高粗利ドリンク・終演後に頼みやすいカテゴリを出してください。";
   const ownerExtra =
@@ -1528,7 +1649,26 @@ function drinkOrderAdvice_(runKind, variant) {
   }
   return tablet;
 }
-function foodOrderAdvice_(runKind, variant) {
+function foodOrderAdvice_(runKind, variant, orderPhase) {
+  const phase = orderPhase || "before_tablet";
+  if (phase === "before_tablet") {
+    if (variant === "weak") {
+      return "開演前に出しやすい軽食と、終演後につまめるメニューをメニュー表のおすすめ欄・卓上POPで見せてください。提供が早いメニューを優先してください。";
+    }
+    if (variant === "strong") {
+      return "フードが取れています。メニュー表のおすすめ欄・卓上POPの2品構成が客層に合っていた可能性があるため、次回も同じ並びを再現してください。";
+    }
+    return "メニュー表のおすすめ欄・卓上POPでフードの見せ方を確認してください。";
+  }
+  if (phase === "tablet_test") {
+    if (variant === "weak") {
+      return "タブレット/QR注文（テスト運用）の画面で、開演前の軽食・終演後につまみやすいメニューが選ばれているか確認してください。提供が早いメニューを優先表示してください。";
+    }
+    if (variant === "strong") {
+      return "フードが取れています。テスト運用中のおすすめ表示のメニュー構成が効いている可能性があるため、次回も同じ2品を再現してください。";
+    }
+    return "タブレット/QR注文（テスト運用）のフードおすすめ表示を確認してください。";
+  }
   const tablet =
     "開演前に出しやすい軽食と、終演後につまみやすいメニューをタブレット/QRのおすすめ枠の上位に出してください。提供が早いメニューを優先表示すると選ばれやすくなります。";
   if (variant === "weak") return tablet;
@@ -1538,64 +1678,89 @@ function foodOrderAdvice_(runKind, variant) {
   return tablet;
 }
 function buildBarTimeJudgment_(ctx) {
-  const { barTimeCount, dayBarRate, avgBarRate, isAchieved, pastCustomerDiff, barLow, runKind } = ctx;
+  const { barTimeCount, dayBarRate, avgBarRate, isAchieved, pastCustomerDiff, barLow, runKind, orderPhase } = ctx;
+  const phase = orderPhase || "before_tablet";
   const gatheringWeak = pastCustomerDiff != null && pastCustomerDiff < -1;
   const barHigh = dayBarRate != null && avgBarRate != null && dayBarRate >= Math.max(12, avgBarRate * 1.15);
-  const tabletAfterShow =
-    "終演後にタブレット/QR画面で「終演後おすすめ」を出し、追加ドリンク・軽いつまみ・カラオケ/ダーツなど残る理由を画面上で見せてください。";
   const ownerMcNote =
     runKind === "owner"
       ? " 店主催で進行を握れる場合のみ、終演前の一言案内と連動させてもよいです。"
       : "";
 
+  let afterShowAdvice = "";
+  let afterShowSnippet = "";
+  if (phase === "before_tablet") {
+    afterShowAdvice =
+      "終演後に残りやすい雰囲気（BGM・照明）と、メニュー表・卓上POPで終演後につまめるメニュー・追加ドリンクを見せてください。";
+    afterShowSnippet =
+      "終演後はメニュー表のおすすめ欄と卓上POPで、追加ドリンクと軽いつまみ2品を見せやすくしてください。";
+  } else if (phase === "tablet_test") {
+    afterShowAdvice =
+      "終演後にタブレット/QR注文（テスト運用）で「終演後おすすめ」を出し、追加ドリンク・軽いつまみが実際に選ばれているか確認してください。";
+    afterShowSnippet = afterShowAdvice;
+  } else {
+    afterShowAdvice =
+      "終演後にタブレット/QR画面で「終演後おすすめ」を出し、追加ドリンク・軽いつまみ・カラオケ/ダーツなど残る理由を画面上で見せてください。";
+    afterShowSnippet = afterShowAdvice;
+  }
+
   if (barTimeCount === 0) {
     return {
       label: "終演後の注文導線",
-      text: `バータイム0名です。${tabletAfterShow}${ownerMcNote}`,
-      nextSnippet: tabletAfterShow,
+      text: `バータイム0名です。${afterShowAdvice}${ownerMcNote}`,
+      nextSnippet: afterShowSnippet,
     };
   }
   if (barHigh) {
-    return {
-      label: "終演後の注文導線",
-      text: "バータイム比率が高めです。終演後おすすめ表示の内容・並びが効いている可能性があるため、次回も同じ画面構成を再現してください。",
-      nextSnippet: null,
-    };
+    const highText =
+      phase === "before_tablet"
+        ? "バータイム比率が高めです。終演後の雰囲気づくりとメニュー表・卓上POPの構成が効いている可能性があるため、次回も同じ流れを再現してください。"
+        : phase === "tablet_test"
+          ? "バータイム比率が高めです。テスト運用中の終演後おすすめ表示が効いている可能性があるため、次回も同じ構成を再現してください。"
+          : "バータイム比率が高めです。終演後おすすめ表示の内容・並びが効いている可能性があるため、次回も同じ画面構成を再現してください。";
+    return { label: "終演後の注文導線", text: highText, nextSnippet: null };
   }
   if (isAchieved && barLow) {
+    const lowAchievedSnippet =
+      phase === "tablet_full"
+        ? "終演後おすすめ枠に追加ドリンクと軽いつまみを2品だけ出してください。"
+        : afterShowSnippet;
     return {
       label: "終演後の注文導線",
-      text: `目標は達成していますが、終演後の追加注文は少なめです。${tabletAfterShow} 優先度は低めです。`,
-      nextSnippet: "終演後おすすめ枠に追加ドリンクと軽いつまみを2品だけ出してください。",
+      text: `目標は達成していますが、終演後の追加注文は少なめです。${afterShowAdvice} 優先度は低めです。`,
+      nextSnippet: lowAchievedSnippet,
     };
   }
   if (!isAchieved && barLow && gatheringWeak) {
-    return {
-      label: "終演後の注文導線",
-      text:
-        runKind === "booking"
-          ? "未達で集客も弱い日です。通常ブッキングでは、終演後の導線より先に予約数・目標設定・タブレットの来店前おすすめ表示を確認してください。"
-          : "未達で集客も弱い日です。終演後の表示より、来店前〜開演中の注文画面設計と予約・告知の確認を先にしてください。",
-      nextSnippet: null,
-    };
+    const weakGatherText =
+      runKind === "booking"
+        ? phase === "before_tablet"
+          ? "未達で集客も弱い日です。終演後の導線より先に、予約数・目標設定・メニュー表のおすすめ欄を確認してください。"
+          : phase === "tablet_test"
+            ? "未達で集客も弱い日です。終演後より先に、予約数・目標設定・テスト運用中の来店前おすすめ表示を確認してください。"
+            : "未達で集客も弱い日です。終演後の導線より先に、予約数・目標設定・タブレットの来店前おすすめ表示を確認してください。"
+        : phase === "before_tablet"
+          ? "未達で集客も弱い日です。終演後の雰囲気づくりより、来店前のメニュー表おすすめ欄と固定客向け案内を先に確認してください。"
+          : "未達で集客も弱い日です。終演後の表示より、来店前〜開演中のおすすめ表示と予約・告知の確認を先にしてください。";
+    return { label: "終演後の注文導線", text: weakGatherText, nextSnippet: null };
   }
   if (barLow && !gatheringWeak) {
     return {
       label: "終演後の注文導線",
-      text: `来店人数はある一方、終演後の追加注文が弱い日です。${tabletAfterShow}`,
-      nextSnippet: tabletAfterShow,
+      text: `来店人数はある一方、終演後の追加注文が弱い日です。${afterShowAdvice}`,
+      nextSnippet: afterShowSnippet,
     };
   }
   if (barLow) {
     return {
       label: "終演後の注文導線",
-      text: `バータイム比率が低めです。${tabletAfterShow}`,
-      nextSnippet: tabletAfterShow,
+      text: `バータイム比率が低めです。${afterShowAdvice}`,
+      nextSnippet: afterShowSnippet,
     };
   }
   return null;
 }
-function buildCharterPastComparison_(selected, pool, taxMode) {
+function buildCharterPastComparison_(selected, pool, taxMode, orderPhase) {
   if (!selected) return null;
   const selectedDateKey = parseSalesDateKey_(selected.businessDate);
   const charterPool = (pool || []).filter((row) => isCharterComparableRow_(row));
@@ -1639,7 +1804,16 @@ function buildCharterPastComparison_(selected, pool, taxMode) {
     if (salesDiff < -10000 && countDiff != null && countDiff < -3) {
       comment = "過去貸切平均より売上・人数ともに低い日です。次回は予約時点の人数見込み・最低保証・飲食プランを先に決めてください。";
     } else if (countDiff != null && countDiff >= 5 && salesDiff < 0) {
-      comment = "人数は多い一方、売上・単価が弱い日です。タブレット/QRのおすすめ枠で追加ドリンク・フードが選ばれているか確認してください。";
+      if (orderPhase === "before_tablet") {
+        comment =
+          "人数は多い一方、売上・単価が弱い日です。事前フードプラン・卓上メニュー・飲み放題有無・提供しやすいメニュー構成を確認してください。";
+      } else if (orderPhase === "tablet_test") {
+        comment =
+          "人数は多い一方、売上・単価が弱い日です。タブレット/QR注文（テスト運用）で追加ドリンク・フードが選ばれているか確認してください。";
+      } else {
+        comment =
+          "人数は多い一方、売上・単価が弱い日です。タブレット/QRのおすすめ枠で追加ドリンク・フードが選ばれているか確認してください。";
+      }
     } else if (salesDiff >= 0) {
       comment = "過去貸切平均を上回るか同水準です。人数・客単価・飲食構成を基準値として残してください。";
     } else {
@@ -1658,7 +1832,8 @@ function buildCharterPastComparison_(selected, pool, taxMode) {
     statusNote: sampleCount === 0 ? "過去貸切実績：該当なし" : null,
   };
 }
-function buildCharterDayAnalysis_(row, monthly, taxMode, charterPast) {
+function buildCharterDayAnalysis_(row, monthly, taxMode, charterPast, orderPhase) {
+  const phase = orderPhase || resolveOrderOperationPhase_(row.businessDate);
   const targetSales = Number(row.targetSales || 0);
   const totalSales = Number(row.totalSales || 0);
   const customerCount = row.customerCount != null ? Number(row.customerCount) : null;
@@ -1673,11 +1848,26 @@ function buildCharterDayAnalysis_(row, monthly, taxMode, charterPast) {
 
   let businessSummary = "";
   if (isAchieved) {
-    businessSummary = `この日は貸切として目標を達成しています。人数${countPhrase}・客単価${unitPhrase}で、貸切時間内の飲食売上が取れています。次回貸切でも人数規模・飲食単価・注文画面のおすすめ構成を基準値として残してください。`;
+    if (phase === "before_tablet") {
+      businessSummary = `この日は貸切として目標を達成しています。人数${countPhrase}・客単価${unitPhrase}で、貸切時間内の飲食売上が取れています。次回貸切でも人数規模・飲食単価・メニュー構成（事前フードプラン・卓上メニュー）を基準値として残してください。`;
+    } else if (phase === "tablet_test") {
+      businessSummary = `この日は貸切として目標を達成しています。人数${countPhrase}・客単価${unitPhrase}で飲食売上が取れています。タブレット/QR注文（テスト運用）のおすすめ表示の反応も記録してください。`;
+    } else {
+      businessSummary = `この日は貸切として目標を達成しています。人数${countPhrase}・客単価${unitPhrase}で、貸切時間内の飲食売上が取れています。次回貸切でも人数規模・飲食単価・注文画面のおすすめ構成を基準値として残してください。`;
+    }
   } else if (targetSales > 0) {
     businessSummary = `この日は貸切として目標未達です。人数に対して客単価が低いのか、そもそも人数が足りないのかを分けて確認してください。次回は最低保証金額・人数見込み・飲食プランを予約時点で決めてください。`;
     if (drinkFood.bothWeak) {
-      businessSummary += " ドリンク・フードともに弱い場合は、飲み放題か単品注文かを確認し、単品ならタブレット/QRのおすすめ枠を絞って表示してください。";
+      if (phase === "before_tablet") {
+        businessSummary +=
+          " ドリンク・フードともに弱い場合は、飲み放題か単品注文かを確認し、事前フードプラン・卓上メニューで最低限の飲食売上を作ってください。";
+      } else if (phase === "tablet_test") {
+        businessSummary +=
+          " ドリンク・フードともに弱い場合は、飲み放題か単品注文かを確認し、テスト運用中のおすすめ表示を絞って検証してください。";
+      } else {
+        businessSummary +=
+          " ドリンク・フードともに弱い場合は、飲み放題か単品注文かを確認し、単品ならタブレット/QRのおすすめ枠を絞って表示してください。";
+      }
     }
   } else {
     businessSummary =
@@ -1722,19 +1912,34 @@ function buildCharterDayAnalysis_(row, monthly, taxMode, charterPast) {
   if (customerCount != null && dayUnitPrice != null && refUnit != null && dayUnitPrice < Number(refUnit) * 0.9) {
     judgmentPoints.push({
       label: "飲食単価",
-      text: "人数に対して客単価が低い日です。事前フードプラン・軽食セットの提案、またはタブレット上位のおすすめ枠で飲食単価を上げてください。",
+      text:
+        phase === "before_tablet"
+          ? "人数に対して客単価が低い日です。事前フードプラン・軽食セット・卓上メニューで飲食単価を上げてください。"
+          : phase === "tablet_test"
+            ? "人数に対して客単価が低い日です。事前フードプラン・軽食セットの提案と、テスト運用中のおすすめ表示を確認してください。"
+            : "人数に対して客単価が低い日です。事前フードプラン・軽食セットの提案、またはタブレット上位のおすすめ枠で飲食単価を上げてください。",
     });
   }
   if (drinkFood.drinkWeak) {
     judgmentPoints.push({
       label: "ドリンク",
-      text: "ドリンク売上が弱い日です。飲み放題か単品注文かを確認し、単品ならタブレット/QR画面上部に追加ドリンク・ボトル・ソフトドリンクを表示してください。",
+      text:
+        phase === "before_tablet"
+          ? "ドリンク売上が弱い日です。飲み放題か単品注文かを確認し、単品ならメニュー表・卓上POPで追加ドリンク・ボトルを見せやすくしてください。"
+          : phase === "tablet_test"
+            ? "ドリンク売上が弱い日です。飲み放題か単品注文かを確認し、単品ならタブレット/QR（テスト運用）で追加ドリンクが選ばれているか確認してください。"
+            : "ドリンク売上が弱い日です。飲み放題か単品注文かを確認し、単品ならタブレット/QR画面上部に追加ドリンク・ボトル・ソフトドリンクを表示してください。",
     });
   }
   if (drinkFood.foodWeak) {
     judgmentPoints.push({
       label: "フード",
-      text: "フード売上が弱い日です。当日任せにせず、事前に軽食セットまたは大皿フードを提案し、タブレットのおすすめ枠に出すと安定しやすいです。",
+      text:
+        phase === "before_tablet"
+          ? "フード売上が弱い日です。当日任せにせず、事前に軽食セットまたは大皿フードを提案し、卓上メニューで出すと安定しやすいです。"
+          : phase === "tablet_test"
+            ? "フード売上が弱い日です。事前に軽食セットまたは大皿フードを提案し、テスト運用中のおすすめ表示に出しているか確認してください。"
+            : "フード売上が弱い日です。当日任せにせず、事前に軽食セットまたは大皿フードを提案し、タブレットのおすすめ枠に出すと安定しやすいです。",
     });
   }
 
@@ -1743,10 +1948,18 @@ function buildCharterDayAnalysis_(row, monthly, taxMode, charterPast) {
     nextAction = `次回貸切では、今回の人数・客単価・飲食構成を基準にしてください。人数60名以上なら、最低保証金額を今回実績に近づけてもよい可能性があります。`;
   } else if (customerCount != null && customerCount >= 50 && drinkFood.foodWeak) {
     nextAction =
-      "次回貸切では、事前に軽食セットまたは大皿フードを提案してください。人数が多い日はタブレット画面のおすすめを絞り、提供が早いメニューを上位に出してください。";
+      phase === "before_tablet"
+        ? "次回貸切では、事前に軽食セットまたは大皿フードを提案してください。人数が多い日は卓上メニューを絞り、提供が早いメニューを優先してください。"
+        : phase === "tablet_test"
+          ? "次回貸切では、事前に軽食セットまたは大皿フードを提案してください。人数が多い日はテスト運用中のおすすめを絞り、提供が早いメニューが選ばれているか確認してください。"
+          : "次回貸切では、事前に軽食セットまたは大皿フードを提案してください。人数が多い日はタブレット画面のおすすめを絞り、提供が早いメニューを上位に出してください。";
   } else if (drinkFood.drinkWeak) {
     nextAction =
-      "次回貸切では、飲み放題の有無を確認し、単品注文ならタブレット/QR画面上部に追加ドリンク・ボトル・ソフトドリンクを表示してください。";
+      phase === "before_tablet"
+        ? "次回貸切では、飲み放題の有無を確認し、単品注文ならメニュー表・卓上POPで追加ドリンク・ボトルを見せやすくしてください。"
+        : phase === "tablet_test"
+          ? "次回貸切では、飲み放題の有無を確認し、単品注文ならタブレット/QR（テスト運用）で追加ドリンクが選ばれているか確認してください。"
+          : "次回貸切では、飲み放題の有無を確認し、単品注文ならタブレット/QR画面上部に追加ドリンク・ボトル・ソフトドリンクを表示してください。";
   } else if (!isAchieved) {
     nextAction =
       "次回貸切では、予約時点で人数見込み・最低保証・飲食プランを決めてください。人数が読めない場合は、人数×想定単価で目標を作り、固定の高い目標は避けてください。";
@@ -1833,10 +2046,12 @@ function buildCharterDayAnalysis_(row, monthly, taxMode, charterPast) {
     isAchieved,
     seriesLabel: "貸切",
     eventRunKind: "charter",
+    orderOperationPhase: phase,
   };
 }
-function buildSeriesComparisonComment_(seriesLabel, pastAvg, metrics, drinkFood, runKind) {
+function buildSeriesComparisonComment_(seriesLabel, pastAvg, metrics, drinkFood, runKind, orderPhase) {
   if (!pastAvg || !seriesLabel) return null;
+  const phase = orderPhase || "before_tablet";
   const { totalSales, customerCount, dayUnitPrice, targetSales, isAchieved } = metrics;
   const salesDiff = Number(totalSales || 0) - Number(pastAvg.totalSales || 0);
   const customerDiff =
@@ -1848,36 +2063,64 @@ function buildSeriesComparisonComment_(seriesLabel, pastAvg, metrics, drinkFood,
       ? Number(dayUnitPrice) - Number(pastAvg.customerUnitPrice)
       : null;
   const nearPastAvg = Math.abs(salesDiff) <= Math.max(10000, Number(pastAvg.totalSales || 0) * 0.1);
-  const dfPhrase = drinkFoodSummaryPhrase_(drinkFood, runKind);
-  const bookingGather =
-    runKind === "booking"
-      ? "通常ブッキングでは、出演者へのMC依頼より、タブレット/QRのおすすめ表示と予約・目標設定を中心に見てください。"
-      : "";
+  const dfPhrase = drinkFoodSummaryPhrase_(drinkFood, runKind, phase);
+  let bookingGather = "";
+  if (runKind === "booking") {
+    if (phase === "before_tablet") {
+      bookingGather =
+        "通常ブッキングでは、メニュー表のおすすめ欄・卓上POP・予約・目標設定を中心に見てください。";
+    } else if (phase === "tablet_test") {
+      bookingGather =
+        "通常ブッキングでは、タブレット/QR注文（テスト運用）のおすすめ表示と予約・目標設定を中心に見てください。";
+    } else {
+      bookingGather =
+        "通常ブッキングでは、出演者へのMC依頼より、タブレット/QRのおすすめ表示と予約・目標設定を中心に見てください。";
+    }
+  }
 
   if (salesDiff < -10000 && customerDiff != null && customerDiff < -1) {
     return `${seriesLabel}平均より売上・集客ともに低い日です。${runKind === "booking" ? "再開催するなら、出演者への告知協力の事前共有と、店側の予約導線・目標設定を確認してください。" : "再開催するなら、固定客向けの次回案内とイベント専用おすすめ表示を確認してください。"}${dfPhrase}`;
   }
   if (customerDiff != null && customerDiff < -1 && unitDiff != null && unitDiff >= -100) {
-    return `集客は弱い一方で客単価は取れています。来店後の注文画面設計は機能している可能性があるため、次回は${runKind === "booking" ? "出演者への告知協力と1週間前の予約数確認" : "固定客向け案内とイベント専用おすすめ表示"}を優先してください。${dfPhrase}`;
+    const unitOkFollow =
+      phase === "before_tablet"
+        ? "来店後のメニュー表・卓上POPの見せ方は機能している可能性があるため、"
+        : phase === "tablet_test"
+          ? "来店後の注文画面（テスト運用）のおすすめ表示は機能している可能性があるため、"
+          : "来店後の注文画面設計は機能している可能性があるため、";
+    return `集客は弱い一方で客単価は取れています。${unitOkFollow}次回は${runKind === "booking" ? "出演者への告知協力と1週間前の予約数確認" : "固定客向け案内とイベント専用おすすめ表示"}を優先してください。${dfPhrase}`;
   }
   if (customerDiff != null && customerDiff >= -1 && unitDiff != null && unitDiff < -100) {
-    return `集客は取れていますが客単価が弱い日です。${drinkOrderAdvice_(runKind, "weak")} ${foodOrderAdvice_(runKind, "weak")}`;
+    return `集客は取れていますが客単価が弱い日です。${drinkOrderAdvice_(runKind, "weak", phase)} ${foodOrderAdvice_(runKind, "weak", phase)}`;
   }
   if (nearPastAvg && !isAchieved && Number(targetSales || 0) > 0) {
     return `売上は${seriesLabel}平均に近いため、イベント内容だけが原因とは言い切れません。次回目標は過去平均売上＋10〜15%程度から設定してください。${bookingGather}`;
   }
   if (salesDiff >= 0 && unitDiff != null && unitDiff >= 0) {
-    return `${seriesLabel}平均より売上・客単価が高めです。タブレット/QRのおすすめ枠・予約導線など、今回うまくいった店側の設計をメモして次回の基準にしてください。`;
+    const successTail =
+      phase === "before_tablet"
+        ? "メニュー表のおすすめ欄・卓上POP・予約導線など、今回うまくいった店側の設計をメモして次回の基準にしてください。"
+        : phase === "tablet_test"
+          ? "タブレット/QR（テスト運用）のおすすめ表示・予約導線など、今回うまくいった店側の設計をメモして次回の基準にしてください。"
+          : "タブレット/QRのおすすめ枠・予約導線など、今回うまくいった店側の設計をメモして次回の基準にしてください。";
+    return `${seriesLabel}平均より売上・客単価が高めです。${successTail}`;
   }
-  return `${seriesLabel}平均と今回の差を確認し、次回までにタブレット/QRのおすすめ枠と目標設定を決めてください。${dfPhrase}`;
+  const closingTail =
+    phase === "before_tablet"
+      ? "次回までにメニュー表のおすすめ欄・卓上POPと目標設定を決めてください。"
+      : phase === "tablet_test"
+        ? "次回までにタブレット/QR（テスト運用）のおすすめ表示と目標設定を決めてください。"
+        : "次回までにタブレット/QRのおすすめ枠と目標設定を決めてください。";
+  return `${seriesLabel}平均と今回の差を確認し、${closingTail}${dfPhrase}`;
 }
 function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison, analysisOptions = {}) {
   if (!row) return null;
   const events = analysisOptions.events || [];
   const pastComparablePool = analysisOptions.pastComparablePool || [];
+  const orderPhase = resolveOrderOperationPhase_(row.businessDate);
   if (isCharterDay_(row, events)) {
-    const charterPast = buildCharterPastComparison_(row, pastComparablePool, taxMode);
-    return buildCharterDayAnalysis_(row, monthly, taxMode, charterPast);
+    const charterPast = buildCharterPastComparison_(row, pastComparablePool, taxMode, orderPhase);
+    return buildCharterDayAnalysis_(row, monthly, taxMode, charterPast, orderPhase);
   }
   const runKind = resolveDayEventRunKind_(row, events);
   const targetSales = Number(row.targetSales || 0);
@@ -1923,10 +2166,12 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison,
   const nearPastAvg =
     pastSalesDiff != null && Math.abs(pastSalesDiff) <= Math.max(10000, Number(pastAvg?.totalSales || 0) * 0.1);
   const drinkFood = buildDayDrinkFoodContext_(row, monthly, pastAvg);
-  const dfPhrase = drinkFoodSummaryPhrase_(drinkFood, runKind);
+  const dfPhrase = drinkFoodSummaryPhrase_(drinkFood, runKind, orderPhase);
   const metricCtx = { totalSales, customerCount, dayUnitPrice, targetSales, isAchieved };
   const seriesComparisonComment =
-    pastCount > 0 ? buildSeriesComparisonComment_(seriesLabel, pastAvg, metricCtx, drinkFood, runKind) : null;
+    pastCount > 0
+      ? buildSeriesComparisonComment_(seriesLabel, pastAvg, metricCtx, drinkFood, runKind, orderPhase)
+      : null;
   const barJudgment = buildBarTimeJudgment_({
     barTimeCount,
     dayBarRate,
@@ -1935,7 +2180,14 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison,
     pastCustomerDiff,
     barLow,
     runKind,
+    orderPhase,
   });
+  const phaseLead =
+    orderPhase === "before_tablet"
+      ? "タブレット/QR注文導入前の営業日のため、"
+      : orderPhase === "tablet_test"
+        ? "タブレット/QR注文のテスト運用期間のため、"
+        : "";
   const salesWellBelowPast =
     pastCount > 0 &&
     pastSalesDiff != null &&
@@ -1949,38 +2201,53 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison,
   if (pastCount > 0) {
     if (isAchieved) {
       businessSummary =
-        "この日は目標を達成しています。タブレット/QRのおすすめ枠・予約導線・来店後の注文画面のうち、どこが効いたかをメモし、次回も同じ表示構成を使ってください。";
+        orderPhase === "before_tablet"
+          ? `${phaseLead}この日は目標を達成しています。メニュー表のおすすめ欄・卓上POP・予約導線のうち、どこが効いたかをメモし、次回も同じ構成を使ってください。`
+          : orderPhase === "tablet_test"
+            ? `${phaseLead}この日は目標を達成しています。テスト運用中のおすすめ表示・予約導線のうち、どこが効いたかをメモし、次回も同じ表示構成を検証してください。`
+            : "この日は目標を達成しています。タブレット/QRのおすすめ枠・予約導線・来店後の注文画面のうち、どこが効いたかをメモし、次回も同じ表示構成を使ってください。";
       if (dfPhrase) businessSummary += ` ${dfPhrase}`;
     } else if (salesWellBelowPast && gatheringWeak) {
-      businessSummary = `同系平均より売上・集客ともに低い日です。${runKind === "booking" ? "再開催するなら、出演者への告知協力の事前共有と、店側の予約導線・目標設定を確認してください。" : "再開催するなら、固定客向け案内とイベント専用おすすめ表示を見直してください。"}${dfPhrase}`;
+      businessSummary = `${phaseLead}同系平均より売上・集客ともに低い日です。${runKind === "booking" ? "再開催するなら、出演者への告知協力の事前共有と、店側の予約導線・目標設定を確認してください。" : "再開催するなら、固定客向け案内とイベント専用おすすめ表示を見直してください。"}${dfPhrase}`;
     } else if (gatheringWeak && unitOkWithPast) {
       businessSummary =
         runKind === "booking"
-          ? "目標未達ですが、来店後の飲食売上は取れています。次回は値上げより、出演者への告知協力と1週間前の予約数確認を先に行い、タブレット/QRのおすすめ枠も維持してください。"
-          : "目標未達ですが、来店後の飲食売上は取れています。次回は固定客向け案内とイベント専用おすすめ表示を先に見直してください。";
+          ? `${phaseLead}目標未達ですが、来店後の飲食売上は取れています。次回は値上げより、出演者への告知協力と1週間前の予約数確認を先に行い、${orderPhase === "before_tablet" ? "メニュー表のおすすめ欄も維持してください。" : orderPhase === "tablet_test" ? "テスト運用中のおすすめ表示も維持してください。" : "タブレット/QRのおすすめ枠も維持してください。"}`
+          : `${phaseLead}目標未達ですが、来店後の飲食売上は取れています。次回は固定客向け案内とイベント専用おすすめ表示を先に見直してください。`;
       if (drinkFood.drinkWeak && !drinkFood.foodWeak) {
-        businessSummary += ` ${drinkOrderAdvice_(runKind, "weak")}`;
+        businessSummary += ` ${drinkOrderAdvice_(runKind, "weak", orderPhase)}`;
       } else if (!drinkFood.drinkWeak && drinkFood.foodWeak) {
-        businessSummary += ` ${foodOrderAdvice_(runKind, "weak")}`;
+        businessSummary += ` ${foodOrderAdvice_(runKind, "weak", orderPhase)}`;
       }
     } else if (gatheringOkWithPast && unitWeakWithPast) {
-      businessSummary = `集客は取れていますが客単価が弱い日です。${drinkOrderAdvice_(runKind, "weak")}`;
+      businessSummary = `${phaseLead}集客は取れていますが客単価が弱い日です。${drinkOrderAdvice_(runKind, "weak", orderPhase)}`;
     } else if (nearPastAvg && targetSales > 0) {
-      businessSummary =
-        "売上は同系平均に近く、イベント内容だけが原因とは言い切れません。次回目標は過去平均売上＋10〜15%程度から設定してください。";
+      businessSummary = `${phaseLead}売上は同系平均に近く、イベント内容だけが原因とは言い切れません。次回目標は過去平均売上＋10〜15%程度から設定してください。`;
     } else {
-      businessSummary =
-        seriesComparisonComment ||
-        `同系イベントとして、タブレット/QRのおすすめ枠と目標設定を次回までに決めておく日です。${dfPhrase}`;
+      const fallbackTail =
+        orderPhase === "before_tablet"
+          ? "メニュー表のおすすめ欄・卓上POPと目標設定を次回までに決めておく日です。"
+          : orderPhase === "tablet_test"
+            ? "テスト運用中のおすすめ表示と目標設定を次回までに決めておく日です。"
+            : "タブレット/QRのおすすめ枠と目標設定を次回までに決めておく日です。";
+      businessSummary = seriesComparisonComment || `${phaseLead}同系イベントとして、${fallbackTail}${dfPhrase}`;
     }
   } else if (isAchieved) {
     businessSummary =
-      "目標は達成しています。過去同系実績がないため比較はできませんが、今回の売上・集客・ドリンク売上・フード売上とおすすめ枠の構成を記録し、2回目以降の基準にしてください。";
+      orderPhase === "before_tablet"
+        ? `${phaseLead}目標は達成しています。過去同系実績がないため比較はできませんが、今回の売上・集客・ドリンク売上・フード売上とメニュー表のおすすめ構成を記録し、2回目以降の基準にしてください。`
+        : orderPhase === "tablet_test"
+          ? `${phaseLead}目標は達成しています。過去同系実績がないため比較はできませんが、今回の売上・集客・ドリンク売上・フード売上とテスト運用中のおすすめ構成を記録し、2回目以降の基準にしてください。`
+          : "目標は達成しています。過去同系実績がないため比較はできませんが、今回の売上・集客・ドリンク売上・フード売上とおすすめ枠の構成を記録し、2回目以降の基準にしてください。";
   } else if (targetSales > 0) {
-    businessSummary =
-      "過去同系実績がないため同系比較はできません。今回の売上・集客・客単価・ドリンク売上・フード売上を基準値として残し、次回から比較できるようにしてください。";
+    businessSummary = `${phaseLead}過去同系実績がないため同系比較はできません。今回の売上・集客・客単価・ドリンク売上・フード売上を基準値として残し、次回から比較できるようにしてください。`;
   } else {
-    businessSummary = "目標が未入力です。次回までに目標売上と、タブレット/QRで出すおすすめ枠の仮決めをしてください。";
+    businessSummary =
+      orderPhase === "before_tablet"
+        ? "目標が未入力です。次回までに目標売上と、メニュー表のおすすめ欄・卓上POPの仮決めをしてください。"
+        : orderPhase === "tablet_test"
+          ? "目標が未入力です。次回までに目標売上と、テスト運用中のおすすめ表示の仮決めをしてください。"
+          : "目標が未入力です。次回までに目標売上と、タブレット/QRで出すおすすめ枠の仮決めをしてください。";
   }
 
   const judgmentPoints = [];
@@ -1997,7 +2264,7 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison,
       label: "開催判断",
       text:
         runKind === "booking"
-          ? "売上は未達ですが客単価は取れています。タブレット/QRの注文画面は機能している可能性があるため、告知協力と予約数確認を先に行う価値があります。"
+          ? `売上は未達ですが客単価は取れています。${orderPhase === "before_tablet" ? "メニュー表・卓上POPの見せ方は機能している可能性があるため、" : orderPhase === "tablet_test" ? "テスト運用中の注文画面のおすすめ表示は機能している可能性があるため、" : "タブレット/QRの注文画面は機能している可能性があるため、"}告知協力と予約数確認を先に行う価値があります。`
           : "売上は未達ですが客単価は取れています。来店後のおすすめ表示は機能している可能性があるため、固定客向け案内を先に見直す価値があります。",
     });
   } else if (pastCount > 0 && nearPastAvg && !isAchieved && targetSales > 0) {
@@ -2008,12 +2275,20 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison,
   } else if (isAchieved && pastCount > 0) {
     judgmentPoints.push({
       label: "開催判断",
-      text: "同系平均を上回るか達成しており、同じタブレット/QRおすすめ枠と予約導線を次回も使えます。",
+      text:
+        orderPhase === "before_tablet"
+          ? "同系平均を上回るか達成しており、同じメニュー表のおすすめ欄・卓上POPと予約導線を次回も使えます。"
+          : orderPhase === "tablet_test"
+            ? "同系平均を上回るか達成しており、同じテスト運用中のおすすめ表示と予約導線を次回も使えます。"
+            : "同系平均を上回るか達成しており、同じタブレット/QRおすすめ枠と予約導線を次回も使えます。",
     });
   } else if (pastCount === 0) {
     judgmentPoints.push({
       label: "開催判断",
-      text: "同系比較がまだできないため、今回の数値とおすすめ枠の構成を記録し、2回目以降に開催判断の材料をそろえてください。",
+      text:
+        orderPhase === "before_tablet"
+          ? "同系比較がまだできないため、今回の数値とメニュー表のおすすめ構成を記録し、2回目以降に開催判断の材料をそろえてください。"
+          : "同系比較がまだできないため、今回の数値とおすすめ表示の構成を記録し、2回目以降に開催判断の材料をそろえてください。",
     });
   }
   if (!isAchieved && pastCount > 0 && nearPastAvg && targetSales > 0) {
@@ -2027,7 +2302,9 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison,
       text:
         runKind === "booking"
           ? "過去平均より大きく低い場合、目標を据え置くなら、出演者への告知協力内容を事前に決めて共有してください。"
-          : "過去平均より大きく低い場合、目標を据え置くなら、固定客向け案内とおすすめ枠の見直しを先に行ってください。",
+          : orderPhase === "before_tablet"
+            ? "過去平均より大きく低い場合、目標を据え置くなら、固定客向け案内とメニュー表のおすすめ欄の見直しを先に行ってください。"
+            : "過去平均より大きく低い場合、目標を据え置くなら、固定客向け案内とおすすめ表示の見直しを先に行ってください。",
     });
   }
   if (gatheringWeak) {
@@ -2049,21 +2326,21 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison,
   }
   if (drinkFood.hasData && drinkFood.drinkSales != null) {
     if (drinkFood.drinkWeak) {
-      judgmentPoints.push({ label: "ドリンク", text: drinkOrderAdvice_(runKind, "weak") });
+      judgmentPoints.push({ label: "ドリンク", text: drinkOrderAdvice_(runKind, "weak", orderPhase) });
     } else if (drinkFood.drinkStrong) {
-      judgmentPoints.push({ label: "ドリンク", text: drinkOrderAdvice_(runKind, "strong") });
+      judgmentPoints.push({ label: "ドリンク", text: drinkOrderAdvice_(runKind, "strong", orderPhase) });
     }
   }
   if (drinkFood.hasData && drinkFood.foodSales != null) {
     if (drinkFood.foodWeak) {
-      judgmentPoints.push({ label: "フード", text: foodOrderAdvice_(runKind, "weak") });
+      judgmentPoints.push({ label: "フード", text: foodOrderAdvice_(runKind, "weak", orderPhase) });
     } else if (drinkFood.foodStrong) {
-      judgmentPoints.push({ label: "フード", text: foodOrderAdvice_(runKind, "strong") });
+      judgmentPoints.push({ label: "フード", text: foodOrderAdvice_(runKind, "strong", orderPhase) });
     }
   } else if (unitLow && !drinkFood.foodWeak) {
     judgmentPoints.push({
       label: "ドリンク・フード単価",
-      text: `客単価が弱い日です。${drinkOrderAdvice_(runKind, "weak")} ${foodOrderAdvice_(runKind, "weak")}`,
+      text: `客単価が弱い日です。${drinkOrderAdvice_(runKind, "weak", orderPhase)} ${foodOrderAdvice_(runKind, "weak", orderPhase)}`,
     });
   }
   if (barJudgment) {
@@ -2071,30 +2348,52 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison,
   }
 
   const eventTag = seriesLabel === "同系イベント" ? "同系イベント" : seriesLabel;
-  let nextAction = `次回の${eventTag}では、今回の売上・集客・ドリンク売上・フード売上とタブレット/QRおすすめ枠の構成を記録し、2回目以降の比較に使えるようにしてください。`;
+  const recordTail =
+    orderPhase === "before_tablet"
+      ? "メニュー表のおすすめ欄・卓上POPの構成"
+      : orderPhase === "tablet_test"
+        ? "テスト運用中のおすすめ表示の構成"
+        : "タブレット/QRおすすめ枠の構成";
+  let nextAction = `次回の${eventTag}では、今回の売上・集客・ドリンク売上・フード売上と${recordTail}を記録し、2回目以降の比較に使えるようにしてください。`;
   if (pastCount > 0 && gatheringWeak && unitOkWithPast) {
     nextAction =
       runKind === "booking"
         ? `次回の${eventTag}では、出演者への告知協力を事前に決め、1週間前に予約数を確認してください。足りない場合は店側投稿用と出演者投稿用の短い文案（見どころ3行）を用意してください。`
         : `次回の${eventTag}では、固定客向け案内とイベント専用おすすめ表示を先に決めてください。`;
     if (drinkFood.drinkWeak) {
-      nextAction += ` ${drinkOrderAdvice_(runKind, "weak")}`;
+      nextAction += ` ${drinkOrderAdvice_(runKind, "weak", orderPhase)}`;
     }
     if (drinkFood.foodWeak) {
-      nextAction += ` ${foodOrderAdvice_(runKind, "weak")}`;
+      nextAction += ` ${foodOrderAdvice_(runKind, "weak", orderPhase)}`;
     }
   } else if (pastCount > 0 && gatheringOkWithPast && unitWeakWithPast) {
-    nextAction = `次回の${eventTag}では、タブレット/QRのおすすめ枠に2杯目向けドリンク・終演後ドリンク・フード2品を決め、来店後に自然に選ばれる表示にしてください。`;
+    nextAction =
+      orderPhase === "before_tablet"
+        ? `次回の${eventTag}では、メニュー表のおすすめ欄・卓上POPに2杯目向けドリンク・終演後ドリンク・フード2品を決め、来店後に選びやすい表示にしてください。`
+        : orderPhase === "tablet_test"
+          ? `次回の${eventTag}では、テスト運用中のおすすめ表示に2杯目向けドリンク・終演後ドリンク・フード2品を出し、実際に選ばれているか確認してください。`
+          : `次回の${eventTag}では、タブレット/QRのおすすめ枠に2杯目向けドリンク・終演後ドリンク・フード2品を決め、来店後に自然に選ばれる表示にしてください。`;
   } else if (pastCount > 0 && nearPastAvg && !isAchieved && targetSales > 0) {
-    nextAction = `次回の${eventTag}では、過去平均売上＋10〜15%を目標の起点にし、おすすめ枠の構成も今回を基準にしてください。`;
+    nextAction = `次回の${eventTag}では、過去平均売上＋10〜15%を目標の起点にし、${orderPhase === "before_tablet" ? "メニュー表のおすすめ欄" : "おすすめ表示"}の構成も今回を基準にしてください。`;
   } else if (isAchieved && pastCount > 0) {
-    nextAction = `次回の${eventTag}では、今回のタブレット/QRおすすめ枠・予約導線・終演後おすすめ表示をチェックリスト化し、同じ順番で再現してください。`;
+    nextAction =
+      orderPhase === "before_tablet"
+        ? `次回の${eventTag}では、今回のメニュー表おすすめ欄・卓上POP・予約導線・終演後の見せ方をチェックリスト化し、同じ順番で再現してください。`
+        : orderPhase === "tablet_test"
+          ? `次回の${eventTag}では、今回のテスト運用中のおすすめ表示・予約導線をチェックリスト化し、同じ順番で検証してください。`
+          : `次回の${eventTag}では、今回のタブレット/QRおすすめ枠・予約導線・終演後おすすめ表示をチェックリスト化し、同じ順番で再現してください。`;
   } else if (pastCount > 0 && salesWellBelowPast) {
-    nextAction = `次回の${eventTag}を開催するなら、${runKind === "booking" ? "告知協力と目標設定" : "固定客案内とおすすめ枠"}を変えるか、目標売上を過去平均に近づけてください。同系平均から大きく乖離している日は、同じ条件での再開催は慎重に判断してください。`;
+    const changeWhat =
+      runKind === "booking"
+        ? "告知協力と目標設定"
+        : orderPhase === "before_tablet"
+          ? "固定客案内とメニュー表のおすすめ欄"
+          : "固定客案内とおすすめ表示";
+    nextAction = `次回の${eventTag}を開催するなら、${changeWhat}を変えるか、目標売上を過去平均に近づけてください。同系平均から大きく乖離している日は、同じ条件での再開催は慎重に判断してください。`;
   } else if (pastCount === 0) {
-    nextAction = `次回の${eventTag}では、今回の売上・集客・ドリンク売上・フード売上とおすすめ枠の構成を記録してください。`;
+    nextAction = `次回の${eventTag}では、今回の売上・集客・ドリンク売上・フード売上と${recordTail}を記録してください。`;
   }
-  if (barJudgment?.nextSnippet && !nextAction.includes("終演後おすすめ") && !nextAction.includes("タブレット")) {
+  if (barJudgment?.nextSnippet) {
     nextAction += ` ${barJudgment.nextSnippet}`;
   }
 
@@ -2158,6 +2457,7 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison,
     isAchieved,
     seriesLabel,
     eventRunKind: runKind,
+    orderOperationPhase: orderPhase,
   };
 }
 function DayAnalysisBlock({ analysis, taxMode, narrow, onSelectReferenceDay }) {
