@@ -2049,15 +2049,78 @@ function buildCharterDayAnalysis_(row, monthly, taxMode, charterPast, orderPhase
     orderOperationPhase: phase,
   };
 }
-function buildSeriesComparisonComment_(seriesLabel, pastAvg, metrics, drinkFood, runKind, orderPhase) {
+function resolveDayAchievementTier_(achievementRate) {
+  const rate = achievementRate != null ? Number(achievementRate) : null;
+  if (rate == null || !Number.isFinite(rate)) return "unknown";
+  if (rate >= 120) return "strongSuccess";
+  if (rate >= 100) return "achieved";
+  return "underTarget";
+}
+function pastCustomerCompareLevel_(customerCount, pastCustomerCount) {
+  if (
+    customerCount == null ||
+    pastCustomerCount == null ||
+    !Number.isFinite(Number(pastCustomerCount)) ||
+    Number(pastCustomerCount) <= 0
+  ) {
+    return "unknown";
+  }
+  const ratio = (Number(customerCount) - Number(pastCustomerCount)) / Number(pastCustomerCount);
+  if (Math.abs(ratio) <= 0.1) return "near";
+  if (ratio < -0.1) return "low";
+  return "high";
+}
+function orderDisplayLabelForDayAnalysis_(orderPhase) {
+  if (orderPhase === "before_tablet") return "メニュー表・卓上POP";
+  if (orderPhase === "tablet_test") return "テスト運用中の注文表示";
+  return "注文画面のおすすめ表示";
+}
+function buildStrongSuccessBusinessSummary_(opts) {
+  const { phaseLead, orderPhase, pastCustomerLevel, pastUnitDiff, pastSalesDiff, pastCount, dfPhrase } = opts;
+  const displayLabel = orderDisplayLabelForDayAnalysis_(orderPhase);
+  let customerPart = "集客はほぼ同水準";
+  if (pastCustomerLevel === "high") customerPart = "集客は過去同イベントより高め";
+  else if (pastCustomerLevel === "low") customerPart = "来場人数は過去同イベントより少なめだが、客単価で十分補えており";
+  else if (pastCustomerLevel === "unknown") customerPart = "集客データは限定的ですが";
+
+  let driverPart = "客単価が高く、売上を押し上げています";
+  if (pastUnitDiff != null && pastUnitDiff < 100 && pastSalesDiff != null && pastSalesDiff > 0) {
+    driverPart = "売上全体が過去実績を上回っています";
+  }
+
+  let text = `${phaseLead}この日は目標を大きく達成しています。`;
+  if (pastCount > 0) {
+    text += `過去同イベントと比べて${customerPart}、${driverPart}。次回は集客改善よりも、ドリンク・フード構成、${displayLabel}、客層との相性など、客単価を上げた要因を記録してください。`;
+    if (pastCount === 1) {
+      text += " 過去比較は参考値ですが、今回の達成率と客単価は好材料です。次回も同じ項目を記録し、再現性を確認してください。";
+    }
+  } else {
+    text += " 過去同系実績はまだありませんが、今回の達成率と客単価は好材料です。次回も同じ項目を記録し、再現性を確認してください。";
+  }
+  if (dfPhrase) text += ` ${dfPhrase}`;
+  return text;
+}
+function buildStrongSuccessSeriesComment_(seriesLabel, pastCustomerLevel, unitDiff, salesDiff, pastSampleCount, dfPhrase) {
+  const pastOneTail =
+    pastSampleCount === 1 ? " 過去比較はまだ1件のみのため、次回も同じ項目を残して判断材料を増やしてください。" : "";
+  if (pastCustomerLevel === "low" && unitDiff != null && unitDiff >= -100) {
+    return `来場人数は${seriesLabel}より少なめですが、客単価で十分補えて大きく達成しています。次回も客単価を作った要因（ドリンク・フード構成、おすすめ表示、客層との相性）の記録を優先してください。${pastOneTail}${dfPhrase}`;
+  }
+  if ((pastCustomerLevel === "near" || pastCustomerLevel === "unknown") && unitDiff != null && unitDiff >= 100) {
+    return `${seriesLabel}と比べて集客はほぼ同水準です。売上増は客単価上昇が主因です。次回は集客対策より、今回の客単価を作った要因を記録してください。${pastOneTail}${dfPhrase}`;
+  }
+  if (salesDiff >= 0 && unitDiff != null && unitDiff >= 0) {
+    return `${seriesLabel}平均より売上・客単価が高めです。今回うまくいった構成をメモし、次回の基準にしてください。${pastOneTail}${dfPhrase}`;
+  }
+  return `目標を大きく達成しています。${seriesLabel}との差分より、今回の成功要因（客単価・ドリンク・フード構成）を記録し、次回に再現できるか確認してください。${pastOneTail}${dfPhrase}`;
+}
+function buildSeriesComparisonComment_(seriesLabel, pastAvg, metrics, drinkFood, runKind, orderPhase, pastSampleCount) {
   if (!pastAvg || !seriesLabel) return null;
   const phase = orderPhase || "before_tablet";
-  const { totalSales, customerCount, dayUnitPrice, targetSales, isAchieved } = metrics;
+  const { totalSales, customerCount, dayUnitPrice, targetSales, isAchieved, achievementRate } = metrics;
+  const achievementTier = resolveDayAchievementTier_(achievementRate);
+  const pastCustomerLevel = pastCustomerCompareLevel_(customerCount, pastAvg.customerCount);
   const salesDiff = Number(totalSales || 0) - Number(pastAvg.totalSales || 0);
-  const customerDiff =
-    customerCount != null && pastAvg.customerCount != null
-      ? Number(customerCount) - Number(pastAvg.customerCount)
-      : null;
   const unitDiff =
     dayUnitPrice != null && pastAvg.customerUnitPrice != null
       ? Number(dayUnitPrice) - Number(pastAvg.customerUnitPrice)
@@ -2078,19 +2141,29 @@ function buildSeriesComparisonComment_(seriesLabel, pastAvg, metrics, drinkFood,
     }
   }
 
-  if (salesDiff < -10000 && customerDiff != null && customerDiff < -1) {
+  if (achievementTier === "strongSuccess") {
+    return buildStrongSuccessSeriesComment_(seriesLabel, pastCustomerLevel, unitDiff, salesDiff, pastSampleCount, dfPhrase);
+  }
+  if (achievementTier === "achieved") {
+    if (pastCustomerLevel === "low" && unitDiff != null && unitDiff >= -100) {
+      return `集客は${seriesLabel}より低めですが、客単価で目標は達成しています。大きな上振れではないため、成功要因の記録と次回の伸ばしどころ（集客・客単価）を決めてください。${dfPhrase}`;
+    }
+    return `この日は目標を達成しています。大きな上振れではないため、成功要因を確認しつつ、次回は集客・客単価のどちらを伸ばすかを決めてください。${dfPhrase}`;
+  }
+
+  if (salesDiff < -10000 && pastCustomerLevel === "low") {
     return `${seriesLabel}平均より売上・集客ともに低い日です。${runKind === "booking" ? "再開催するなら、出演者への告知協力の事前共有と、店側の予約導線・目標設定を確認してください。" : "再開催するなら、固定客向けの次回案内とイベント専用おすすめ表示を確認してください。"}${dfPhrase}`;
   }
-  if (customerDiff != null && customerDiff < -1 && unitDiff != null && unitDiff >= -100) {
+  if (pastCustomerLevel === "low" && unitDiff != null && unitDiff >= -100) {
     const unitOkFollow =
       phase === "before_tablet"
         ? "来店後のメニュー表・卓上POPの見せ方は機能している可能性があるため、"
         : phase === "tablet_test"
           ? "来店後の注文画面（テスト運用）のおすすめ表示は機能している可能性があるため、"
           : "来店後の注文画面設計は機能している可能性があるため、";
-    return `集客は弱い一方で客単価は取れています。${unitOkFollow}次回は${runKind === "booking" ? "出演者への告知協力と1週間前の予約数確認" : "固定客向け案内とイベント専用おすすめ表示"}を優先してください。${dfPhrase}`;
+    return `集客は低めですが客単価は取れています。${unitOkFollow}次回は${runKind === "booking" ? "出演者への告知協力と1週間前の予約数確認" : "固定客向け案内とイベント専用おすすめ表示"}を優先してください。${dfPhrase}`;
   }
-  if (customerDiff != null && customerDiff >= -1 && unitDiff != null && unitDiff < -100) {
+  if (pastCustomerLevel !== "low" && unitDiff != null && unitDiff < -100) {
     return `集客は取れていますが客単価が弱い日です。${drinkOrderAdvice_(runKind, "weak", phase)} ${foodOrderAdvice_(runKind, "weak", phase)}`;
   }
   if (nearPastAvg && !isAchieved && Number(targetSales || 0) > 0) {
@@ -2136,6 +2209,7 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison,
   const avgBarRate = monthly.barTimeCustomerRate;
   const barTimeCount = row.barTimeCustomerCount != null ? Number(row.barTimeCustomerCount) : null;
   const isAchieved = targetSales > 0 && achievementRate != null && achievementRate >= 100;
+  const achievementTier = resolveDayAchievementTier_(achievementRate);
   const unitLow = dayUnitPrice != null && avgUnit != null && avgUnit > 0 && dayUnitPrice < avgUnit * 0.9;
   const barLow =
     dayBarRate != null &&
@@ -2163,14 +2237,15 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison,
       : null;
   const pastSalesDiff =
     pastAvg?.totalSales != null ? totalSales - Number(pastAvg.totalSales) : null;
+  const pastCustomerLevel = pastCustomerCompareLevel_(customerCount, pastAvg?.customerCount);
   const nearPastAvg =
     pastSalesDiff != null && Math.abs(pastSalesDiff) <= Math.max(10000, Number(pastAvg?.totalSales || 0) * 0.1);
   const drinkFood = buildDayDrinkFoodContext_(row, monthly, pastAvg);
   const dfPhrase = drinkFoodSummaryPhrase_(drinkFood, runKind, orderPhase);
-  const metricCtx = { totalSales, customerCount, dayUnitPrice, targetSales, isAchieved };
+  const metricCtx = { totalSales, customerCount, dayUnitPrice, targetSales, isAchieved, achievementRate };
   const seriesComparisonComment =
     pastCount > 0
-      ? buildSeriesComparisonComment_(seriesLabel, pastAvg, metricCtx, drinkFood, runKind, orderPhase)
+      ? buildSeriesComparisonComment_(seriesLabel, pastAvg, metricCtx, drinkFood, runKind, orderPhase, pastCount)
       : null;
   const barJudgment = buildBarTimeJudgment_({
     barTimeCount,
@@ -2192,20 +2267,27 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison,
     pastCount > 0 &&
     pastSalesDiff != null &&
     pastSalesDiff < -Math.max(15000, Number(pastAvg?.totalSales || 0) * 0.15);
-  const gatheringWeak = pastCustomerDiff != null && pastCustomerDiff < -1;
+  const gatheringWeak =
+    achievementTier === "underTarget" &&
+    (pastCustomerLevel === "low" || (pastCustomerDiff != null && pastCustomerDiff < -1 && pastCustomerLevel === "unknown"));
   const unitOkWithPast = pastUnitDiff != null && pastUnitDiff >= -100;
   const unitWeakWithPast = pastUnitDiff != null && pastUnitDiff < -100;
-  const gatheringOkWithPast = pastCustomerDiff == null || pastCustomerDiff >= -1;
+  const gatheringOkWithPast = pastCustomerLevel !== "low";
 
   let businessSummary = "";
   if (pastCount > 0) {
-    if (isAchieved) {
-      businessSummary =
-        orderPhase === "before_tablet"
-          ? `${phaseLead}この日は目標を達成しています。メニュー表のおすすめ欄・卓上POP・予約導線のうち、どこが効いたかをメモし、次回も同じ構成を使ってください。`
-          : orderPhase === "tablet_test"
-            ? `${phaseLead}この日は目標を達成しています。テスト運用中のおすすめ表示・予約導線のうち、どこが効いたかをメモし、次回も同じ表示構成を検証してください。`
-            : "この日は目標を達成しています。タブレット/QRのおすすめ枠・予約導線・来店後の注文画面のうち、どこが効いたかをメモし、次回も同じ表示構成を使ってください。";
+    if (achievementTier === "strongSuccess") {
+      businessSummary = buildStrongSuccessBusinessSummary_({
+        phaseLead,
+        orderPhase,
+        pastCustomerLevel,
+        pastUnitDiff,
+        pastSalesDiff,
+        pastCount,
+        dfPhrase,
+      });
+    } else if (achievementTier === "achieved") {
+      businessSummary = `${phaseLead}この日は目標を達成しています。大きな上振れではないため、成功要因を確認しつつ、次回は集客・客単価のどちらを伸ばすかを決めてください。`;
       if (dfPhrase) businessSummary += ` ${dfPhrase}`;
     } else if (salesWellBelowPast && gatheringWeak) {
       businessSummary = `${phaseLead}同系平均より売上・集客ともに低い日です。${runKind === "booking" ? "再開催するなら、出演者への告知協力の事前共有と、店側の予約導線・目標設定を確認してください。" : "再開催するなら、固定客向け案内とイベント専用おすすめ表示を見直してください。"}${dfPhrase}`;
@@ -2232,13 +2314,11 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison,
             : "タブレット/QRのおすすめ枠と目標設定を次回までに決めておく日です。";
       businessSummary = seriesComparisonComment || `${phaseLead}同系イベントとして、${fallbackTail}${dfPhrase}`;
     }
-  } else if (isAchieved) {
+  } else if (achievementTier === "strongSuccess" || achievementTier === "achieved") {
     businessSummary =
-      orderPhase === "before_tablet"
-        ? `${phaseLead}目標は達成しています。過去同系実績がないため比較はできませんが、今回の売上・集客・ドリンク売上・フード売上とメニュー表のおすすめ構成を記録し、2回目以降の基準にしてください。`
-        : orderPhase === "tablet_test"
-          ? `${phaseLead}目標は達成しています。過去同系実績がないため比較はできませんが、今回の売上・集客・ドリンク売上・フード売上とテスト運用中のおすすめ構成を記録し、2回目以降の基準にしてください。`
-          : "目標は達成しています。過去同系実績がないため比較はできませんが、今回の売上・集客・ドリンク売上・フード売上とおすすめ枠の構成を記録し、2回目以降の基準にしてください。";
+      achievementTier === "strongSuccess"
+        ? `${phaseLead}目標を大きく達成しています。過去同系実績がないため比較はできませんが、今回の達成率・客単価・ドリンク売上・フード売上と${orderDisplayLabelForDayAnalysis_(orderPhase)}の構成を記録し、2回目以降の再現性を確認してください。`
+        : `${phaseLead}目標は達成しています。過去同系実績がないため比較はできませんが、今回の売上・集客・ドリンク売上・フード売上と${orderDisplayLabelForDayAnalysis_(orderPhase)}の構成を記録し、2回目以降の基準にしてください。`;
   } else if (targetSales > 0) {
     businessSummary = `${phaseLead}過去同系実績がないため同系比較はできません。今回の売上・集客・客単価・ドリンク売上・フード売上を基準値として残し、次回から比較できるようにしてください。`;
   } else {
@@ -2251,7 +2331,33 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison,
   }
 
   const judgmentPoints = [];
-  if (pastCount > 0 && salesWellBelowPast && gatheringWeak) {
+  if (achievementTier === "strongSuccess") {
+    judgmentPoints.push({
+      label: "開催判断",
+      text:
+        pastCount <= 1
+          ? "目標を大きく達成しているため、同系イベントとして継続候補です。過去実績が少ないため、次回も同じ指標を記録してください。"
+          : "目標を大きく達成しているため、同系イベントとして継続候補です。",
+    });
+    if (pastUnitDiff != null && pastUnitDiff >= 100) {
+      judgmentPoints.push({
+        label: "客単価",
+        text:
+          pastCustomerLevel === "near" || pastCustomerLevel === "unknown"
+            ? "集客は過去同イベントとほぼ同水準ですが、客単価が上がったことで大きく達成しています。次回は集客対策より、客単価を上げた要因を確認してください。"
+            : "売上増の主因は客単価です。ドリンク・フードのどちらが伸びたかを確認してください。",
+      });
+    }
+    judgmentPoints.push({
+      label: "目標設定",
+      text: "次回は今回実績をそのまま基準にするのではなく、過去実績と今回実績の間、または今回実績の8〜9割を目安にしてもよい可能性があります。",
+    });
+  } else if (achievementTier === "achieved" && pastCount > 0) {
+    judgmentPoints.push({
+      label: "開催判断",
+      text: "目標を達成しています。大きな上振れではないため、成功要因を記録し、次回の伸ばしどころ（集客・客単価）を決めてください。",
+    });
+  } else if (pastCount > 0 && salesWellBelowPast && gatheringWeak) {
     judgmentPoints.push({
       label: "開催判断",
       text:
@@ -2267,20 +2373,10 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison,
           ? `売上は未達ですが客単価は取れています。${orderPhase === "before_tablet" ? "メニュー表・卓上POPの見せ方は機能している可能性があるため、" : orderPhase === "tablet_test" ? "テスト運用中の注文画面のおすすめ表示は機能している可能性があるため、" : "タブレット/QRの注文画面は機能している可能性があるため、"}告知協力と予約数確認を先に行う価値があります。`
           : "売上は未達ですが客単価は取れています。来店後のおすすめ表示は機能している可能性があるため、固定客向け案内を先に見直す価値があります。",
     });
-  } else if (pastCount > 0 && nearPastAvg && !isAchieved && targetSales > 0) {
+  } else if (pastCount > 0 && nearPastAvg && achievementTier === "underTarget" && targetSales > 0) {
     judgmentPoints.push({
       label: "開催判断",
       text: "売上は同系平均に近いため、イベント内容より目標設定を先に見直す方が近道です。",
-    });
-  } else if (isAchieved && pastCount > 0) {
-    judgmentPoints.push({
-      label: "開催判断",
-      text:
-        orderPhase === "before_tablet"
-          ? "同系平均を上回るか達成しており、同じメニュー表のおすすめ欄・卓上POPと予約導線を次回も使えます。"
-          : orderPhase === "tablet_test"
-            ? "同系平均を上回るか達成しており、同じテスト運用中のおすすめ表示と予約導線を次回も使えます。"
-            : "同系平均を上回るか達成しており、同じタブレット/QRおすすめ枠と予約導線を次回も使えます。",
     });
   } else if (pastCount === 0) {
     judgmentPoints.push({
@@ -2325,19 +2421,31 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison,
     });
   }
   if (drinkFood.hasData && drinkFood.drinkSales != null) {
-    if (drinkFood.drinkWeak) {
+    if (drinkFood.drinkWeak && achievementTier === "underTarget") {
       judgmentPoints.push({ label: "ドリンク", text: drinkOrderAdvice_(runKind, "weak", orderPhase) });
     } else if (drinkFood.drinkStrong) {
-      judgmentPoints.push({ label: "ドリンク", text: drinkOrderAdvice_(runKind, "strong", orderPhase) });
+      judgmentPoints.push({
+        label: "ドリンク",
+        text:
+          achievementTier === "strongSuccess" || achievementTier === "achieved"
+            ? "ドリンクが取れています。当日のメニュー構成・おすすめ表示・客層との相性を記録してください。"
+            : drinkOrderAdvice_(runKind, "strong", orderPhase),
+      });
     }
   }
   if (drinkFood.hasData && drinkFood.foodSales != null) {
-    if (drinkFood.foodWeak) {
+    if (drinkFood.foodWeak && achievementTier === "underTarget") {
       judgmentPoints.push({ label: "フード", text: foodOrderAdvice_(runKind, "weak", orderPhase) });
     } else if (drinkFood.foodStrong) {
-      judgmentPoints.push({ label: "フード", text: foodOrderAdvice_(runKind, "strong", orderPhase) });
+      judgmentPoints.push({
+        label: "フード",
+        text:
+          achievementTier === "strongSuccess" || achievementTier === "achieved"
+            ? "フードが取れています。当日のメニュー構成・おすすめ表示・客層との相性を記録してください。"
+            : foodOrderAdvice_(runKind, "strong", orderPhase),
+      });
     }
-  } else if (unitLow && !drinkFood.foodWeak) {
+  } else if (unitLow && !drinkFood.foodWeak && achievementTier === "underTarget") {
     judgmentPoints.push({
       label: "ドリンク・フード単価",
       text: `客単価が弱い日です。${drinkOrderAdvice_(runKind, "weak", orderPhase)} ${foodOrderAdvice_(runKind, "weak", orderPhase)}`,
@@ -2355,7 +2463,15 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison,
         ? "テスト運用中のおすすめ表示の構成"
         : "タブレット/QRおすすめ枠の構成";
   let nextAction = `次回の${eventTag}では、今回の売上・集客・ドリンク売上・フード売上と${recordTail}を記録し、2回目以降の比較に使えるようにしてください。`;
-  if (pastCount > 0 && gatheringWeak && unitOkWithPast) {
+  const orderDisplayLabel = orderDisplayLabelForDayAnalysis_(orderPhase);
+  if (achievementTier === "strongSuccess") {
+    nextAction = `次回は、今回の客単価が上がった要因を確認してください。ドリンク・フードの売上内訳、${orderDisplayLabel}の表示順、おすすめメニュー、客層との相性を記録し、同じ構成を再現できるか確認してください。`;
+    if (pastCount === 1) {
+      nextAction += " 過去比較はまだ1件のみのため、次回も同じ項目を残して判断材料を増やしてください。";
+    }
+  } else if (achievementTier === "achieved" && pastCount > 0) {
+    nextAction = `次回の${eventTag}では、今回の成功要因（集客・客単価・${orderDisplayLabel}）を記録し、大きな上振れを作るにはどちらを伸ばすか決めてください。`;
+  } else if (pastCount > 0 && gatheringWeak && unitOkWithPast) {
     nextAction =
       runKind === "booking"
         ? `次回の${eventTag}では、出演者への告知協力を事前に決め、1週間前に予約数を確認してください。足りない場合は店側投稿用と出演者投稿用の短い文案（見どころ3行）を用意してください。`
@@ -2373,15 +2489,8 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison,
         : orderPhase === "tablet_test"
           ? `次回の${eventTag}では、テスト運用中のおすすめ表示に2杯目向けドリンク・終演後ドリンク・フード2品を出し、実際に選ばれているか確認してください。`
           : `次回の${eventTag}では、タブレット/QRのおすすめ枠に2杯目向けドリンク・終演後ドリンク・フード2品を決め、来店後に自然に選ばれる表示にしてください。`;
-  } else if (pastCount > 0 && nearPastAvg && !isAchieved && targetSales > 0) {
+  } else if (pastCount > 0 && nearPastAvg && achievementTier === "underTarget" && targetSales > 0) {
     nextAction = `次回の${eventTag}では、過去平均売上＋10〜15%を目標の起点にし、${orderPhase === "before_tablet" ? "メニュー表のおすすめ欄" : "おすすめ表示"}の構成も今回を基準にしてください。`;
-  } else if (isAchieved && pastCount > 0) {
-    nextAction =
-      orderPhase === "before_tablet"
-        ? `次回の${eventTag}では、今回のメニュー表おすすめ欄・卓上POP・予約導線・終演後の見せ方をチェックリスト化し、同じ順番で再現してください。`
-        : orderPhase === "tablet_test"
-          ? `次回の${eventTag}では、今回のテスト運用中のおすすめ表示・予約導線をチェックリスト化し、同じ順番で検証してください。`
-          : `次回の${eventTag}では、今回のタブレット/QRおすすめ枠・予約導線・終演後おすすめ表示をチェックリスト化し、同じ順番で再現してください。`;
   } else if (pastCount > 0 && salesWellBelowPast) {
     const changeWhat =
       runKind === "booking"
