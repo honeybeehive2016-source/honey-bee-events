@@ -700,7 +700,7 @@ function yearlyYoYRowOpacity_(r) {
 
 function yen(v) {
   if (v == null || Number.isNaN(Number(v))) return "—";
-  return "¥" + Number(v).toLocaleString("ja-JP");
+  return "¥" + Math.round(Number(v)).toLocaleString("ja-JP");
 }
 function readSalesTaxMode() {
   try {
@@ -712,8 +712,8 @@ function readSalesTaxMode() {
 function displayMoneyValue(value, taxMode) {
   if (value == null || Number.isNaN(Number(value))) return value;
   const n = Number(value);
-  if (taxMode === "net") return Math.round(n / (1 + TAX_RATE));
-  return n;
+  const converted = taxMode === "net" ? n / (1 + TAX_RATE) : n;
+  return Math.round(converted);
 }
 function formatDisplayYen(value, taxMode) {
   return yen(displayMoneyValue(value, taxMode));
@@ -915,6 +915,46 @@ function calcFixedCostAdjustedProfitFromGrossSales_(totalSalesSum) {
 function formatFixedCostAdjustedProfit_(profit) {
   if (profit == null || !Number.isFinite(Number(profit))) return "—";
   return `約 ${formatExTaxYen_(Math.round(Number(profit)))}`;
+}
+function formatReviewTableBreakEvenGap_(breakEvenAnalysis) {
+  const gap = breakEvenAnalysis?.gapFromBreakEven;
+  if (gap == null || !breakEvenAnalysis?.hasActualSales || !Number.isFinite(Number(gap))) return "—";
+  return formatSignedExTaxYen_(Math.round(Number(gap)));
+}
+function formatReviewTableFixedCostProfit_(profit) {
+  if (profit == null || !Number.isFinite(Number(profit))) return "—";
+  return formatSignedExTaxYen_(Math.round(Number(profit)));
+}
+function reviewTableSignedValueColor_(value) {
+  if (value == null || !Number.isFinite(Number(value))) return undefined;
+  const n = Number(value);
+  if (n > 0) return "#9ec9a8";
+  if (n < 0) return "#dca06a";
+  return undefined;
+}
+function buildSalesComposition_(parts, totalSales) {
+  const total = Number(totalSales || 0);
+  const drink = Number(parts.drink || 0);
+  const food = Number(parts.food || 0);
+  const bandFoodDrink = Number(parts.bandFoodDrink || 0);
+  const venue = Number(parts.venue || 0);
+  const rental = Number(parts.rental || 0);
+  const other = Number(parts.other || 0);
+  return {
+    drink,
+    food,
+    bandFoodDrink,
+    venue,
+    rental,
+    other,
+    total,
+    drinkRate: calcRate(drink, total),
+    foodRate: calcRate(food, total),
+    bandFoodDrinkRate: calcRate(bandFoodDrink, total),
+    venueRate: calcRate(venue, total),
+    rentalRate: calcRate(rental, total),
+    otherRate: calcRate(other, total),
+  };
 }
 function formatFixedCostAdjustedProfitRate_(rate) {
   if (rate == null || !Number.isFinite(Number(rate))) return "—";
@@ -3171,6 +3211,10 @@ function num(v) {
 }
 function pct(v) {
   if (v == null || Number.isNaN(Number(v))) return "—";
+  return Number(v).toFixed(1) + "%";
+}
+function pct2(v) {
+  if (v == null || Number.isNaN(Number(v))) return "—";
   return Number(v).toFixed(2) + "%";
 }
 function pct1(v) {
@@ -3711,7 +3755,7 @@ function buildUnitPriceMetrics_({
 }
 function formatUnitYen_(value) {
   if (value == null || Number.isNaN(Number(value))) return "—";
-  return `¥${num(value)}`;
+  return yen(Math.round(Number(value)));
 }
 function barTimeCustomerCountFromMetrics_(metrics) {
   return pickMetricNullable(metrics, BAR_TIME_CUSTOMER_COUNT_KEYS);
@@ -3726,7 +3770,12 @@ function deriveLiveTimeCustomerCount_(customerCount, barTimeCustomerCount) {
   return live;
 }
 function formatCustomerCountLabel_(count) {
-  return count != null ? `${num(count)}名` : "—";
+  if (count == null || !Number.isFinite(Number(count))) return "—";
+  return `${num(Math.round(Number(count)))}名`;
+}
+function formatAvgCustomerCountLabel_(count) {
+  if (count == null || !Number.isFinite(Number(count))) return "—";
+  return `${(Math.round(Number(count) * 10) / 10).toFixed(1)}名`;
 }
 function yearlyMonthChartGridCols_(narrow) {
   return narrow ? "1fr" : "repeat(2, minmax(0, 1fr))";
@@ -5089,7 +5138,7 @@ function YearlySummaryFiveBlocks({ yearlyAnalysis, narrow, dy, pct, pct1, signed
           <YearlySummaryMetricLine
             narrow={narrow}
             label="月平均集客"
-            value={a.monthlyAvgCustomerCount != null ? `${num(a.monthlyAvgCustomerCount)}名` : "—"}
+            value={a.monthlyAvgCustomerCount != null ? formatAvgCustomerCountLabel_(a.monthlyAvgCustomerCount) : "—"}
             emphasize
           />
           <YearlySummaryMetricLine narrow={narrow} label="年間客単価" value={formatUnitYen_(a.yearlyCustomerUnitPrice)} emphasize />
@@ -5179,6 +5228,8 @@ function YearlyCheckpointList({ items, narrow }) {
 }
 function YearlyMonthReviewCard({ row, narrow, dy, pct, pct1, signedDy, formatUnitYen_, onMonthClick }) {
   const muted = row.status !== "集計済み";
+  const gapColor = reviewTableSignedValueColor_(row.breakEvenGapExTax);
+  const fixedCostColor = reviewTableSignedValueColor_(row.fixedCostAdjustedProfit);
   return (
     <div
       role="button"
@@ -5206,38 +5257,29 @@ function YearlyMonthReviewCard({ row, narrow, dy, pct, pct1, signedDy, formatUni
         <div style={{ ...MOBILE_CARD_MONTH_TITLE_STYLE, fontSize: narrow ? "1.02rem" : ".98rem" }}>{row.monthLabel}</div>
         <div style={{ display: "flex", alignItems: "center", gap: ".28rem", flexWrap: "wrap" }}>
           <BreakEvenLineBadge breakEvenAnalysis={row.breakEvenAnalysis} compact />
-          <FixedCostProfitBadge profit={row.fixedCostAdjustedProfit} compact />
           <YearlyMonthStatusBadge m={row} />
         </div>
       </div>
       <div style={{ display: "grid", gap: ".14rem", marginBottom: ".38rem" }}>
         <YearlyCardMetricRow label="売上" value={dy(row.totalSalesSum)} muted={muted || !row.totalSalesSum} valueStyle={{ fontSize: narrow ? "1.05rem" : "1.02rem" }} />
-        <YearlyCardMetricRow label="目標達成率" value={row.progressRate != null ? pct(row.progressRate) : "—"} muted={muted} />
-        <YearlyCardMetricRow label="損益分岐" value={row.breakEvenGapLabel} muted={!row.breakEvenAnalysis?.hasActualSales} />
+        <YearlyCardMetricRow label="達成率" value={row.progressRate != null ? pct1(row.progressRate) : "—"} muted={muted} />
+        <YearlyCardMetricRow
+          label="損益分岐差額"
+          value={formatReviewTableBreakEvenGap_(row.breakEvenAnalysis)}
+          muted={!row.breakEvenAnalysis?.hasActualSales}
+          valueStyle={{ color: gapColor }}
+        />
         <YearlyCardMetricRow
           label="固定費後利益"
-          value={formatFixedCostAdjustedProfit_(row.fixedCostAdjustedProfit)}
+          value={formatReviewTableFixedCostProfit_(row.fixedCostAdjustedProfit)}
           muted={muted || row.fixedCostAdjustedProfit == null}
-          valueStyle={{
-            color: row.fixedCostAdjustedProfit != null && row.fixedCostAdjustedProfit < 0 ? "#dca06a" : undefined,
-          }}
+          valueStyle={{ color: fixedCostColor }}
         />
-        <YearlyCardMetricRow
-          label="固定費後利益率"
-          value={formatFixedCostAdjustedProfitRate_(row.fixedCostAdjustedProfitRate)}
-          muted={muted || row.fixedCostAdjustedProfitRate == null}
-        />
-        <YearlyCardMetricRow label="営業ベース利益" value={dy(row.operatingProfitSum)} muted={muted} />
-        <YearlyCardMetricRow label="集客人数" value={formatCustomerCountLabel_(row.customerCountSum)} muted={muted} />
+        <YearlyCardMetricRow label="集客" value={formatCustomerCountLabel_(row.customerCountSum)} muted={muted} />
         <YearlyCardMetricRow label="客単価" value={formatUnitYen_(row.customerUnitPrice)} muted={muted} />
         <YearlyCardMetricRow label="飲食単価" value={formatUnitYen_(row.foodDrinkUnitPrice)} muted={muted} />
-        <YearlyCardMetricRow
-          label="営業ベース利益率"
-          value={row.operatingProfitRate != null ? pct1(row.operatingProfitRate) : "—"}
-          muted={muted}
-        />
         {row.yoyRate != null ? (
-          <YearlyCardMetricRow label="前年同月比" value={pct1(row.yoyRate)} muted={false} valueStyle={{ color: row.yoyDiff >= 0 ? "#9ec9a8" : "#dca06a" }} />
+          <YearlyCardMetricRow label="前年比" value={pct1(row.yoyRate)} muted={false} valueStyle={{ color: row.yoyDiff >= 0 ? "#9ec9a8" : "#dca06a" }} />
         ) : null}
       </div>
       <div style={{ fontSize: "0.66rem", color: "rgba(201,168,76,0.55)", marginTop: ".28rem" }}>クリックで月次分析</div>
@@ -5266,26 +5308,27 @@ function YearlyMonthReviewSection({ rows, narrow, dy, pct, pct1, signedDy, forma
 function YearlyMonthReviewTable({ rows, narrow, dy, pct, pct1, formatUnitYen_, onMonthClick, taxMode }) {
   return (
     <div style={YEARLY_TABLE_WRAP}>
-      <table style={{ ...YEARLY_TABLE_STYLE, minWidth: 1080 }}>
+      <table style={{ ...YEARLY_TABLE_STYLE, minWidth: 980 }}>
         <thead>
           <tr>
-            <th style={yearlyThStyle_(88, "left")}>月</th>
-            <th style={yearlyThStyle_(104)}>売上</th>
-            <th style={yearlyThStyle_(92)}>達成率</th>
-            <th style={yearlyThStyle_(96, "center")}>経営ライン</th>
-            <th style={yearlyThStyle_(148)}>損益分岐</th>
+            <th style={yearlyThStyle_(72, "left")}>月</th>
+            <th style={yearlyThStyle_(100)}>売上</th>
+            <th style={yearlyThStyle_(80)}>達成率</th>
+            <th style={yearlyThStyle_(84, "center")}>経営ライン</th>
+            <th style={yearlyThStyle_(108)}>損益分岐差額</th>
             <th style={yearlyThStyle_(108)}>固定費後利益</th>
-            <th style={yearlyThStyle_(92)}>固定費後利益率</th>
-            <th style={yearlyThStyle_(96, "center")}>固定費後</th>
-            <th style={yearlyThStyle_(92)}>営業ベース利益率</th>
-            <th style={yearlyThStyle_(92)}>集客</th>
-            <th style={yearlyThStyle_(92)}>客単価</th>
-            <th style={yearlyThStyle_(92)}>飲食単価</th>
-            <th style={yearlyThStyle_(92)}>前年比</th>
+            <th style={yearlyThStyle_(72)}>集客</th>
+            <th style={yearlyThStyle_(84)}>客単価</th>
+            <th style={yearlyThStyle_(84)}>飲食単価</th>
+            <th style={yearlyThStyle_(72)}>前年比</th>
+            <th style={yearlyThStyle_(72, "center")}>状態</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
+          {rows.map((row) => {
+            const gapColor = reviewTableSignedValueColor_(row.breakEvenGapExTax);
+            const fixedCostColor = reviewTableSignedValueColor_(row.fixedCostAdjustedProfit);
+            return (
             <tr
               key={`review_tbl_${row.targetMonth}`}
               style={{ ...YEARLY_TABLE_ROW, opacity: yearlyTableRowOpacity_(row), cursor: "pointer" }}
@@ -5293,33 +5336,30 @@ function YearlyMonthReviewTable({ rows, narrow, dy, pct, pct1, formatUnitYen_, o
               title="クリックで月次分析へ"
               {...yearlyRowHoverHandlers_()}
             >
-              <td style={yearlyMonthTdStyle_(88)}>{row.monthLabel}</td>
-              <YearlyTableNumberCell m={row} value={row.totalSalesSum} width={104} taxMode={taxMode} />
-              <YearlyTableNumberCell m={row} value={row.progressRate} kind="pct" width={92} />
-              <td style={yearlyNumTdStyle_(96, !row.breakEvenAnalysis?.hasActualSales)}>
+              <td style={yearlyMonthTdStyle_(72)}>{row.monthLabel}</td>
+              <YearlyTableNumberCell m={row} value={row.totalSalesSum} width={100} taxMode={taxMode} />
+              <YearlyTableNumberCell m={row} value={row.progressRate} kind="pct" width={80} />
+              <td style={yearlyNumTdStyle_(84, !row.breakEvenAnalysis?.hasActualSales)}>
                 <BreakEvenLineBadge breakEvenAnalysis={row.breakEvenAnalysis} compact large />
               </td>
-              <td style={{ ...yearlyNumTdStyle_(148, !row.breakEvenAnalysis?.hasActualSales), fontSize: ".9rem", textAlign: "right" }}>
-                {row.breakEvenGapLabel}
+              <td style={{ ...yearlyNumTdStyle_(108, !row.breakEvenAnalysis?.hasActualSales), color: gapColor }}>
+                {formatReviewTableBreakEvenGap_(row.breakEvenAnalysis)}
               </td>
-              <td style={yearlyNumTdStyle_(108, row.fixedCostAdjustedProfit == null)}>
-                {formatFixedCostAdjustedProfit_(row.fixedCostAdjustedProfit)}
+              <td style={{ ...yearlyNumTdStyle_(108, row.fixedCostAdjustedProfit == null), color: fixedCostColor }}>
+                {formatReviewTableFixedCostProfit_(row.fixedCostAdjustedProfit)}
               </td>
-              <td style={yearlyNumTdStyle_(92, row.fixedCostAdjustedProfitRate == null)}>
-                {formatFixedCostAdjustedProfitRate_(row.fixedCostAdjustedProfitRate)}
-              </td>
-              <td style={yearlyNumTdStyle_(96, row.fixedCostAdjustedProfit == null)}>
-                <FixedCostProfitBadge profit={row.fixedCostAdjustedProfit} compact large />
-              </td>
-              <YearlyTableNumberCell m={row} value={row.operatingProfitRate} kind="pct" width={92} />
-              <td style={yearlyNumTdStyle_(92, row.status !== "集計済み")}>{formatCustomerCountLabel_(row.customerCountSum)}</td>
-              <td style={yearlyNumTdStyle_(92, row.status !== "集計済み")}>{formatUnitYen_(row.customerUnitPrice)}</td>
-              <td style={yearlyNumTdStyle_(92, row.status !== "集計済み")}>{formatUnitYen_(row.foodDrinkUnitPrice)}</td>
-              <td style={yearlyNumTdStyle_(92, row.yoyRate == null)}>
+              <td style={yearlyNumTdStyle_(72, row.status !== "集計済み")}>{formatCustomerCountLabel_(row.customerCountSum)}</td>
+              <td style={yearlyNumTdStyle_(84, row.status !== "集計済み")}>{formatUnitYen_(row.customerUnitPrice)}</td>
+              <td style={yearlyNumTdStyle_(84, row.status !== "集計済み")}>{formatUnitYen_(row.foodDrinkUnitPrice)}</td>
+              <td style={yearlyNumTdStyle_(72, row.yoyRate == null)}>
                 {row.yoyRate != null ? pct1(row.yoyRate) : "—"}
               </td>
+              <td style={{ ...yearlyNumTdStyle_(72, false), textAlign: "center" }}>
+                <YearlyMonthStatusBadge m={row} large />
+              </td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -5533,7 +5573,7 @@ function MonthlySummaryPanel({ monthlyAnalysis, narrow, dy, pct, pct1, signedDy 
       <div style={{ display: "grid", gridTemplateColumns: topGrid, gap: ".55rem", minWidth: 0, maxWidth: "100%" }}>
         <SummarySubCard title="進捗・売上" accent narrow={narrow}>
           <div style={{ display: "flex", alignItems: "baseline", gap: ".45rem", flexWrap: "wrap", marginBottom: ".15rem" }}>
-            <div style={{ fontSize: narrow ? "1.35rem" : "1.55rem", fontWeight: 700, color: "#f0e8d0", lineHeight: 1.2 }}>{pct(a.monthlyProgressRate)}</div>
+            <div style={{ fontSize: narrow ? "1.35rem" : "1.55rem", fontWeight: 700, color: "#f0e8d0", lineHeight: 1.2 }}>{pct2(a.monthlyProgressRate)}</div>
             <span
               style={{
                 fontSize: narrow ? ".72rem" : ".76rem",
@@ -5548,10 +5588,10 @@ function MonthlySummaryPanel({ monthlyAnalysis, narrow, dy, pct, pct1, signedDy 
               {tone.label}
             </span>
           </div>
-          <SummaryMetricLine narrow={narrow} label="月間進捗率" value={pct(a.monthlyProgressRate)} />
+          <SummaryMetricLine narrow={narrow} label="月間進捗率" value={pct1(a.monthlyProgressRate)} />
           <SummaryMetricLine narrow={narrow} label={targetGapLabel} value={targetGapValue} strong valueStyle={{ color: "#f3ead2" }} />
           <SummaryMetricLine narrow={narrow} label="月間売上 / 目標" value={`${dy(a.totalSalesSum)} / ${dy(a.fullMonthTargetSalesSum)}`} emphasize />
-          <SummaryMetricLine narrow={narrow} label="実績日達成率" value={pct(a.actualAchievementRate)} />
+          <SummaryMetricLine narrow={narrow} label="実績日達成率" value={pct1(a.actualAchievementRate)} />
           <div style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".08rem" }}>
             実績日ベース目標 {dy(a.actualTargetSalesSum)}
           </div>
@@ -5570,7 +5610,7 @@ function MonthlySummaryPanel({ monthlyAnalysis, narrow, dy, pct, pct1, signedDy 
           <SummaryMetricLine
             narrow={narrow}
             label="1日平均集客"
-            value={a.avgDailyCustomerCount != null ? `${num(a.avgDailyCustomerCount)}名` : "—"}
+            value={a.avgDailyCustomerCount != null ? formatAvgCustomerCountLabel_(a.avgDailyCustomerCount) : "—"}
             emphasize
           />
           <SummaryMetricLine narrow={narrow} label="客単価" value={formatUnitYen_(a.customerUnitPrice)} emphasize />
@@ -6576,6 +6616,23 @@ export default function SalesModule({ events = [], navigateBack }) {
       : null;
     const yearlyDrink = aggregatedMonths.reduce((s, m) => s + Number(m.drinkSalesSum || 0), 0);
     const yearlyFood = aggregatedMonths.reduce((s, m) => s + Number(m.foodSalesSum || 0), 0);
+    const yearlyVenueFee = aggregatedMonths.reduce((s, m) => s + Number(m.venueFeeSum || 0), 0);
+    const yearlyRentalSales = aggregatedMonths.reduce((s, m) => s + Number(m.rentalSalesSum || 0), 0);
+    const yearlyOtherSales = Math.max(
+      0,
+      yearlyTotalSales - yearlyDrink - yearlyFood - yearlyBandFoodDrink - yearlyVenueFee - yearlyRentalSales
+    );
+    const yearlySalesComposition = buildSalesComposition_(
+      {
+        drink: yearlyDrink,
+        food: yearlyFood,
+        bandFoodDrink: yearlyBandFoodDrink,
+        venue: yearlyVenueFee,
+        rental: yearlyRentalSales,
+        other: yearlyOtherSales,
+      },
+      yearlyTotalSales
+    );
     const yearlyCustomerCount = aggregatedMonths.reduce((s, m) => s + Number(m.customerCountSum || 0), 0);
     const yearlyBarTimeCustomerCount = aggregatedMonths.reduce((s, m) => s + Number(m.barTimeCustomerCountSum || 0), 0);
     const yearlyLiveTimeCustomerCount = deriveLiveTimeCustomerCount_(yearlyCustomerCount, yearlyBarTimeCustomerCount);
@@ -6729,6 +6786,10 @@ export default function SalesModule({ events = [], navigateBack }) {
       yearlyFoodDrink,
       yearlyDrink,
       yearlyFood,
+      yearlyVenueFee,
+      yearlyRentalSales,
+      yearlyOtherSales,
+      yearlySalesComposition,
       yearlyCustomerCount,
       yearlyBarTimeCustomerCount,
       yearlyLiveTimeCustomerCount,
@@ -6931,7 +6992,7 @@ export default function SalesModule({ events = [], navigateBack }) {
 
           <div style={{ display:"flex", alignItems:"baseline", gap:".55rem", flexWrap:"wrap", marginBottom:".28rem" }}>
             <div style={{ fontFamily:"Georgia,serif", fontSize:"2.7rem", lineHeight:1, color:"#f3ead2", letterSpacing:".02em", textShadow:"0 0 16px rgba(201,168,76,0.18)" }}>
-              {pct(staffProgress.achievementRate)}
+              {pct2(staffProgress.achievementRate)}
             </div>
             <span style={{ fontSize: ".74rem", fontWeight: 600, padding: ".16rem .58rem", borderRadius: 999, background: monthTone.chipBg, border: "1px solid " + monthTone.chipBd, color: monthTone.chipTx }}>
               {monthTone.label}
@@ -7103,22 +7164,22 @@ export default function SalesModule({ events = [], navigateBack }) {
             <SalesCompositionBreakdown
               narrow={vp.narrow}
               items={[
-                { key: "drink", label: "ドリンク", chipColor: SALES_COMPOSITION_CHIP_COLORS.drink, amount: dy(monthlyAnalysis.drinkSalesSum), rate: pct(monthlyAnalysis.salesComposition.drinkRate) },
-                { key: "food", label: "フード", chipColor: SALES_COMPOSITION_CHIP_COLORS.food, amount: dy(monthlyAnalysis.foodSalesSum), rate: pct(monthlyAnalysis.salesComposition.foodRate) },
+                { key: "drink", label: "ドリンク", chipColor: SALES_COMPOSITION_CHIP_COLORS.drink, amount: dy(monthlyAnalysis.drinkSalesSum), rate: pct1(monthlyAnalysis.salesComposition.drinkRate) },
+                { key: "food", label: "フード", chipColor: SALES_COMPOSITION_CHIP_COLORS.food, amount: dy(monthlyAnalysis.foodSalesSum), rate: pct1(monthlyAnalysis.salesComposition.foodRate) },
                 {
                   key: "band",
                   label: "バンド飲食代",
                   chipColor: SALES_COMPOSITION_CHIP_COLORS.bandFoodDrink,
                   amount: dy(monthlyAnalysis.bandFoodDrinkSalesSum),
-                  rate: pct(monthlyAnalysis.salesComposition.bandFoodDrinkRate),
+                  rate: pct1(monthlyAnalysis.salesComposition.bandFoodDrinkRate),
                   extra: [
                     monthlyAnalysis.hasBandDrinkBreakdown ? `うちバンドドリンク ${dy(monthlyAnalysis.bandDrinkSalesSum)}` : null,
                     monthlyAnalysis.hasBandFoodBreakdown ? `うちバンドフード ${dy(monthlyAnalysis.bandFoodSalesSum)}` : null,
                   ].filter(Boolean).join(" / ") || null,
                 },
-                { key: "venue", label: "会場費", chipColor: SALES_COMPOSITION_CHIP_COLORS.venue, amount: dy(monthlyAnalysis.venueFeeSum), rate: pct(monthlyAnalysis.salesComposition.venueRate) },
-                { key: "rental", label: "レンタル", chipColor: SALES_COMPOSITION_CHIP_COLORS.rental, amount: dy(monthlyAnalysis.rentalSalesSum), rate: pct(monthlyAnalysis.salesComposition.rentalRate) },
-                { key: "other", label: "その他", chipColor: SALES_COMPOSITION_CHIP_COLORS.other, amount: dy(monthlyAnalysis.otherSalesSum), rate: pct(monthlyAnalysis.salesComposition.otherRate) },
+                { key: "venue", label: "会場費", chipColor: SALES_COMPOSITION_CHIP_COLORS.venue, amount: dy(monthlyAnalysis.venueFeeSum), rate: pct1(monthlyAnalysis.salesComposition.venueRate) },
+                { key: "rental", label: "レンタル", chipColor: SALES_COMPOSITION_CHIP_COLORS.rental, amount: dy(monthlyAnalysis.rentalSalesSum), rate: pct1(monthlyAnalysis.salesComposition.rentalRate) },
+                { key: "other", label: "その他", chipColor: SALES_COMPOSITION_CHIP_COLORS.other, amount: dy(monthlyAnalysis.otherSalesSum), rate: pct1(monthlyAnalysis.salesComposition.otherRate) },
               ]}
             />
           </div>
@@ -7616,6 +7677,34 @@ export default function SalesModule({ events = [], navigateBack }) {
                   pct1={pct1}
                   signedDy={signedDy}
                   formatUnitYen_={formatUnitYen_}
+                />
+              </div>
+
+              <div style={analysisCardWrap("composition", vp.narrow)}>
+                <div style={analysisSecTitle("composition", ".5rem", vp.narrow)}>年間売上構成</div>
+                <div style={{ fontSize: vp.narrow ? "0.76rem" : "0.8rem", color: "rgba(240,232,208,0.55)", marginBottom: ".4rem" }}>
+                  集計済み月の合計（{num(yearlyAnalysis.aggregatedMonthCount)}ヶ月）
+                </div>
+                <SalesCompositionLegend narrow={vp.narrow} />
+                <div style={{ width: "100%", maxWidth: "100%", overflow: "hidden" }}>
+                  <SalesCompositionBar rates={yearlyAnalysis.yearlySalesComposition} />
+                </div>
+                <SalesCompositionBreakdown
+                  narrow={vp.narrow}
+                  items={[
+                    { key: "drink", label: "ドリンク", chipColor: SALES_COMPOSITION_CHIP_COLORS.drink, amount: dy(yearlyAnalysis.yearlyDrink), rate: pct1(yearlyAnalysis.yearlySalesComposition.drinkRate) },
+                    { key: "food", label: "フード", chipColor: SALES_COMPOSITION_CHIP_COLORS.food, amount: dy(yearlyAnalysis.yearlyFood), rate: pct1(yearlyAnalysis.yearlySalesComposition.foodRate) },
+                    {
+                      key: "band",
+                      label: "バンド飲食代",
+                      chipColor: SALES_COMPOSITION_CHIP_COLORS.bandFoodDrink,
+                      amount: dy(yearlyAnalysis.yearlyBandFoodDrink),
+                      rate: pct1(yearlyAnalysis.yearlySalesComposition.bandFoodDrinkRate),
+                    },
+                    { key: "venue", label: "会場費", chipColor: SALES_COMPOSITION_CHIP_COLORS.venue, amount: dy(yearlyAnalysis.yearlyVenueFee), rate: pct1(yearlyAnalysis.yearlySalesComposition.venueRate) },
+                    { key: "rental", label: "レンタル", chipColor: SALES_COMPOSITION_CHIP_COLORS.rental, amount: dy(yearlyAnalysis.yearlyRentalSales), rate: pct1(yearlyAnalysis.yearlySalesComposition.rentalRate) },
+                    { key: "other", label: "その他", chipColor: SALES_COMPOSITION_CHIP_COLORS.other, amount: dy(yearlyAnalysis.yearlyOtherSales), rate: pct1(yearlyAnalysis.yearlySalesComposition.otherRate) },
+                  ]}
                 />
               </div>
 
