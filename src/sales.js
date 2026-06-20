@@ -1513,26 +1513,14 @@ function buildVenueUnitPriceMonthlyComment_(ctx) {
   const total = Number(a.totalSalesSum || 0);
   if (venueSum <= 0 || total <= 0 || venueSum / total < 0.06) return null;
 
-  const totalUnit = a.customerUnitPrice;
+  const customerUnit = a.customerUnitPrice;
   const foodUnit = a.foodDrinkUnitPrice;
-  const exVenueUnit = a.customerUnitPriceExVenue;
 
-  if (
-    totalUnit != null &&
-    foodUnit != null &&
-    exVenueUnit != null &&
-    totalUnit > foodUnit * 1.05 &&
-    totalUnit > exVenueUnit * 1.03
-  ) {
-    return "総客単価は高く見えますが、会場費の影響があります。飲食単価を見ると伸びしろがあるため、ドリンク・フードの注文設計を確認してください。";
+  if (customerUnit != null && foodUnit != null && customerUnit > foodUnit * 1.05) {
+    return "客単価は高く見えますが、会場費の影響があります。飲食単価とドリンク・フード売上を確認してください。";
   }
-  if (
-    exVenueUnit != null &&
-    foodUnit != null &&
-    a.normalFoodDrinkUnitPrice != null &&
-    foodUnit >= a.normalFoodDrinkUnitPrice * 0.98
-  ) {
-    return "会場費を除いても飲食単価が高く、来店後の売上化は良好です。";
+  if (foodUnit != null) {
+    return "飲食単価が維持できているため、来店後の売上化は大きく崩れていません。";
   }
   return null;
 }
@@ -2509,7 +2497,7 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison,
   const venueFeeRate = totalSales > 0 ? venueFee / totalSales : 0;
   const venueFeeNote =
     venueFee > 0 && venueFeeRate >= 0.08
-      ? "この日は会場費売上が含まれているため、総客単価だけで飲食の強さを判断しないでください。飲食単価とドリンク/フード売上を分けて確認してください。"
+      ? "この日は会場費売上が含まれているため、客単価だけで飲食の強さを判断しないでください。飲食単価とドリンク・フード売上を分けて確認してください。"
       : "";
   if (venueFeeNote) {
     businessSummary = businessSummary ? `${businessSummary} ${venueFeeNote}` : venueFeeNote;
@@ -2608,7 +2596,7 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison,
   if (venueFeeNote) {
     judgmentPoints.push({
       label: "会場費",
-      text: "会場費が総売上の一定割合を占めています。総客単価ではなく飲食単価・ドリンク/フード売上で来店後の実力を確認してください。",
+      text: "会場費が総売上の一定割合を占めています。客単価だけではなく飲食単価・ドリンク・フード売上で来店後の実力を確認してください。",
     });
   }
   if (drinkFood.hasData && drinkFood.drinkSales != null) {
@@ -3183,10 +3171,7 @@ function emptyMonthAggregate_(targetMonth, status, fetchError) {
 }
 function aggregateMonthFromRecords_(records, targetMonth, currentBusinessDate, monthlySummary) {
   const monthRows = (records || []).filter((r) => (r.businessDate || "").startsWith(targetMonth));
-  const actualRows = monthRows.filter(
-    (r) => (r.businessDate || "") < currentBusinessDate && r?.metrics?.totalSales != null
-  );
-  const futureRows = monthRows.filter((r) => (r.businessDate || "") >= currentBusinessDate);
+  const { actualRows, futureRows } = partitionMonthRowsForSales_(monthRows, currentBusinessDate);
   const totalSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.totalSales || 0), 0);
   const targetSalesSum = monthRows.reduce((s, r) => s + Number(r?.metrics?.targetSales || 0), 0);
   const foodDrinkSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.foodDrinkSales || 0), 0);
@@ -3247,7 +3232,7 @@ function aggregateMonthFromRecords_(records, targetMonth, currentBusinessDate, m
     customerUnitPrice: unitPrices.customerUnitPrice,
     normalCustomerUnitPrice: unitPrices.normalCustomerUnitPrice,
     foodDrinkUnitPrice: unitPrices.foodDrinkUnitPrice,
-    foodDrinkUnitPriceIncludingBand: unitPrices.foodDrinkUnitPrice,
+    foodDrinkUnitPriceIncludingBand: unitPrices.foodDrinkUnitPriceIncludingBand,
     normalFoodDrinkUnitPrice: unitPrices.normalFoodDrinkUnitPrice,
     customerUnitPriceExVenue: unitPrices.customerUnitPriceExVenue,
     normalCustomerUnitPriceExVenue: unitPrices.normalCustomerUnitPriceExVenue,
@@ -3288,9 +3273,7 @@ function aggregateMonthFromRecords_(records, targetMonth, currentBusinessDate, m
   };
 }
 async function fetchSalesMonth_(targetMonth) {
-  const sep = SALES_API_URL.includes("?") ? "&" : "?";
-  const url = `${SALES_API_URL}${sep}targetMonth=${encodeURIComponent(targetMonth)}`;
-  const res = await fetch(url, { cache: "no-store" });
+  const res = await fetch(buildSalesFetchUrl_(targetMonth), { cache: "no-store" });
   const text = await res.text();
   let json;
   try {
@@ -3504,10 +3487,7 @@ const CUSTOMER_COUNT_KEYS = [
   "attendanceCount",
 ];
 const BAR_TIME_CUSTOMER_COUNT_KEYS = ["barTimeCustomerCount"];
-const BAR_TIME_UNIT_PRICE_NOTE =
-  "※バータイム売上は分けていないため、バータイム単価は表示していません。";
-const VENUE_FEE_EXCLUSION_NOTE =
-  "※会場費除外単価は、総売上から会場費を除いた補助指標です。レンタル・その他売上は含まれます。";
+const FOOD_DRINK_UNIT_PRICE_NOTE = "※飲食単価はドリンク＋フード売上 ÷ 集客人数です。";
 function sumFoodDrinkSalesBase_(drinkSales, foodSales, foodDrinkSales) {
   if (drinkSales != null && foodSales != null) {
     const drink = Number(drinkSales);
@@ -3541,7 +3521,8 @@ function buildUnitPriceMetrics_({
   return {
     customerUnitPrice: unitPriceByCustomerCount_(totalSales, customerCount),
     normalCustomerUnitPrice: unitPriceByCustomerCount_(totalN - band, customerCount),
-    foodDrinkUnitPrice: unitPriceByCustomerCount_(foodIncludingBand, customerCount),
+    foodDrinkUnitPrice: unitPriceByCustomerCount_(foodBase, customerCount),
+    foodDrinkUnitPriceIncludingBand: unitPriceByCustomerCount_(foodIncludingBand, customerCount),
     normalFoodDrinkUnitPrice: unitPriceByCustomerCount_(foodBase, customerCount),
     customerUnitPriceExVenue: unitPriceByCustomerCount_(totalN - venue, customerCount),
     normalCustomerUnitPriceExVenue: unitPriceByCustomerCount_(totalN - venue - band, customerCount),
@@ -3765,6 +3746,18 @@ function getCurrentBusinessDateForSales() {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+/** 営業日7:00切替は futureRows の予定判定のみ。売上入力済み行は日付に関わらず実績に含める。 */
+function partitionMonthRowsForSales_(monthRows, currentBusinessDate) {
+  const actualRows = monthRows.filter((r) => r?.metrics?.totalSales != null);
+  const futureRows = monthRows.filter(
+    (r) => r?.metrics?.totalSales == null && (r.businessDate || "") >= currentBusinessDate
+  );
+  return { actualRows, futureRows };
+}
+function buildSalesFetchUrl_(targetMonth) {
+  const sep = SALES_API_URL.includes("?") ? "&" : "?";
+  return `${SALES_API_URL}${sep}targetMonth=${encodeURIComponent(targetMonth)}&t=${Date.now()}`;
 }
 
 function eventNamesForDate(events, businessDate) {
@@ -4871,37 +4864,37 @@ function BreakEvenMonthlySummaryBlock({ breakEvenAnalysis, narrow }) {
         boxSizing: "border-box",
       }}
     >
-      <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.82)", fontWeight: 600, marginBottom: ".35rem", letterSpacing: ".04em" }}>
+      <div style={{ fontSize: narrow ? "0.72rem" : "0.7rem", color: "rgba(201,168,76,0.85)", fontWeight: 600, marginBottom: ".35rem", letterSpacing: ".04em" }}>
         経営ライン
       </div>
       {be.hasActualSales ? (
         <>
           <div style={{ display: "flex", alignItems: "center", gap: ".4rem", flexWrap: "wrap", marginBottom: ".38rem" }}>
-            <span style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.62)" }}>判定</span>
+            <span style={{ fontSize: narrow ? "0.8rem" : "0.78rem", color: "rgba(240,232,208,0.65)" }}>判定</span>
             <BreakEvenLineBadge breakEvenAnalysis={be} />
             {be.label ? (
-              <span style={{ fontSize: ".76rem", color: tone?.tx || "rgba(240,232,208,0.88)", fontWeight: 700 }}>{be.label}</span>
+              <span style={{ fontSize: narrow ? "0.88rem" : "0.86rem", color: tone?.tx || "rgba(240,232,208,0.9)", fontWeight: 700 }}>{be.label}</span>
             ) : null}
           </div>
-          <div style={{ display: "grid", gap: ".22rem", fontSize: narrow ? ".8rem" : ".78rem", lineHeight: 1.5 }}>
+          <div style={{ display: "grid", gap: ".22rem", fontSize: narrow ? "0.84rem" : "0.82rem", lineHeight: 1.5 }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: ".5rem", minWidth: 0 }}>
-              <span style={{ color: "rgba(240,232,208,0.58)" }}>損益分岐目安</span>
-              <strong style={{ color: "rgba(240,232,208,0.9)", wordBreak: "break-word", textAlign: "right" }}>税抜 {formatExTaxYen_(be.breakEvenLineExTax)}</strong>
+              <span style={{ color: "rgba(240,232,208,0.6)" }}>損益分岐目安</span>
+              <strong style={{ color: "rgba(240,232,208,0.92)", fontSize: narrow ? "1.02rem" : "1rem", wordBreak: "break-word", textAlign: "right" }}>税抜 {formatExTaxYen_(be.breakEvenLineExTax)}</strong>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", gap: ".5rem", minWidth: 0 }}>
-              <span style={{ color: "rgba(240,232,208,0.58)" }}>現在</span>
-              <strong style={{ color: "rgba(240,232,208,0.95)", fontSize: narrow ? ".92rem" : ".88rem", wordBreak: "break-word", textAlign: "right" }}>
+              <span style={{ color: "rgba(240,232,208,0.6)" }}>現在</span>
+              <strong style={{ color: "rgba(240,232,208,0.96)", fontSize: narrow ? "1.1rem" : "1.05rem", wordBreak: "break-word", textAlign: "right" }}>
                 税抜 {formatExTaxYen_(be.exTaxSales)}
               </strong>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", gap: ".5rem", minWidth: 0 }}>
-              <span style={{ color: "rgba(240,232,208,0.58)" }}>損益分岐まで{gapLabel === "超過" ? "の超過" : ""}</span>
-              <strong style={{ color: gapLabel === "超過" ? "#9ec9a8" : "#dca06a", wordBreak: "break-word", textAlign: "right" }}>{gapValue}</strong>
+              <span style={{ color: "rgba(240,232,208,0.6)" }}>損益分岐まで{gapLabel === "超過" ? "の超過" : ""}</span>
+              <strong style={{ color: gapLabel === "超過" ? "#9ec9a8" : "#dca06a", fontSize: narrow ? "1.02rem" : "1rem", wordBreak: "break-word", textAlign: "right" }}>{gapValue}</strong>
             </div>
           </div>
         </>
       ) : (
-        <div style={{ fontSize: narrow ? ".78rem" : ".76rem", color: "rgba(240,232,208,0.58)", lineHeight: 1.55 }}>
+        <div style={{ fontSize: narrow ? "0.82rem" : "0.8rem", color: "rgba(240,232,208,0.6)", lineHeight: 1.55 }}>
           実績売上がないため、損益分岐判定はまだ出せません。
         </div>
       )}
@@ -4909,7 +4902,9 @@ function BreakEvenMonthlySummaryBlock({ breakEvenAnalysis, narrow }) {
     </div>
   );
 }
-function SummaryMetricLine({ label, value, valueStyle, strong }) {
+function SummaryMetricLine({ label, value, valueStyle, strong, narrow, emphasize }) {
+  const labelSize = narrow ? "0.78rem" : "0.82rem";
+  const valueSize = strong || emphasize ? (narrow ? "1.12rem" : "1.18rem") : narrow ? "1.02rem" : "1.1rem";
   return (
     <div
       style={{
@@ -4919,17 +4914,20 @@ function SummaryMetricLine({ label, value, valueStyle, strong }) {
         alignItems: "baseline",
         minWidth: 0,
         maxWidth: "100%",
-        fontSize: ".8rem",
+        fontSize: labelSize,
         lineHeight: 1.5,
       }}
     >
-      <span style={{ color: "rgba(240,232,208,0.6)", flexShrink: 0 }}>{label}</span>
+      <span style={{ color: "rgba(240,232,208,0.65)", flexShrink: 0 }}>{label}</span>
       <strong
         style={{
-          color: "rgba(240,232,208,0.92)",
+          color: "rgba(240,232,208,0.94)",
+          fontSize: valueSize,
+          fontWeight: strong || emphasize ? 700 : 600,
           wordBreak: "break-word",
           textAlign: "right",
-          ...(strong ? { fontSize: ".9rem" } : {}),
+          fontFamily: SALES_NUMBER_FONT_FAMILY,
+          ...SALES_NUMBER_TABULAR,
           ...valueStyle,
         }}
       >
@@ -4938,7 +4936,7 @@ function SummaryMetricLine({ label, value, valueStyle, strong }) {
     </div>
   );
 }
-function SummarySubCard({ title, children, accent }) {
+function SummarySubCard({ title, children, accent, narrow }) {
   return (
     <div
       style={{
@@ -4951,7 +4949,7 @@ function SummarySubCard({ title, children, accent }) {
         boxSizing: "border-box",
       }}
     >
-      <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.82)", fontWeight: 600, marginBottom: ".32rem", letterSpacing: ".04em" }}>{title}</div>
+      <div style={{ fontSize: narrow ? "0.72rem" : "0.7rem", color: "rgba(201,168,76,0.85)", fontWeight: 600, marginBottom: ".32rem", letterSpacing: ".04em" }}>{title}</div>
       <div style={{ display: "grid", gap: ".2rem" }}>{children}</div>
     </div>
   );
@@ -4970,7 +4968,7 @@ function MonthlySummaryPanel({ monthlyAnalysis, narrow, dy, pct, pct1, signedDy 
   return (
     <div style={{ display: "grid", gap: ".55rem", minWidth: 0, maxWidth: "100%" }}>
       <div style={{ display: "grid", gridTemplateColumns: topGrid, gap: ".55rem", minWidth: 0, maxWidth: "100%" }}>
-        <SummarySubCard title="進捗・売上" accent>
+        <SummarySubCard title="進捗・売上" accent narrow={narrow}>
           <div style={{ display: "flex", alignItems: "baseline", gap: ".45rem", flexWrap: "wrap", marginBottom: ".15rem" }}>
             <div style={{ fontSize: narrow ? "1.35rem" : "1.28rem", fontWeight: 700, color: "#f0e8d0", lineHeight: 1.2 }}>{pct(a.monthlyProgressRate)}</div>
             <span
@@ -4987,11 +4985,11 @@ function MonthlySummaryPanel({ monthlyAnalysis, narrow, dy, pct, pct1, signedDy 
               {tone.label}
             </span>
           </div>
-          <SummaryMetricLine label="月間進捗率" value={pct(a.monthlyProgressRate)} />
-          <SummaryMetricLine label={targetGapLabel} value={targetGapValue} strong valueStyle={{ color: "#f3ead2" }} />
-          <SummaryMetricLine label="月間売上 / 目標" value={`${dy(a.totalSalesSum)} / ${dy(a.fullMonthTargetSalesSum)}`} />
-          <SummaryMetricLine label="実績日達成率" value={pct(a.actualAchievementRate)} />
-          <div style={{ fontSize: ".66rem", color: "rgba(240,232,208,0.45)", lineHeight: 1.45, marginTop: ".08rem" }}>
+          <SummaryMetricLine narrow={narrow} label="月間進捗率" value={pct(a.monthlyProgressRate)} />
+          <SummaryMetricLine narrow={narrow} label={targetGapLabel} value={targetGapValue} strong valueStyle={{ color: "#f3ead2" }} />
+          <SummaryMetricLine narrow={narrow} label="月間売上 / 目標" value={`${dy(a.totalSalesSum)} / ${dy(a.fullMonthTargetSalesSum)}`} emphasize />
+          <SummaryMetricLine narrow={narrow} label="実績日達成率" value={pct(a.actualAchievementRate)} />
+          <div style={{ fontSize: narrow ? "0.68rem" : "0.66rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".08rem" }}>
             実績日ベース目標 {dy(a.actualTargetSalesSum)}
           </div>
         </SummarySubCard>
@@ -4999,27 +4997,26 @@ function MonthlySummaryPanel({ monthlyAnalysis, narrow, dy, pct, pct1, signedDy 
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: subGrid, gap: ".55rem", minWidth: 0, maxWidth: "100%" }}>
-        <SummarySubCard title="集客・単価">
-          <SummaryMetricLine label="月間総集客" value={formatCustomerCountLabel_(a.customerCountSum)} />
+        <SummarySubCard title="集客・単価" narrow={narrow}>
+          <SummaryMetricLine narrow={narrow} label="月間総集客" value={formatCustomerCountLabel_(a.customerCountSum)} emphasize />
           <SummaryMetricLine
+            narrow={narrow}
             label="1日平均集客"
             value={a.avgDailyCustomerCount != null ? `${num(a.avgDailyCustomerCount)}名` : "—"}
+            emphasize
           />
-          <SummaryMetricLine label="総客単価" value={formatUnitYen_(a.customerUnitPrice)} />
-          <SummaryMetricLine label="飲食単価" value={formatUnitYen_(a.foodDrinkUnitPrice)} />
-          <SummaryMetricLine label="通常飲食単価" value={formatUnitYen_(a.normalFoodDrinkUnitPrice)} />
-          <SummaryMetricLine label="会場費除外単価" value={formatUnitYen_(a.customerUnitPriceExVenue)} />
-          <div style={{ fontSize: ".64rem", color: "rgba(240,232,208,0.45)", lineHeight: 1.45, marginTop: ".1rem" }}>{BAR_TIME_UNIT_PRICE_NOTE}</div>
-          {a.hasVenueFeeInMonth ? (
-            <div style={{ fontSize: ".64rem", color: "rgba(240,232,208,0.45)", lineHeight: 1.45 }}>{VENUE_FEE_EXCLUSION_NOTE}</div>
-          ) : null}
+          <SummaryMetricLine narrow={narrow} label="客単価" value={formatUnitYen_(a.customerUnitPrice)} emphasize />
+          <SummaryMetricLine narrow={narrow} label="飲食単価" value={formatUnitYen_(a.foodDrinkUnitPrice)} emphasize />
+          <div style={{ fontSize: narrow ? "0.68rem" : "0.66rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".1rem" }}>
+            {FOOD_DRINK_UNIT_PRICE_NOTE}
+          </div>
         </SummarySubCard>
-        <SummarySubCard title="利益">
-          <SummaryMetricLine label="営業粗利" value={a.totalSalesSum > 0 ? dy(a.operatingGrossProfitSum) : "—"} strong />
-          <SummaryMetricLine label="営業粗利率" value={a.operatingGrossProfitRate != null ? pct1(a.operatingGrossProfitRate) : "—"} />
-          <SummaryMetricLine label="営業利益" value={dy(a.operatingProfitSum)} />
-          <SummaryMetricLine label="営業利益率" value={pct(a.operatingProfitRate)} />
-          <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "repeat(3, minmax(0, 1fr))", gap: ".18rem .45rem", marginTop: ".18rem", fontSize: ".68rem", color: "rgba(240,232,208,0.52)" }}>
+        <SummarySubCard title="利益" narrow={narrow}>
+          <SummaryMetricLine narrow={narrow} label="営業粗利" value={a.totalSalesSum > 0 ? dy(a.operatingGrossProfitSum) : "—"} strong />
+          <SummaryMetricLine narrow={narrow} label="営業粗利率" value={a.operatingGrossProfitRate != null ? pct1(a.operatingGrossProfitRate) : "—"} emphasize />
+          <SummaryMetricLine narrow={narrow} label="営業利益" value={dy(a.operatingProfitSum)} emphasize />
+          <SummaryMetricLine narrow={narrow} label="営業利益率" value={pct(a.operatingProfitRate)} emphasize />
+          <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "repeat(3, minmax(0, 1fr))", gap: ".18rem .45rem", marginTop: ".18rem", fontSize: narrow ? "0.72rem" : "0.7rem", color: "rgba(240,232,208,0.55)" }}>
             <span>実績 {num(a.actualDayCount)}日</span>
             <span>予定 {num(a.futureDayCount)}件</span>
             <span>日平均 {dy(a.avgDailySales)}</span>
@@ -5037,24 +5034,25 @@ function MonthlySummaryPanel({ monthlyAnalysis, narrow, dy, pct, pct1, signedDy 
           maxWidth: "100%",
         }}
       >
-        <div style={{ fontSize: ".66rem", color: "rgba(201,168,76,0.62)", marginBottom: ".22rem", fontWeight: 600 }}>前年同月比較（2025年固定）</div>
-        <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "repeat(3, minmax(0, 1fr))", gap: ".2rem .55rem", fontSize: ".76rem", color: "rgba(240,232,208,0.68)" }}>
+        <div style={{ fontSize: narrow ? "0.72rem" : "0.7rem", color: "rgba(201,168,76,0.7)", marginBottom: ".22rem", fontWeight: 600 }}>前年同月比較（2025年固定）</div>
+        <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "repeat(3, minmax(0, 1fr))", gap: ".2rem .55rem", fontSize: narrow ? "0.84rem" : "0.82rem", color: "rgba(240,232,208,0.72)" }}>
           <div>
-            前年同月売上 <strong style={{ color: "rgba(240,232,208,0.82)" }}>{a.priorYearMonth.prevMonthSales != null ? dy(a.priorYearMonth.prevMonthSales) : "—"}</strong>
+            前年同月売上 <strong style={{ color: "rgba(240,232,208,0.9)", fontSize: narrow ? "1.02rem" : "1rem" }}>{a.priorYearMonth.prevMonthSales != null ? dy(a.priorYearMonth.prevMonthSales) : "—"}</strong>
           </div>
           <div>
             前年同月差額{" "}
             <strong
               style={{
+                fontSize: narrow ? "1.02rem" : "1rem",
                 color:
-                  a.priorYearMonth.prevMonthDiff != null ? (a.priorYearMonth.prevMonthDiff >= 0 ? "#9ec9a8" : "#dca06a") : "rgba(240,232,208,0.82)",
+                  a.priorYearMonth.prevMonthDiff != null ? (a.priorYearMonth.prevMonthDiff >= 0 ? "#9ec9a8" : "#dca06a") : "rgba(240,232,208,0.9)",
               }}
             >
               {a.priorYearMonth.prevMonthDiff != null ? signedDy(a.priorYearMonth.prevMonthDiff) : "—"}
             </strong>
           </div>
           <div>
-            前年同月比 <strong style={{ color: "rgba(240,232,208,0.82)" }}>{a.priorYearMonth.prevMonthRate != null ? pct1(a.priorYearMonth.prevMonthRate) : "—"}</strong>
+            前年同月比 <strong style={{ color: "rgba(240,232,208,0.9)", fontSize: narrow ? "1.02rem" : "1rem" }}>{a.priorYearMonth.prevMonthRate != null ? pct1(a.priorYearMonth.prevMonthRate) : "—"}</strong>
           </div>
         </div>
       </div>
@@ -5327,8 +5325,7 @@ export default function SalesModule({ events = [], navigateBack }) {
     setLoading(true);
     setError("");
     try {
-      const sep = SALES_API_URL.includes("?") ? "&" : "?";
-      const url = `${SALES_API_URL}${sep}targetMonth=${encodeURIComponent(month)}`;
+      const url = buildSalesFetchUrl_(month);
       const res = await fetch(url, { cache: "no-store" });
       const text = await res.text();
       let json;
@@ -5437,7 +5434,7 @@ export default function SalesModule({ events = [], navigateBack }) {
 
   const staffProgress = useMemo(() => {
     const monthRows = rows.filter((r) => (r.businessDate || "").startsWith(targetMonth));
-    const actualRows = monthRows.filter((r) => (r.businessDate || "") < currentBusinessDate && r?.metrics?.totalSales != null);
+    const { actualRows } = partitionMonthRowsForSales_(monthRows, currentBusinessDate);
     const salesSum = actualRows.reduce((s, r) => s + Number(r.metrics.totalSales || 0), 0);
     const targetSum = monthRows.reduce((s, r) => s + Number(r?.metrics?.targetSales || 0), 0);
     const achievementRate = targetSum > 0 ? (salesSum / targetSum) * 100 : null;
@@ -5458,10 +5455,7 @@ export default function SalesModule({ events = [], navigateBack }) {
   const monthTone = achievementTone(staffProgress.achievementRate, staffProgress.targetSum > 0);
   const monthlyAnalysis = useMemo(() => {
     const monthRows = rows.filter((r) => (r.businessDate || "").startsWith(targetMonth));
-    const actualRows = monthRows.filter(
-      (r) => (r.businessDate || "") < currentBusinessDate && r?.metrics?.totalSales != null
-    );
-    const futureRows = monthRows.filter((r) => (r.businessDate || "") >= currentBusinessDate);
+    const { actualRows, futureRows } = partitionMonthRowsForSales_(monthRows, currentBusinessDate);
 
     const totalSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.totalSales || 0), 0);
     const actualTargetSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.targetSales || 0), 0);
@@ -5505,7 +5499,7 @@ export default function SalesModule({ events = [], navigateBack }) {
     });
     const normalCustomerUnitPrice = unitPrices.normalCustomerUnitPrice;
     const foodDrinkUnitPrice = unitPrices.foodDrinkUnitPrice;
-    const foodDrinkUnitPriceIncludingBand = unitPrices.foodDrinkUnitPrice;
+    const foodDrinkUnitPriceIncludingBand = unitPrices.foodDrinkUnitPriceIncludingBand;
     const normalFoodDrinkUnitPrice = unitPrices.normalFoodDrinkUnitPrice;
     const customerUnitPriceExVenue = unitPrices.customerUnitPriceExVenue;
     const normalCustomerUnitPriceExVenue = unitPrices.normalCustomerUnitPriceExVenue;
@@ -5681,7 +5675,7 @@ export default function SalesModule({ events = [], navigateBack }) {
           customerUnitPrice: unitPrices.customerUnitPrice,
           normalCustomerUnitPrice: unitPrices.normalCustomerUnitPrice,
           foodDrinkUnitPrice: unitPrices.foodDrinkUnitPrice,
-          foodDrinkUnitPriceIncludingBand: unitPrices.foodDrinkUnitPrice,
+          foodDrinkUnitPriceIncludingBand: unitPrices.foodDrinkUnitPriceIncludingBand,
           normalFoodDrinkUnitPrice: unitPrices.normalFoodDrinkUnitPrice,
           customerUnitPriceExVenue: unitPrices.customerUnitPriceExVenue,
           normalCustomerUnitPriceExVenue: unitPrices.normalCustomerUnitPriceExVenue,
@@ -5895,13 +5889,12 @@ export default function SalesModule({ events = [], navigateBack }) {
     for (const item of yearlyMonthData || []) {
       if (!item?.ok || !item?.month || item.month === targetMonth) continue;
       (item.records || []).forEach((record, idx) => {
-        if ((record.businessDate || "") >= currentBusinessDate) return;
         if (record?.metrics?.totalSales == null) return;
         pushComparable(record, idx);
       });
     }
     return pool;
-  }, [monthlyAnalysis.actualRows, yearlyMonthData, events, targetMonth, currentBusinessDate]);
+  }, [monthlyAnalysis.actualRows, yearlyMonthData, events, targetMonth]);
   const selectedPastSimilarComparison = useMemo(() => {
     if (!selectedTrendRow) return null;
     const selectedRecord = (monthlyAnalysis.actualRows || []).find(
@@ -6641,12 +6634,13 @@ export default function SalesModule({ events = [], navigateBack }) {
                       <MobileFieldRow narrow={vp.narrow} label="バータイム比率" value={pct(selectedTrendRow.barTimeCustomerRate)} />
                       <MobileFieldRow narrow={vp.narrow} label="目標" value={dy(selectedTrendRow.targetSales)} />
                       <MobileFieldRow narrow={vp.narrow} label="達成率" value={pct(selectedTrendRow.achievementRate)} valueStyle={{ color: "#f3ead2" }} />
-                      <MobileFieldRow narrow={vp.narrow} label="客単価（総）" value={formatUnitYen_(selectedTrendRow.customerUnitPrice)} />
+                      <MobileFieldRow narrow={vp.narrow} label="客単価" value={formatUnitYen_(selectedTrendRow.customerUnitPrice)} />
                       <MobileFieldRow narrow={vp.narrow} label="飲食単価" value={formatUnitYen_(selectedTrendRow.foodDrinkUnitPrice)} />
-                      <MobileFieldRow narrow={vp.narrow} label="通常飲食単価" value={formatUnitYen_(selectedTrendRow.normalFoodDrinkUnitPrice)} />
-                      <MobileFieldRow narrow={vp.narrow} label="会場費除外単価" value={formatUnitYen_(selectedTrendRow.customerUnitPriceExVenue)} />
+                      {selectedTrendRow.venueFee != null && Number(selectedTrendRow.venueFee) > 0 ? (
+                        <MobileFieldRow narrow={vp.narrow} label="会場費" value={dy(selectedTrendRow.venueFee)} />
+                      ) : null}
                     </div>
-                    <div style={{ ...analysisNote({ marginTop: ".28rem" }, vp.narrow) }}>{BAR_TIME_UNIT_PRICE_NOTE}</div>
+                    <div style={{ ...analysisNote({ marginTop: ".28rem" }, vp.narrow) }}>{FOOD_DRINK_UNIT_PRICE_NOTE}</div>
                   </div>
 
                   <DayAnalysisBlock
@@ -6678,9 +6672,6 @@ export default function SalesModule({ events = [], navigateBack }) {
                       <DayReportFoodMetricRow narrow={vp.narrow} label="ドリンク売上" value={dy(selectedTrendRow.drinkSales)} />
                       <DayReportFoodMetricRow narrow={vp.narrow} label="フード売上" value={dy(selectedTrendRow.foodSales)} />
                       <DayReportFoodMetricRow narrow={vp.narrow} label="会場費" value={dy(selectedTrendRow.venueFee)} />
-                      <DayReportFoodMetricRow narrow={vp.narrow} label="飲食単価" value={formatUnitYen_(selectedTrendRow.foodDrinkUnitPrice)} />
-                      <DayReportFoodMetricRow narrow={vp.narrow} label="通常飲食単価" value={formatUnitYen_(selectedTrendRow.normalFoodDrinkUnitPrice)} />
-                      <DayReportFoodMetricRow narrow={vp.narrow} label="会場費除外単価" value={formatUnitYen_(selectedTrendRow.customerUnitPriceExVenue)} />
                       {selectedTrendRow.bandDrinkSales != null ? (
                         <DayReportFoodMetricRow narrow={vp.narrow} label="バンドドリンク" value={dy(selectedTrendRow.bandDrinkSales)} />
                       ) : null}
