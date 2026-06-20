@@ -842,6 +842,23 @@ function buildBreakEvenMonthlyComment_(ctx) {
 
   const safeMan = Math.round(BREAK_EVEN_SAFE_LINE_EX_TAX / 10000);
 
+  if (phase.currentMonth) {
+    if (!be.isAboveBreakEven) return null;
+    if (be.tierKey === "good") {
+      return "現時点で税抜450万円を超えています。月途中のため暫定評価ですが、営業ベース利益率・人件費率・仕入れ率が崩れていないかを確認してください。";
+    }
+    if (be.tierKey === "strong") {
+      return "現時点で税抜500万円前後のペースです。月途中のため暫定評価ですが、営業ベース利益率・人件費率・仕入れ率が崩れていないかを確認してください。";
+    }
+    if (tier !== "achieved" && be.isAboveSafeLine) {
+      return `月間目標には届いていませんが、現時点で税抜${safeMan}万円の最低ラインは超えています。残り営業日は利益の上積みを狙う局面です。`;
+    }
+    if (be.tierKey === "stable") {
+      return "現時点で税抜400万円の安定ラインを超えています。残り営業日も、営業ベース利益率・仕入れ率が崩れていないか確認してください。";
+    }
+    return null;
+  }
+
   if (be.tierKey === "good") {
     return "税抜450万円を超えており、かなり良い月です。ここからは売上だけでなく、営業ベース利益率・人件費率・仕入れ率が崩れていないかを確認してください。";
   }
@@ -873,6 +890,17 @@ function buildFixedCostAdjustedMonthlyComment_(ctx) {
   const profit = a.fixedCostAdjustedProfit;
   const be = a.breakEvenAnalysis;
   if (profit == null || !(Number(a.totalSalesSum || 0) > 0)) return null;
+
+  if (ctx.phase?.currentMonth) {
+    if (profit <= 0) return null;
+    if (profit > FIXED_COST_STRONG_MONTH_EX_TAX) {
+      return "現時点で固定費控除後利益が100万円を超えるペースです。月途中のため暫定評価ですが、強かったイベントと飲食単価を確認してください。";
+    }
+    if (profit > 0 && be?.isAboveBreakEven) {
+      return "現時点で税抜売上は損益分岐を超えており、固定費控除後利益もプラスです。残り営業日も、営業ベース利益率・人件費率・仕入れ率が崩れていないかを確認してください。";
+    }
+    return null;
+  }
 
   if (profit > FIXED_COST_STRONG_MONTH_EX_TAX) {
     return "固定費控除後利益が100万円を超えており、かなり良い月です。売上が強かったイベントと飲食単価を確認し、来月以降も再現できる形にしてください。";
@@ -1116,10 +1144,17 @@ function buildYearlyCheckpoints_(ctx) {
     yearlyOperatingGrossProfitRate,
     yearlyFixedCostAdjustedProfitRate,
     momComparison,
-    belowBreakEvenMonthCount,
-    negativeOperatingProfitMonthCount,
+    monthRows,
+    currentBusinessDate,
     taxMode,
   } = ctx;
+
+  const evalMonths = (monthRows || []).filter((m) => m.status === "集計済み");
+  const { endedMonths, currentMonths } = partitionMonthsByPhase_(evalMonths, currentBusinessDate);
+  const belowBreakEvenEnded = endedMonths.filter(isMonthBelowBreakEven_).length;
+  const belowBreakEvenCurrent = currentMonths.filter(isMonthBelowBreakEven_);
+  const negativeFixedCostEnded = endedMonths.filter(isMonthNegativeFixedCost_).length;
+  const negativeFixedCostCurrent = currentMonths.filter(isMonthNegativeFixedCost_);
 
   if (momComparison && momComparison.salesDiff < 0) {
     items.push({
@@ -1154,20 +1189,44 @@ function buildYearlyCheckpoints_(ctx) {
       detail: landing?.forecastGap != null ? `差額 ${formatSignedDisplayYen(landing.forecastGap, taxMode)}` : null,
     });
   }
-  if (belowBreakEvenMonthCount > 0) {
+  if (belowBreakEvenEnded > 0) {
     items.push({
       key: "belowBreakEven",
-      title: "損益分岐未達の月があります",
+      title: "損益分岐未達の終了済み月があります",
       message: "該当月は、集客不足か単価不足かを月次分析で確認してください。",
-      detail: `${belowBreakEvenMonthCount}ヶ月`,
+      detail: `${belowBreakEvenEnded}ヶ月`,
     });
   }
-  if (negativeOperatingProfitMonthCount > 0) {
+  for (const m of belowBreakEvenCurrent) {
+    const gap = m.breakEvenAnalysis?.gapFromBreakEven;
+    const gapText = gap != null && gap < 0 ? formatExTaxYen_(Math.abs(gap)) : "—";
+    const actualRateText =
+      m.actualAchievementRate != null ? `、実績日達成率は${pct1(m.actualAchievementRate)}` : "";
+    items.push({
+      key: `belowBreakEvenCurrent_${m.targetMonth}`,
+      title: `進行中の${m.monthLabel}`,
+      message: `進行中の${m.monthLabel}は現時点で損益分岐まであと${gapText}（税抜）ですが${actualRateText}です。残り営業日の見込みで確認してください。`,
+      detail: m.futureDayCount > 0 ? `残り予定 ${num(m.futureDayCount)}件` : null,
+    });
+  }
+  if (negativeFixedCostEnded > 0) {
     items.push({
       key: "negativeOpProfit",
-      title: "固定費控除後利益がマイナスの月があります",
+      title: "固定費控除後利益がマイナスの終了済み月があります",
       message: "売上だけでなく、仕入れ・人件費・飲食比率も確認してください。",
-      detail: `${negativeOperatingProfitMonthCount}ヶ月`,
+      detail: `${negativeFixedCostEnded}ヶ月`,
+    });
+  }
+  for (const m of negativeFixedCostCurrent) {
+    const fc = calcFixedCostAdjustedProfitFromGrossSales_(m.totalSalesSum);
+    const profitText = fc.profit != null ? formatSignedExTaxYen_(Math.round(fc.profit)) : "—";
+    const actualRateText =
+      m.actualAchievementRate != null ? `、実績日達成率は${pct1(m.actualAchievementRate)}` : "";
+    items.push({
+      key: `negativeFixedCostCurrent_${m.targetMonth}`,
+      title: `進行中の${m.monthLabel}`,
+      message: `進行中の${m.monthLabel}は固定費控除後利益が現時点${profitText}（暫定）${actualRateText}です。残り営業日の見込みで確認してください。`,
+      detail: m.futureDayCount > 0 ? `残り予定 ${num(m.futureDayCount)}件` : null,
     });
   }
   const totalPurchaseRate = yearlyPurchaseCostRates?.totalPurchaseRate;
@@ -1237,7 +1296,7 @@ function buildYearlyCheckpoints_(ctx) {
   }
   return items.slice(0, 6);
 }
-function buildYearlyMonthReviewRows_(monthRows, monthlyYoYRows) {
+function buildYearlyMonthReviewRows_(monthRows, monthlyYoYRows, currentBusinessDate) {
   const yoyMap = Object.fromEntries((monthlyYoYRows || []).map((r) => [r.targetMonth, r]));
   return (monthRows || []).map((m) => {
     const yoy = yoyMap[m.targetMonth];
@@ -1246,6 +1305,7 @@ function buildYearlyMonthReviewRows_(monthRows, monthlyYoYRows) {
     const fixedCostAdjusted = calcFixedCostAdjustedProfitFromGrossSales_(m.totalSalesSum);
     return {
       ...m,
+      monthPhase: resolveMonthPhase_(m.targetMonth, currentBusinessDate),
       yoyRate: yoy?.yoyRate ?? null,
       yoyDiff: yoy?.diff ?? null,
       operatingGrossProfitSum,
@@ -1302,6 +1362,40 @@ function resolveMonthPhase_(targetMonth, currentBusinessDate) {
   if (selected < current) return { endedMonth: true, currentMonth: false, futureMonth: false };
   if (selected > current) return { endedMonth: false, currentMonth: false, futureMonth: true };
   return { endedMonth: false, currentMonth: true, futureMonth: false };
+}
+function partitionMonthsByPhase_(months, currentBusinessDate) {
+  const endedMonths = [];
+  const currentMonths = [];
+  const futureMonths = [];
+  for (const m of months || []) {
+    const phase = resolveMonthPhase_(m.targetMonth, currentBusinessDate);
+    if (phase.futureMonth) futureMonths.push(m);
+    else if (phase.currentMonth) currentMonths.push(m);
+    else if (phase.endedMonth) endedMonths.push(m);
+  }
+  return { endedMonths, currentMonths, futureMonths };
+}
+function isMonthBelowBreakEven_(m) {
+  return Boolean(m?.breakEvenAnalysis?.hasActualSales && !m.breakEvenAnalysis.isAboveBreakEven);
+}
+function isMonthNegativeFixedCost_(m) {
+  const fc = calcFixedCostAdjustedProfitFromGrossSales_(m.totalSalesSum);
+  return fc.profit != null && fc.profit < 0;
+}
+function buildCurrentMonthBreakEvenNote_(analysis) {
+  const be = analysis?.breakEvenAnalysis;
+  if (!be?.hasActualSales || be.isAboveBreakEven) return null;
+  const gap = be.gapFromBreakEven;
+  const gapAbs = gap != null && gap < 0 ? formatExTaxYen_(Math.abs(gap)) : null;
+  let text = "現時点では損益分岐に届いていませんが、月途中のため確定未達ではありません。";
+  if (gapAbs) text += ` 損益分岐まであと${gapAbs}（税抜）です。`;
+  text += "残り営業日の売上見込みを踏まえて確認してください。";
+  return text;
+}
+function buildCurrentMonthFixedCostNote_(analysis) {
+  const profit = analysis?.fixedCostAdjustedProfit;
+  if (profit == null || profit >= 0) return null;
+  return `固定費控除後利益は現時点で${formatSignedExTaxYen_(Math.round(profit))}ですが、月途中の暫定値です。残り営業日の予約数と目標を見て、損益分岐超えまでの必要売上を確認してください。`;
 }
 function resolveProgressTier_(rate) {
   if (rate == null || !Number.isFinite(Number(rate))) return "unknown";
@@ -1416,21 +1510,31 @@ function buildMonthlyConclusionComment_(ctx) {
     return `月間目標は達成済みで着地しました。${yoyTail}${driverHint} 再現のため「売上TOP5」と「飲食売上TOP10」で成功パターンを確認してください。`;
   }
 
+  if (phase.currentMonth) {
+    const actualRate = a.actualAchievementRate;
+    const futureDayCount = Number(a.futureDayCount || 0);
+    const futureNote = futureDayCount > 0 ? `残り予定${futureDayCount}件で` : "残り営業日で";
+    const progressText = rate != null ? `月間進捗率は${pct1(rate)}` : "この月は進行中";
+    const actualText = actualRate != null ? `実績日達成率は${pct1(actualRate)}` : null;
+
+    if (actualRate != null && actualRate >= 100) {
+      return `${progressText}ですが、${actualText}で、営業済みの日は目標を上回っています。${yoyTail}月途中のため確定未達ではありません。${futureNote}月間目標と損益分岐までの差額を確認してください。`;
+    }
+    if (actualRate != null && actualRate < 100) {
+      return `${progressText}で、${actualText}と、営業済みの日も目標ペースを下回っています。${yoyTail}${futureNote}挽回するには、集客不足日か飲食単価不足日のどちらを埋めるかを絞ってください。`;
+    }
+    return `${progressText}です。${yoyTail}月途中のため、月間進捗率のみ参考にしてください。${futureNote}月間目標までの見込みを確認してください。`;
+  }
+
   if (tier === "almost") {
     if (phase.endedMonth) {
       return `売上は目標に対して ${formatDisplayYen(remaining, taxMode)} 不足し、月間進捗率は ${pct(rate)} でした。${yoyTail} 大きく崩れてはいませんが、あと一歩届かなかった要因を未達日の分類と達成日の差から確認してください。`;
-    }
-    if (phase.currentMonth) {
-      return `月間進捗率 ${pct(rate)} で、目標達成まで ${formatDisplayYen(remaining, taxMode)} です。${yoyTail} 未達日と達成日の集客・客単価の差を見ると、残り営業日の重点施策が整理できます。`;
     }
   }
 
   if (tier === "atRisk") {
     if (phase.endedMonth) {
       return `月間進捗率 ${pct(rate)} で、目標未達で着地しました。${yoyTail} 月全体の課題は未達日の傾向と達成日との差から特定できます。`;
-    }
-    if (phase.currentMonth) {
-      return `月間進捗率 ${pct(rate)} で、未達リスクがあります。${yoyTail} 未達日の傾向と達成日との差を先に確認してください。`;
     }
   }
 
@@ -1663,7 +1767,10 @@ function buildMonthlyActionComment_(ctx, used) {
       const tail = phase.endedMonth
         ? "次月は終演後の一杯、出演者との交流、軽いフード提案をイベント設計に組み込んでください。"
         : "集客だけでなく、終演後に残る理由を作ることで追加売上を積める可能性があります。";
-      return `売上${tier === "atRisk" ? "未達" : "未達に近い"}状態で、バータイム比率も低めです。${tail} 詳細は「選択日の営業レポート」でバータイム人数が多い日を探してください。`;
+      const statusText = phase.currentMonth
+        ? "売上ペースが低め"
+        : `売上${tier === "atRisk" ? "未達" : "未達に近い"}`;
+      return `${statusText}状態で、バータイム比率も低めです。${tail} 詳細は「選択日の営業レポート」でバータイム人数が多い日を探してください。`;
     }
   }
 
@@ -1746,8 +1853,12 @@ function buildMonthlyImprovementComments_(analysis, taxMode, targetMonth, curren
   const causeOrSuccess = buildCauseOrSuccessComment_(ctx, used);
   const customerAction = buildCustomerAcquisitionActionComment_(ctx, used);
   const action = customerAction || buildMonthlyActionComment_(ctx, used);
-  const breakEvenComment = buildBreakEvenMonthlyComment_(ctx);
-  const fixedCostComment = buildFixedCostAdjustedMonthlyComment_(ctx);
+  const breakEvenComment = ctx.phase.currentMonth
+    ? buildCurrentMonthBreakEvenNote_(analysis) || buildBreakEvenMonthlyComment_(ctx)
+    : buildBreakEvenMonthlyComment_(ctx);
+  const fixedCostComment = ctx.phase.currentMonth
+    ? buildCurrentMonthFixedCostNote_(analysis) || buildFixedCostAdjustedMonthlyComment_(ctx)
+    : buildFixedCostAdjustedMonthlyComment_(ctx);
   const venueUnitComment = buildVenueUnitPriceMonthlyComment_(ctx);
 
   return [conclusion, breakEvenComment, fixedCostComment, venueUnitComment, comparison, causeOrSuccess, action].filter(Boolean).slice(0, 4);
@@ -3391,6 +3502,8 @@ function aggregateMonthFromRecords_(records, targetMonth, currentBusinessDate, m
   const { actualRows, futureRows } = partitionMonthRowsForSales_(monthRows, currentBusinessDate);
   const totalSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.totalSales || 0), 0);
   const targetSalesSum = monthRows.reduce((s, r) => s + Number(r?.metrics?.targetSales || 0), 0);
+  const actualTargetSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.targetSales || 0), 0);
+  const actualAchievementRate = calcRate(totalSalesSum, actualTargetSalesSum);
   const foodDrinkSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.foodDrinkSales || 0), 0);
   const bandFoodDrinkSalesSum = actualRows.reduce((s, r) => s + bandFoodDrinkSalesFromMetrics_(r?.metrics), 0);
   const foodDrinkSalesIncludingBandSum = foodDrinkSalesSum + bandFoodDrinkSalesSum;
@@ -3439,6 +3552,7 @@ function aggregateMonthFromRecords_(records, targetMonth, currentBusinessDate, m
     totalSalesSum,
     targetSalesSum,
     progressRate: calcRate(totalSalesSum, targetSalesSum),
+    actualAchievementRate,
     foodDrinkSalesSum,
     foodDrinkSalesIncludingBandSum,
     bandFoodDrinkSalesSum,
@@ -5129,7 +5243,12 @@ function YearlySummaryFiveBlocks({ yearlyAnalysis, narrow, dy, pct, pct1, signed
             <YearlySummaryMetricLine narrow={narrow} label="かなり良い月数" value={`${num(be.goodLineCount)}ヶ月`} />
             <YearlySummaryMetricLine narrow={narrow} label="強い月数" value={`${num(be.strongLineCount)}ヶ月`} />
           </div>
-          <div style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".08rem" }}>{BREAK_EVEN_LINE_NOTE}</div>
+          <div style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".08rem" }}>
+            {BREAK_EVEN_LINE_NOTE}
+            {a.hasCurrentAggregatedMonth ? (
+              <span style={{ display: "block", marginTop: ".08rem" }}>※月数は終了済み月ベースです。進行中月は暫定評価のため含みません。</span>
+            ) : null}
+          </div>
         </YearlySummaryBlock>
       ) : null}
       <div style={{ display: "grid", gridTemplateColumns: subGrid, gap: ".55rem" }}>
@@ -5256,7 +5375,7 @@ function YearlyMonthReviewCard({ row, narrow, dy, pct, pct1, signedDy, formatUni
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: ".45rem", flexWrap: "wrap", marginBottom: ".42rem" }}>
         <div style={{ ...MOBILE_CARD_MONTH_TITLE_STYLE, fontSize: narrow ? "1.02rem" : ".98rem" }}>{row.monthLabel}</div>
         <div style={{ display: "flex", alignItems: "center", gap: ".28rem", flexWrap: "wrap" }}>
-          <BreakEvenLineBadge breakEvenAnalysis={row.breakEvenAnalysis} compact />
+          <BreakEvenLineBadge breakEvenAnalysis={row.breakEvenAnalysis} monthPhase={row.monthPhase} compact />
           <YearlyMonthStatusBadge m={row} />
         </div>
       </div>
@@ -5340,7 +5459,7 @@ function YearlyMonthReviewTable({ rows, narrow, dy, pct, pct1, formatUnitYen_, o
               <YearlyTableNumberCell m={row} value={row.totalSalesSum} width={100} taxMode={taxMode} />
               <YearlyTableNumberCell m={row} value={row.progressRate} kind="pct" width={80} />
               <td style={yearlyNumTdStyle_(84, !row.breakEvenAnalysis?.hasActualSales)}>
-                <BreakEvenLineBadge breakEvenAnalysis={row.breakEvenAnalysis} compact large />
+                <BreakEvenLineBadge breakEvenAnalysis={row.breakEvenAnalysis} monthPhase={row.monthPhase} compact large />
               </td>
               <td style={{ ...yearlyNumTdStyle_(108, !row.breakEvenAnalysis?.hasActualSales), color: gapColor }}>
                 {formatReviewTableBreakEvenGap_(row.breakEvenAnalysis)}
@@ -5398,7 +5517,28 @@ function YearlyMonthStatusBadge({ m, large = false }) {
     </span>
   );
 }
-function BreakEvenLineBadge({ breakEvenAnalysis, compact = false, large = false }) {
+function BreakEvenLineBadge({ breakEvenAnalysis, compact = false, large = false, monthPhase = null }) {
+  if (monthPhase?.currentMonth) {
+    const fontSize = large ? ".74rem" : compact ? ".6rem" : ".62rem";
+    return (
+      <span
+        style={{
+          display: "inline-block",
+          fontSize,
+          fontWeight: 600,
+          lineHeight: 1.25,
+          padding: compact ? ".05rem .28rem" : ".06rem .34rem",
+          borderRadius: 999,
+          border: "1px solid rgba(126,180,200,0.38)",
+          background: "rgba(126,180,200,0.16)",
+          color: "#a8c4d4",
+          whiteSpace: "nowrap",
+        }}
+      >
+        進行中
+      </span>
+    );
+  }
   const be = breakEvenAnalysis;
   if (!be?.hasActualSales || !be.badge) return null;
   const tone = breakEvenLineBadgeTone_(be.tierKey);
@@ -6712,11 +6852,13 @@ export default function SalesModule({ events = [], navigateBack }) {
     const momComparison = buildMomComparison_(monthRows);
     const yearlyCustomerUnitPrice = unitPriceByCustomerCount_(yearlyTotalSales, yearlyCustomerCount);
     const yearlyFoodDrinkUnitPrice = unitPriceByCustomerCount_(yearlyDrink + yearlyFood, yearlyCustomerCount);
-    const breakEvenMonthCounts = countBreakEvenMonths_(aggregatedMonths);
+    const { endedMonths, currentMonths } = partitionMonthsByPhase_(aggregatedMonths, currentBusinessDate);
+    const breakEvenMonthCounts = countBreakEvenMonths_(endedMonths);
     const belowBreakEvenMonthCount = Math.max(
       0,
       breakEvenMonthCounts.actualMonthCount - breakEvenMonthCounts.aboveBreakEvenCount
     );
+    const belowBreakEvenCurrentMonths = currentMonths.filter(isMonthBelowBreakEven_);
     const yearlyOperatingBaseProfit = yearlyOperatingProfit;
     const yearlyOperatingBaseProfitRate = calcRate(yearlyOperatingBaseProfit, yearlyTotalSales);
     let yearlyFixedCostAdjustedProfit = 0;
@@ -6728,21 +6870,19 @@ export default function SalesModule({ events = [], navigateBack }) {
     }
     const yearlyFixedCostAdjustedProfitRate =
       yearlyExTaxSalesSum > 0 ? (yearlyFixedCostAdjustedProfit / yearlyExTaxSalesSum) * 100 : null;
-    const positiveFixedCostAdjustedMonthCount = aggregatedMonths.filter((m) => {
+    const positiveFixedCostAdjustedMonthCount = endedMonths.filter((m) => {
       const fc = calcFixedCostAdjustedProfitFromGrossSales_(m.totalSalesSum);
       return fc.profit != null && fc.profit > 0;
     }).length;
-    const strongFixedCostAdjustedMonthCount = aggregatedMonths.filter((m) => {
+    const strongFixedCostAdjustedMonthCount = endedMonths.filter((m) => {
       const fc = calcFixedCostAdjustedProfitFromGrossSales_(m.totalSalesSum);
       return fc.profit != null && fc.profit > FIXED_COST_STRONG_MONTH_EX_TAX;
     }).length;
-    const negativeFixedCostAdjustedMonthCount = aggregatedMonths.filter((m) => {
-      const fc = calcFixedCostAdjustedProfitFromGrossSales_(m.totalSalesSum);
-      return fc.profit != null && fc.profit < 0;
-    }).length;
+    const negativeFixedCostAdjustedMonthCount = endedMonths.filter(isMonthNegativeFixedCost_).length;
+    const negativeFixedCostCurrentMonths = currentMonths.filter(isMonthNegativeFixedCost_);
     const positiveOperatingProfitMonthCount = positiveFixedCostAdjustedMonthCount;
     const negativeOperatingProfitMonthCount = negativeFixedCostAdjustedMonthCount;
-    const monthReviewRows = buildYearlyMonthReviewRows_(monthRows, monthlyYoYRows);
+    const monthReviewRows = buildYearlyMonthReviewRows_(monthRows, monthlyYoYRows, currentBusinessDate);
     const chartMonthRows = enhanceYearlyMonthRowsForCharts_(monthRows);
     const profitTop3 = topN(
       aggregatedMonths.filter((m) => m.fixedCostAdjustedProfit != null && m.fixedCostAdjustedProfit > 0),
@@ -6823,11 +6963,14 @@ export default function SalesModule({ events = [], navigateBack }) {
       yearlyOperatingGrossProfitRate,
       breakEvenMonthCounts,
       belowBreakEvenMonthCount,
+      belowBreakEvenCurrentMonths,
       positiveOperatingProfitMonthCount,
       negativeOperatingProfitMonthCount,
       positiveFixedCostAdjustedMonthCount,
       strongFixedCostAdjustedMonthCount,
       negativeFixedCostAdjustedMonthCount,
+      negativeFixedCostCurrentMonths,
+      hasCurrentAggregatedMonth: currentMonths.some((m) => m.status === "集計済み"),
       monthReviewRows,
       chartMonthRows,
       profitTop3,
@@ -6894,11 +7037,11 @@ export default function SalesModule({ events = [], navigateBack }) {
       yearlyOperatingGrossProfitRate: yearlyAnalysis.yearlyOperatingGrossProfitRate,
       yearlyFixedCostAdjustedProfitRate: yearlyAnalysis.yearlyFixedCostAdjustedProfitRate,
       momComparison: yearlyAnalysis.momComparison,
-      belowBreakEvenMonthCount: yearlyAnalysis.belowBreakEvenMonthCount,
-      negativeOperatingProfitMonthCount: yearlyAnalysis.negativeFixedCostAdjustedMonthCount,
+      monthRows: yearlyAnalysis.monthRows,
+      currentBusinessDate,
       taxMode,
     });
-  }, [yearlyAnalysis, taxMode]);
+  }, [yearlyAnalysis, taxMode, currentBusinessDate]);
 
   return (
     <div
