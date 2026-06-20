@@ -487,7 +487,7 @@ function analysisSecTitle(variant, marginBottom, narrow = false) {
   const v = ANALYSIS_CARD[variant] || ANALYSIS_CARD.trend;
   const base = { ...S.secTitle, ...v.title, ...(marginBottom != null ? { marginBottom } : {}) };
   if (!narrow) {
-    return { ...base, fontSize: ".84rem", letterSpacing: ".16em", paddingBottom: ".5rem" };
+    return { ...base, fontSize: ".92rem", letterSpacing: ".16em", paddingBottom: ".5rem" };
   }
   return base;
 }
@@ -496,7 +496,7 @@ function analysisRowBorder(variant) {
   return v.rowBorder;
 }
 function analysisNote(extra = {}, narrow = false) {
-  const base = narrow ? { ...ANALYSIS_NOTE, fontSize: ".68rem" } : { ...ANALYSIS_NOTE, fontSize: ".64rem" };
+  const base = narrow ? { ...ANALYSIS_NOTE, fontSize: ".68rem" } : { ...ANALYSIS_NOTE, fontSize: ".68rem" };
   return { ...base, ...extra };
 }
 function salesPageShellStyle(narrow, mobile) {
@@ -651,7 +651,7 @@ function SalesCompositionBreakdown({ items, narrow }) {
       }
     : null;
   return (
-    <div style={{ display: "grid", gridTemplateColumns: rGridCols(narrow, 170), gap: narrow ? ".45rem" : ".35rem .8rem", fontSize: narrow ? ".88rem" : ".76rem", width: "100%", maxWidth: "100%", minWidth: 0, boxSizing: "border-box" }}>
+    <div style={{ display: "grid", gridTemplateColumns: rGridCols(narrow, 170), gap: narrow ? ".45rem" : ".35rem .8rem", fontSize: narrow ? ".88rem" : ".86rem", width: "100%", maxWidth: "100%", minWidth: 0, boxSizing: "border-box" }}>
       {items.map((item) => (
         <div key={item.key} style={rowStyle || undefined}>
           {narrow ? (
@@ -679,7 +679,7 @@ function SalesCompositionBreakdown({ items, narrow }) {
           ) : (
             <>
               {item.label}: <strong>{item.amount}</strong>（{item.rate}）
-              {item.extra ? <span style={{ display: "block", marginTop: ".12rem", paddingLeft: ".5rem", fontSize: ".7rem", color: "rgba(240,232,208,0.68)" }}>{item.extra}</span> : null}
+              {item.extra ? <span style={{ display: "block", marginTop: ".12rem", paddingLeft: ".5rem", fontSize: narrow ? ".7rem" : ".76rem", color: "rgba(240,232,208,0.68)" }}>{item.extra}</span> : null}
             </>
           )}
         </div>
@@ -924,15 +924,16 @@ function fixedCostProfitBadgeLabel_(profit) {
   if (profit == null || !Number.isFinite(Number(profit))) return null;
   return Number(profit) >= 0 ? "黒字" : "赤字";
 }
-function FixedCostProfitBadge({ profit, compact = false }) {
+function FixedCostProfitBadge({ profit, compact = false, large = false }) {
   const label = fixedCostProfitBadgeLabel_(profit);
   if (!label) return null;
   const positive = label === "黒字";
+  const fontSize = large ? ".74rem" : compact ? ".6rem" : ".62rem";
   return (
     <span
       style={{
         display: "inline-block",
-        fontSize: compact ? ".6rem" : ".62rem",
+        fontSize,
         fontWeight: 600,
         lineHeight: 1.25,
         padding: compact ? ".05rem .28rem" : ".06rem .34rem",
@@ -1196,39 +1197,6 @@ function buildYearlyCheckpoints_(ctx) {
   }
   return items.slice(0, 6);
 }
-function buildMonthlyReviewComment_(m, operatingGrossProfitRate) {
-  const be = m.breakEvenAnalysis;
-  const sales = Number(m.totalSalesSum || 0);
-  const progress = m.progressRate;
-  const hasTarget = Number(m.targetSalesSum || 0) > 0;
-  const targetMet = hasTarget && progress != null && progress >= 100;
-  const targetUnder = hasTarget && progress != null && progress < 100;
-  const aboveBE = be?.isAboveBreakEven;
-  const strongMonth = be?.tierKey === "strong" || be?.tierKey === "good";
-  const opProfitRate = m.operatingProfitRate;
-
-  if (m.status !== "集計済み" || sales <= 0) {
-    if (m.status === "予定あり") return "予定月です。実績確定後に月次分析で確認してください。";
-    if (m.status === "取得失敗") return "データ取得に失敗しました。再読込後に確認してください。";
-    return "実績がありません。";
-  }
-  if (strongMonth && aboveBE && (!hasTarget || targetMet) && operatingGrossProfitRate != null && operatingGrossProfitRate >= 55) {
-    return "売上・損益分岐ともに良好です。飲食単価と利益率が崩れていなければ、成功月として再現要因を確認してください。";
-  }
-  if (sales > 0 && operatingGrossProfitRate != null && operatingGrossProfitRate < 50 && (opProfitRate == null || opProfitRate < 10)) {
-    return "売上は取れていますが、利益率が弱い月です。仕入れ・人件費・飲食比率を確認してください。";
-  }
-  if (targetUnder && aboveBE) {
-    return "目標には届いていませんが、損益分岐は超えています。赤字回避はできているため、次月は集客か飲食単価のどちらを伸ばすか確認してください。";
-  }
-  if (!aboveBE && be?.hasActualSales) {
-    return "損益分岐に届いていません。まずは売上不足の原因が集客なのか、単価なのかを月次分析で確認してください。";
-  }
-  if (targetMet && aboveBE) {
-    return "目標達成かつ経営ラインも良好です。成功要因を月次分析で記録してください。";
-  }
-  return "月次分析で売上・集客・単価・利益のバランスを確認してください。";
-}
 function buildYearlyMonthReviewRows_(monthRows, monthlyYoYRows) {
   const yoyMap = Object.fromEntries((monthlyYoYRows || []).map((r) => [r.targetMonth, r]));
   return (monthRows || []).map((m) => {
@@ -1247,7 +1215,6 @@ function buildYearlyMonthReviewRows_(monthRows, monthlyYoYRows) {
       fixedCostAdjustedProfitAbs: fixedCostAdjusted.profit != null ? Math.abs(fixedCostAdjusted.profit) : null,
       fixedCostProfitBadge: fixedCostProfitBadgeLabel_(fixedCostAdjusted.profit),
       breakEvenGapExTax: m.breakEvenAnalysis?.gapFromBreakEven ?? null,
-      reviewComment: buildMonthlyReviewComment_(m, operatingGrossProfitRate),
       breakEvenGapLabel: m.breakEvenAnalysis?.gapLabel ?? "—",
     };
   });
@@ -3508,8 +3475,8 @@ function YearlyMonthBarChart({ title, rows, valueKey, barTone, formatTop, taxMod
   const clickable = typeof onMonthClick === "function";
   const chartHeight = tall ? 200 : 168;
   const barAreaHeight = tall ? 158 : 130;
-  const topLabelSize = tall ? (narrow ? ".52rem" : ".64rem") : narrow ? ".48rem" : ".58rem";
-  const monthLabelSize = tall ? (narrow ? ".58rem" : ".7rem") : narrow ? ".56rem" : ".66rem";
+  const topLabelSize = tall ? (narrow ? ".52rem" : ".7rem") : narrow ? ".48rem" : ".64rem";
+  const monthLabelSize = tall ? (narrow ? ".58rem" : ".76rem") : narrow ? ".56rem" : ".72rem";
   return (
     <div style={analysisCard("trend")}>
       <div style={analysisSecTitle("trend", ".5rem", narrow)}>{title}</div>
@@ -3643,9 +3610,9 @@ function YearlyYoYBarChart({ rows, onMonthClick }) {
   );
 }
 function YearlyRankList({ title, variant, items, valueLabel, formatValue, narrow = false }) {
-  const rowLabelSize = narrow ? ".78rem" : ".84rem";
-  const rowValueSize = narrow ? "1.02rem" : "1.12rem";
-  const rowMetaSize = narrow ? ".72rem" : ".76rem";
+  const rowLabelSize = narrow ? ".78rem" : ".9rem";
+  const rowValueSize = narrow ? "1.02rem" : "1.2rem";
+  const rowMetaSize = narrow ? ".72rem" : ".8rem";
   return (
     <div style={{ ...analysisCard(variant), width: "100%", minWidth: 0, boxSizing: "border-box", ...(narrow ? {} : { padding: "1.15rem 1.25rem" }) }}>
       <div style={analysisSecTitle(variant, ".5rem", narrow)}>{title}</div>
@@ -3890,7 +3857,7 @@ function compositionRatesFromParts(parts, total) {
 }
 function SalesCompositionLegend({ narrow }) {
   return (
-    <div style={{ display:"flex", gap: narrow ? ".5rem .65rem" : ".85rem", flexWrap:"wrap", marginBottom:".42rem", fontSize: narrow ? ".82rem" : ".78rem", color:"rgba(240,232,208,0.86)", width: "100%", maxWidth: "100%", minWidth: 0, boxSizing: "border-box" }}>
+    <div style={{ display:"flex", gap: narrow ? ".5rem .65rem" : ".85rem", flexWrap:"wrap", marginBottom:".42rem", fontSize: narrow ? ".82rem" : ".86rem", color:"rgba(240,232,208,0.86)", width: "100%", maxWidth: "100%", minWidth: 0, boxSizing: "border-box" }}>
       <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".34rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.drink }} />ドリンク</span>
       <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".34rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.food }} />フード</span>
       <span><span style={{ display:"inline-block", width:12, height:12, marginRight:".34rem", borderRadius:2, background:SALES_COMPOSITION_CHIP_COLORS.bandFoodDrink }} />バンド飲食代</span>
@@ -4770,7 +4737,7 @@ const TABLE_NUMBER_STYLE = {
   textAlign: "right",
   fontFamily: SALES_NUMBER_FONT_FAMILY,
   ...SALES_NUMBER_TABULAR,
-  fontSize: "1rem",
+  fontSize: "1.08rem",
   fontWeight: 600,
   lineHeight: 1.45,
   whiteSpace: "nowrap",
@@ -4825,7 +4792,7 @@ const YEARLY_TH = {
   fontWeight: 500,
   color: "rgba(201,168,76,0.76)",
   borderBottom: "1px solid rgba(201,168,76,0.12)",
-  fontSize: ".74rem",
+  fontSize: ".82rem",
   letterSpacing: ".02em",
   whiteSpace: "nowrap",
   lineHeight: 1.35,
@@ -4838,7 +4805,7 @@ function yearlyThStyle_(widthPx, align = "right") {
 }
 const YEARLY_TD_MONTH = {
   textAlign: "left",
-  fontSize: ".96rem",
+  fontSize: "1.04rem",
   fontWeight: 600,
   color: "#e8dcc0",
   lineHeight: 1.45,
@@ -4883,7 +4850,7 @@ function CostProfitBarRow({ bar, maxValue, isChild, taxMode, narrow }) {
   const labelBlock = (
     <div
       style={{
-        fontSize: narrow ? (isChild ? ".72rem" : ".78rem") : isChild ? ".74rem" : ".84rem",
+        fontSize: narrow ? (isChild ? ".72rem" : ".78rem") : isChild ? ".8rem" : ".9rem",
         color: isChild ? "rgba(240,232,208,0.58)" : "rgba(240,232,208,0.74)",
         lineHeight: 1.4,
       }}
@@ -4921,7 +4888,7 @@ function CostProfitBarRow({ bar, maxValue, isChild, taxMode, narrow }) {
   const amountBlock = (
     <div
       style={{
-        fontSize: narrow ? ".92rem" : isChild ? ".78rem" : ".86rem",
+        fontSize: narrow ? ".92rem" : isChild ? ".84rem" : ".92rem",
         fontWeight: narrow ? 600 : 600,
         fontFamily: SALES_NUMBER_FONT_FAMILY,
         ...SALES_NUMBER_TABULAR,
@@ -4998,8 +4965,8 @@ function YearlyCardMetricRow({ label, value, muted, valueStyle }) {
   );
 }
 function YearlySummaryMetricLine({ label, value, narrow, strong, emphasize, valueStyle }) {
-  const labelSize = narrow ? "0.8rem" : "0.9rem";
-  const valueSize = strong || emphasize ? (narrow ? "1.1rem" : "1.28rem") : narrow ? "1.02rem" : "1.14rem";
+  const labelSize = narrow ? "0.8rem" : "0.96rem";
+  const valueSize = strong || emphasize ? (narrow ? "1.1rem" : "1.38rem") : narrow ? "1.02rem" : "1.22rem";
   return (
     <div style={{ display: "flex", justifyContent: "space-between", gap: ".5rem", alignItems: "baseline", minWidth: 0, fontSize: labelSize, lineHeight: 1.5 }}>
       <span style={{ color: "rgba(240,232,208,0.65)", flexShrink: 0 }}>{label}</span>
@@ -5032,7 +4999,7 @@ function YearlySummaryBlock({ title, children, narrow, accent }) {
         boxSizing: "border-box",
       }}
     >
-      <div style={{ fontSize: narrow ? "0.74rem" : "0.82rem", color: "rgba(201,168,76,0.88)", fontWeight: 600, marginBottom: ".34rem", letterSpacing: ".04em" }}>
+      <div style={{ fontSize: narrow ? "0.74rem" : "0.9rem", color: "rgba(201,168,76,0.88)", fontWeight: 600, marginBottom: ".34rem", letterSpacing: ".04em" }}>
         {title}
       </div>
       <div style={{ display: "grid", gap: narrow ? ".22rem" : ".26rem" }}>{children}</div>
@@ -5056,8 +5023,8 @@ function YearlySummaryFiveBlocks({ yearlyAnalysis, narrow, dy, pct, pct1, signed
   return (
     <div style={{ display: "grid", gap: ".55rem", minWidth: 0 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: ".45rem", flexWrap: "wrap", marginBottom: ".1rem" }}>
-        <div style={{ ...analysisMetricHero(narrow, false), fontSize: narrow ? "1.9rem" : "2.25rem" }}>{pct(a.yearlyProgressRate)}</div>
-        <span style={{ fontSize: narrow ? "0.84rem" : "0.88rem", color: "rgba(240,232,208,0.72)" }}>{progressLabel}</span>
+        <div style={{ ...analysisMetricHero(narrow, false), fontSize: narrow ? "1.9rem" : "2.45rem" }}>{pct(a.yearlyProgressRate)}</div>
+        <span style={{ fontSize: narrow ? "0.84rem" : "0.94rem", color: "rgba(240,232,208,0.72)" }}>{progressLabel}</span>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: topGrid, gap: ".55rem" }}>
         <YearlySummaryBlock title="A. 年間進捗" narrow={narrow} accent>
@@ -5099,7 +5066,7 @@ function YearlySummaryFiveBlocks({ yearlyAnalysis, narrow, dy, pct, pct1, signed
               }}
             />
           ) : null}
-          <div style={{ fontSize: narrow ? "0.68rem" : "0.66rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".06rem" }}>
+          <div style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".06rem" }}>
             ※実績月平均は年間売上合計 ÷ 実績月数（{num(landing?.performanceMonthCount)}ヶ月ベース）
           </div>
         </YearlySummaryBlock>
@@ -5113,7 +5080,7 @@ function YearlySummaryFiveBlocks({ yearlyAnalysis, narrow, dy, pct, pct1, signed
             <YearlySummaryMetricLine narrow={narrow} label="かなり良い月数" value={`${num(be.goodLineCount)}ヶ月`} />
             <YearlySummaryMetricLine narrow={narrow} label="強い月数" value={`${num(be.strongLineCount)}ヶ月`} />
           </div>
-          <div style={{ fontSize: narrow ? "0.68rem" : "0.66rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".08rem" }}>{BREAK_EVEN_LINE_NOTE}</div>
+          <div style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".08rem" }}>{BREAK_EVEN_LINE_NOTE}</div>
         </YearlySummaryBlock>
       ) : null}
       <div style={{ display: "grid", gridTemplateColumns: subGrid, gap: ".55rem" }}>
@@ -5129,7 +5096,7 @@ function YearlySummaryFiveBlocks({ yearlyAnalysis, narrow, dy, pct, pct1, signed
           <YearlySummaryMetricLine narrow={narrow} label="年間飲食単価" value={formatUnitYen_(a.yearlyFoodDrinkUnitPrice)} emphasize />
           <YearlySummaryMetricLine narrow={narrow} label="年間ドリンク売上" value={dy(a.yearlyDrink)} />
           <YearlySummaryMetricLine narrow={narrow} label="年間フード売上" value={dy(a.yearlyFood)} />
-          <div style={{ fontSize: narrow ? "0.68rem" : "0.66rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45 }}>{FOOD_DRINK_UNIT_PRICE_NOTE}</div>
+          <div style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45 }}>{FOOD_DRINK_UNIT_PRICE_NOTE}</div>
         </YearlySummaryBlock>
         <YearlySummaryBlock title="E. 利益" narrow={narrow}>
           <YearlySummaryMetricLine
@@ -5166,7 +5133,7 @@ function YearlySummaryFiveBlocks({ yearlyAnalysis, narrow, dy, pct, pct1, signed
             label="固定費控除後利益100万円超えの月数"
             value={`${num(a.strongFixedCostAdjustedMonthCount)}ヶ月`}
           />
-          <div style={{ fontSize: narrow ? "0.68rem" : "0.66rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".04rem" }}>
+          <div style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".04rem" }}>
             {OPERATING_BASE_PROFIT_NOTE}
             <span style={{ display: "block", marginTop: ".12rem" }}>{FIXED_COST_ADJUSTED_PROFIT_NOTE}</span>
             <span style={{ display: "block", marginTop: ".08rem" }}>{FIXED_COST_ADJUSTED_EX_TAX_NOTE}</span>
@@ -5180,7 +5147,7 @@ function YearlyCheckpointList({ items, narrow }) {
   return (
     <div style={{ display: "grid", gap: ".42rem" }}>
       {items.length === 0 ? (
-        <div style={{ fontSize: narrow ? "0.82rem" : "0.88rem", color: "rgba(240,232,208,0.55)" }}>
+        <div style={{ fontSize: narrow ? "0.82rem" : "0.94rem", color: "rgba(240,232,208,0.55)" }}>
           大きなチェックポイントはありません。月別経営レビューで各月の状態を確認してください。
         </div>
       ) : (
@@ -5195,7 +5162,7 @@ function YearlyCheckpointList({ items, narrow }) {
               minWidth: 0,
             }}
           >
-            <div style={{ fontSize: narrow ? "0.84rem" : "0.92rem", color: "rgba(212,168,138,0.95)", fontWeight: 600, marginBottom: ".18rem" }}>
+            <div style={{ fontSize: narrow ? "0.84rem" : "0.98rem", color: "rgba(212,168,138,0.95)", fontWeight: 600, marginBottom: ".18rem" }}>
               {item.title}
               {item.detail ? (
                 <span style={{ marginLeft: ".35rem", fontSize: narrow ? "0.76rem" : "0.8rem", fontWeight: 500, color: "rgba(240,232,208,0.62)" }}>
@@ -5203,7 +5170,7 @@ function YearlyCheckpointList({ items, narrow }) {
                 </span>
               ) : null}
             </div>
-            <div style={{ fontSize: narrow ? "0.8rem" : "0.86rem", color: "rgba(240,232,208,0.72)", lineHeight: 1.5 }}>{item.message}</div>
+            <div style={{ fontSize: narrow ? "0.8rem" : "0.92rem", color: "rgba(240,232,208,0.72)", lineHeight: 1.5 }}>{item.message}</div>
           </div>
         ))
       )}
@@ -5273,9 +5240,6 @@ function YearlyMonthReviewCard({ row, narrow, dy, pct, pct1, signedDy, formatUni
           <YearlyCardMetricRow label="前年同月比" value={pct1(row.yoyRate)} muted={false} valueStyle={{ color: row.yoyDiff >= 0 ? "#9ec9a8" : "#dca06a" }} />
         ) : null}
       </div>
-      <div style={{ fontSize: narrow ? "0.76rem" : "0.74rem", color: "rgba(240,232,208,0.68)", lineHeight: 1.5, borderTop: "1px dashed rgba(201,168,76,0.14)", paddingTop: ".32rem" }}>
-        {row.reviewComment}
-      </div>
       <div style={{ fontSize: "0.66rem", color: "rgba(201,168,76,0.55)", marginTop: ".28rem" }}>クリックで月次分析</div>
     </div>
   );
@@ -5302,23 +5266,22 @@ function YearlyMonthReviewSection({ rows, narrow, dy, pct, pct1, signedDy, forma
 function YearlyMonthReviewTable({ rows, narrow, dy, pct, pct1, formatUnitYen_, onMonthClick, taxMode }) {
   return (
     <div style={YEARLY_TABLE_WRAP}>
-      <table style={{ ...YEARLY_TABLE_STYLE, minWidth: 1180 }}>
+      <table style={{ ...YEARLY_TABLE_STYLE, minWidth: 1080 }}>
         <thead>
           <tr>
-            <th style={yearlyThStyle_(80, "left")}>月</th>
-            <th style={yearlyThStyle_(96)}>売上</th>
-            <th style={yearlyThStyle_(84)}>達成率</th>
-            <th style={yearlyThStyle_(88, "center")}>経営ライン</th>
-            <th style={yearlyThStyle_(128)}>損益分岐</th>
-            <th style={yearlyThStyle_(96)}>固定費後利益</th>
-            <th style={yearlyThStyle_(84)}>固定費後利益率</th>
-            <th style={yearlyThStyle_(88, "center")}>固定費後</th>
-            <th style={yearlyThStyle_(84)}>営業ベース利益率</th>
-            <th style={yearlyThStyle_(84)}>集客</th>
-            <th style={yearlyThStyle_(84)}>客単価</th>
-            <th style={yearlyThStyle_(84)}>飲食単価</th>
-            <th style={yearlyThStyle_(84)}>前年比</th>
-            <th style={yearlyThStyle_(220, "left")}>評価コメント</th>
+            <th style={yearlyThStyle_(88, "left")}>月</th>
+            <th style={yearlyThStyle_(104)}>売上</th>
+            <th style={yearlyThStyle_(92)}>達成率</th>
+            <th style={yearlyThStyle_(96, "center")}>経営ライン</th>
+            <th style={yearlyThStyle_(148)}>損益分岐</th>
+            <th style={yearlyThStyle_(108)}>固定費後利益</th>
+            <th style={yearlyThStyle_(92)}>固定費後利益率</th>
+            <th style={yearlyThStyle_(96, "center")}>固定費後</th>
+            <th style={yearlyThStyle_(92)}>営業ベース利益率</th>
+            <th style={yearlyThStyle_(92)}>集客</th>
+            <th style={yearlyThStyle_(92)}>客単価</th>
+            <th style={yearlyThStyle_(92)}>飲食単価</th>
+            <th style={yearlyThStyle_(92)}>前年比</th>
           </tr>
         </thead>
         <tbody>
@@ -5330,33 +5293,30 @@ function YearlyMonthReviewTable({ rows, narrow, dy, pct, pct1, formatUnitYen_, o
               title="クリックで月次分析へ"
               {...yearlyRowHoverHandlers_()}
             >
-              <td style={yearlyMonthTdStyle_(80)}>{row.monthLabel}</td>
-              <YearlyTableNumberCell m={row} value={row.totalSalesSum} width={96} taxMode={taxMode} />
-              <YearlyTableNumberCell m={row} value={row.progressRate} kind="pct" width={84} />
-              <td style={yearlyNumTdStyle_(88, !row.breakEvenAnalysis?.hasActualSales)}>
-                <BreakEvenLineBadge breakEvenAnalysis={row.breakEvenAnalysis} compact />
+              <td style={yearlyMonthTdStyle_(88)}>{row.monthLabel}</td>
+              <YearlyTableNumberCell m={row} value={row.totalSalesSum} width={104} taxMode={taxMode} />
+              <YearlyTableNumberCell m={row} value={row.progressRate} kind="pct" width={92} />
+              <td style={yearlyNumTdStyle_(96, !row.breakEvenAnalysis?.hasActualSales)}>
+                <BreakEvenLineBadge breakEvenAnalysis={row.breakEvenAnalysis} compact large />
               </td>
-              <td style={{ ...yearlyNumTdStyle_(128, !row.breakEvenAnalysis?.hasActualSales), fontSize: ".82rem", textAlign: "right" }}>
+              <td style={{ ...yearlyNumTdStyle_(148, !row.breakEvenAnalysis?.hasActualSales), fontSize: ".9rem", textAlign: "right" }}>
                 {row.breakEvenGapLabel}
               </td>
-              <td style={yearlyNumTdStyle_(96, row.fixedCostAdjustedProfit == null)}>
+              <td style={yearlyNumTdStyle_(108, row.fixedCostAdjustedProfit == null)}>
                 {formatFixedCostAdjustedProfit_(row.fixedCostAdjustedProfit)}
               </td>
-              <td style={yearlyNumTdStyle_(84, row.fixedCostAdjustedProfitRate == null)}>
+              <td style={yearlyNumTdStyle_(92, row.fixedCostAdjustedProfitRate == null)}>
                 {formatFixedCostAdjustedProfitRate_(row.fixedCostAdjustedProfitRate)}
               </td>
-              <td style={yearlyNumTdStyle_(88, row.fixedCostAdjustedProfit == null)}>
-                <FixedCostProfitBadge profit={row.fixedCostAdjustedProfit} compact />
+              <td style={yearlyNumTdStyle_(96, row.fixedCostAdjustedProfit == null)}>
+                <FixedCostProfitBadge profit={row.fixedCostAdjustedProfit} compact large />
               </td>
-              <YearlyTableNumberCell m={row} value={row.operatingProfitRate} kind="pct" width={84} />
-              <td style={yearlyNumTdStyle_(84, row.status !== "集計済み")}>{formatCustomerCountLabel_(row.customerCountSum)}</td>
-              <td style={yearlyNumTdStyle_(84, row.status !== "集計済み")}>{formatUnitYen_(row.customerUnitPrice)}</td>
-              <td style={yearlyNumTdStyle_(84, row.status !== "集計済み")}>{formatUnitYen_(row.foodDrinkUnitPrice)}</td>
-              <td style={yearlyNumTdStyle_(84, row.yoyRate == null)}>
+              <YearlyTableNumberCell m={row} value={row.operatingProfitRate} kind="pct" width={92} />
+              <td style={yearlyNumTdStyle_(92, row.status !== "集計済み")}>{formatCustomerCountLabel_(row.customerCountSum)}</td>
+              <td style={yearlyNumTdStyle_(92, row.status !== "集計済み")}>{formatUnitYen_(row.customerUnitPrice)}</td>
+              <td style={yearlyNumTdStyle_(92, row.status !== "集計済み")}>{formatUnitYen_(row.foodDrinkUnitPrice)}</td>
+              <td style={yearlyNumTdStyle_(92, row.yoyRate == null)}>
                 {row.yoyRate != null ? pct1(row.yoyRate) : "—"}
-              </td>
-              <td style={{ ...yearlyMonthTdStyle_(220), fontSize: ".8rem", color: "rgba(240,232,208,0.68)", lineHeight: 1.45 }}>
-                {row.reviewComment}
               </td>
             </tr>
           ))}
@@ -5365,12 +5325,12 @@ function YearlyMonthReviewTable({ rows, narrow, dy, pct, pct1, formatUnitYen_, o
     </div>
   );
 }
-function YearlyMonthStatusBadge({ m }) {
+function YearlyMonthStatusBadge({ m, large = false }) {
   return (
     <span
       style={{
         display: "inline-block",
-        fontSize: ".62rem",
+        fontSize: large ? ".74rem" : ".62rem",
         fontWeight: 500,
         lineHeight: 1.25,
         padding: ".06rem .3rem",
@@ -5398,15 +5358,16 @@ function YearlyMonthStatusBadge({ m }) {
     </span>
   );
 }
-function BreakEvenLineBadge({ breakEvenAnalysis, compact = false }) {
+function BreakEvenLineBadge({ breakEvenAnalysis, compact = false, large = false }) {
   const be = breakEvenAnalysis;
   if (!be?.hasActualSales || !be.badge) return null;
   const tone = breakEvenLineBadgeTone_(be.tierKey);
+  const fontSize = large ? ".74rem" : compact ? ".6rem" : ".62rem";
   return (
     <span
       style={{
         display: "inline-block",
-        fontSize: compact ? ".6rem" : ".62rem",
+        fontSize,
         fontWeight: 600,
         lineHeight: 1.25,
         padding: compact ? ".05rem .28rem" : ".06rem .34rem",
@@ -5445,44 +5406,44 @@ function BreakEvenMonthlySummaryBlock({ breakEvenAnalysis, fixedCostAdjustedProf
         boxSizing: "border-box",
       }}
     >
-      <div style={{ fontSize: narrow ? "0.72rem" : "0.8rem", color: "rgba(201,168,76,0.85)", fontWeight: 600, marginBottom: ".35rem", letterSpacing: ".04em" }}>
+      <div style={{ fontSize: narrow ? "0.72rem" : "0.86rem", color: "rgba(201,168,76,0.85)", fontWeight: 600, marginBottom: ".35rem", letterSpacing: ".04em" }}>
         経営ライン
       </div>
       {be.hasActualSales ? (
         <>
           <div style={{ display: "flex", alignItems: "center", gap: ".4rem", flexWrap: "wrap", marginBottom: ".38rem" }}>
-            <span style={{ fontSize: narrow ? "0.8rem" : "0.86rem", color: "rgba(240,232,208,0.65)" }}>判定</span>
+            <span style={{ fontSize: narrow ? "0.8rem" : "0.92rem", color: "rgba(240,232,208,0.65)" }}>判定</span>
             <BreakEvenLineBadge breakEvenAnalysis={be} />
             {be.label ? (
-              <span style={{ fontSize: narrow ? "0.88rem" : "0.94rem", color: tone?.tx || "rgba(240,232,208,0.9)", fontWeight: 700 }}>{be.label}</span>
+              <span style={{ fontSize: narrow ? "0.88rem" : "1rem", color: tone?.tx || "rgba(240,232,208,0.9)", fontWeight: 700 }}>{be.label}</span>
             ) : null}
           </div>
-          <div style={{ display: "grid", gap: ".22rem", fontSize: narrow ? "0.84rem" : "0.9rem", lineHeight: 1.5 }}>
+          <div style={{ display: "grid", gap: ".22rem", fontSize: narrow ? "0.84rem" : "0.96rem", lineHeight: 1.5 }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: ".5rem", minWidth: 0 }}>
               <span style={{ color: "rgba(240,232,208,0.6)" }}>損益分岐目安</span>
-              <strong style={{ color: "rgba(240,232,208,0.92)", fontSize: narrow ? "1.02rem" : "1.08rem", wordBreak: "break-word", textAlign: "right" }}>税抜 {formatExTaxYen_(be.breakEvenLineExTax)}</strong>
+              <strong style={{ color: "rgba(240,232,208,0.92)", fontSize: narrow ? "1.02rem" : "1.14rem", wordBreak: "break-word", textAlign: "right" }}>税抜 {formatExTaxYen_(be.breakEvenLineExTax)}</strong>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", gap: ".5rem", minWidth: 0 }}>
               <span style={{ color: "rgba(240,232,208,0.6)" }}>現在</span>
-              <strong style={{ color: "rgba(240,232,208,0.96)", fontSize: narrow ? "1.1rem" : "1.16rem", wordBreak: "break-word", textAlign: "right" }}>
+              <strong style={{ color: "rgba(240,232,208,0.96)", fontSize: narrow ? "1.1rem" : "1.22rem", wordBreak: "break-word", textAlign: "right" }}>
                 税抜 {formatExTaxYen_(be.exTaxSales)}
               </strong>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", gap: ".5rem", minWidth: 0 }}>
               <span style={{ color: "rgba(240,232,208,0.6)" }}>損益分岐まで{gapLabel === "超過" ? "の超過" : ""}</span>
-              <strong style={{ color: gapLabel === "超過" ? "#9ec9a8" : "#dca06a", fontSize: narrow ? "1.02rem" : "1.08rem", wordBreak: "break-word", textAlign: "right" }}>{gapValue}</strong>
+              <strong style={{ color: gapLabel === "超過" ? "#9ec9a8" : "#dca06a", fontSize: narrow ? "1.02rem" : "1.14rem", wordBreak: "break-word", textAlign: "right" }}>{gapValue}</strong>
             </div>
             {fixedCostAdjustedProfit != null ? (
               <>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: ".5rem", minWidth: 0, marginTop: ".12rem", paddingTop: ".18rem", borderTop: "1px dashed rgba(201,168,76,0.14)" }}>
                   <span style={{ color: "rgba(240,232,208,0.6)" }}>固定費控除後利益</span>
-                  <strong style={{ color: fixedCostAdjustedProfit >= 0 ? "#9ec9a8" : "#dca06a", fontSize: narrow ? "1.02rem" : "1.08rem", textAlign: "right" }}>
+                  <strong style={{ color: fixedCostAdjustedProfit >= 0 ? "#9ec9a8" : "#dca06a", fontSize: narrow ? "1.02rem" : "1.14rem", textAlign: "right" }}>
                     {formatFixedCostAdjustedProfit_(fixedCostAdjustedProfit)}
                   </strong>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: ".5rem", minWidth: 0 }}>
                   <span style={{ color: "rgba(240,232,208,0.6)" }}>利益率</span>
-                  <strong style={{ color: "rgba(240,232,208,0.92)", fontSize: narrow ? "1rem" : "1.06rem", textAlign: "right" }}>
+                  <strong style={{ color: "rgba(240,232,208,0.92)", fontSize: narrow ? "1rem" : "1.12rem", textAlign: "right" }}>
                     {formatFixedCostAdjustedProfitRate_(fixedCostAdjustedProfitRate)}
                   </strong>
                 </div>
@@ -5491,7 +5452,7 @@ function BreakEvenMonthlySummaryBlock({ breakEvenAnalysis, fixedCostAdjustedProf
           </div>
         </>
       ) : (
-        <div style={{ fontSize: narrow ? "0.82rem" : "0.88rem", color: "rgba(240,232,208,0.6)", lineHeight: 1.55 }}>
+        <div style={{ fontSize: narrow ? "0.82rem" : "0.94rem", color: "rgba(240,232,208,0.6)", lineHeight: 1.55 }}>
           実績売上がないため、損益分岐判定はまだ出せません。
         </div>
       )}
@@ -5505,8 +5466,8 @@ function BreakEvenMonthlySummaryBlock({ breakEvenAnalysis, fixedCostAdjustedProf
   );
 }
 function SummaryMetricLine({ label, value, valueStyle, strong, narrow, emphasize }) {
-  const labelSize = narrow ? "0.78rem" : "0.9rem";
-  const valueSize = strong || emphasize ? (narrow ? "1.12rem" : "1.28rem") : narrow ? "1.02rem" : "1.14rem";
+  const labelSize = narrow ? "0.78rem" : "0.96rem";
+  const valueSize = strong || emphasize ? (narrow ? "1.12rem" : "1.38rem") : narrow ? "1.02rem" : "1.22rem";
   return (
     <div
       style={{
@@ -5551,7 +5512,7 @@ function SummarySubCard({ title, children, accent, narrow }) {
         boxSizing: "border-box",
       }}
     >
-      <div style={{ fontSize: narrow ? "0.72rem" : "0.82rem", color: "rgba(201,168,76,0.85)", fontWeight: 600, marginBottom: ".32rem", letterSpacing: ".04em" }}>{title}</div>
+      <div style={{ fontSize: narrow ? "0.72rem" : "0.9rem", color: "rgba(201,168,76,0.85)", fontWeight: 600, marginBottom: ".32rem", letterSpacing: ".04em" }}>{title}</div>
       <div style={{ display: "grid", gap: narrow ? ".2rem" : ".24rem" }}>{children}</div>
     </div>
   );
@@ -5572,10 +5533,10 @@ function MonthlySummaryPanel({ monthlyAnalysis, narrow, dy, pct, pct1, signedDy 
       <div style={{ display: "grid", gridTemplateColumns: topGrid, gap: ".55rem", minWidth: 0, maxWidth: "100%" }}>
         <SummarySubCard title="進捗・売上" accent narrow={narrow}>
           <div style={{ display: "flex", alignItems: "baseline", gap: ".45rem", flexWrap: "wrap", marginBottom: ".15rem" }}>
-            <div style={{ fontSize: narrow ? "1.35rem" : "1.45rem", fontWeight: 700, color: "#f0e8d0", lineHeight: 1.2 }}>{pct(a.monthlyProgressRate)}</div>
+            <div style={{ fontSize: narrow ? "1.35rem" : "1.55rem", fontWeight: 700, color: "#f0e8d0", lineHeight: 1.2 }}>{pct(a.monthlyProgressRate)}</div>
             <span
               style={{
-                fontSize: ".72rem",
+                fontSize: narrow ? ".72rem" : ".76rem",
                 fontWeight: 700,
                 padding: ".14rem .5rem",
                 borderRadius: 999,
@@ -5591,7 +5552,7 @@ function MonthlySummaryPanel({ monthlyAnalysis, narrow, dy, pct, pct1, signedDy 
           <SummaryMetricLine narrow={narrow} label={targetGapLabel} value={targetGapValue} strong valueStyle={{ color: "#f3ead2" }} />
           <SummaryMetricLine narrow={narrow} label="月間売上 / 目標" value={`${dy(a.totalSalesSum)} / ${dy(a.fullMonthTargetSalesSum)}`} emphasize />
           <SummaryMetricLine narrow={narrow} label="実績日達成率" value={pct(a.actualAchievementRate)} />
-          <div style={{ fontSize: narrow ? "0.68rem" : "0.7rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".08rem" }}>
+          <div style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".08rem" }}>
             実績日ベース目標 {dy(a.actualTargetSalesSum)}
           </div>
         </SummarySubCard>
@@ -5614,7 +5575,7 @@ function MonthlySummaryPanel({ monthlyAnalysis, narrow, dy, pct, pct1, signedDy 
           />
           <SummaryMetricLine narrow={narrow} label="客単価" value={formatUnitYen_(a.customerUnitPrice)} emphasize />
           <SummaryMetricLine narrow={narrow} label="飲食単価" value={formatUnitYen_(a.foodDrinkUnitPrice)} emphasize />
-          <div style={{ fontSize: narrow ? "0.68rem" : "0.66rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".1rem" }}>
+          <div style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".1rem" }}>
             {FOOD_DRINK_UNIT_PRICE_NOTE}
           </div>
         </SummarySubCard>
@@ -5636,12 +5597,12 @@ function MonthlySummaryPanel({ monthlyAnalysis, narrow, dy, pct, pct1, signedDy 
             value={formatFixedCostAdjustedProfitRate_(a.fixedCostAdjustedProfitRate)}
             emphasize
           />
-          <div style={{ fontSize: narrow ? "0.68rem" : "0.66rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".08rem" }}>
+          <div style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".08rem" }}>
             {OPERATING_BASE_PROFIT_NOTE}
             <span style={{ display: "block", marginTop: ".1rem" }}>{FIXED_COST_ADJUSTED_PROFIT_NOTE}</span>
             <span style={{ display: "block", marginTop: ".08rem" }}>{FIXED_COST_ADJUSTED_EX_TAX_NOTE}</span>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "repeat(3, minmax(0, 1fr))", gap: ".18rem .45rem", marginTop: ".18rem", fontSize: narrow ? "0.72rem" : "0.7rem", color: "rgba(240,232,208,0.55)" }}>
+          <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "repeat(3, minmax(0, 1fr))", gap: ".18rem .45rem", marginTop: ".18rem", fontSize: narrow ? "0.72rem" : "0.76rem", color: "rgba(240,232,208,0.55)" }}>
             <span>実績 {num(a.actualDayCount)}日</span>
             <span>予定 {num(a.futureDayCount)}件</span>
             <span>日平均 {dy(a.avgDailySales)}</span>
@@ -5659,16 +5620,16 @@ function MonthlySummaryPanel({ monthlyAnalysis, narrow, dy, pct, pct1, signedDy 
           maxWidth: "100%",
         }}
       >
-        <div style={{ fontSize: narrow ? "0.72rem" : "0.7rem", color: "rgba(201,168,76,0.7)", marginBottom: ".22rem", fontWeight: 600 }}>前年同月比較（2025年固定）</div>
-        <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "repeat(3, minmax(0, 1fr))", gap: ".2rem .55rem", fontSize: narrow ? "0.84rem" : "0.82rem", color: "rgba(240,232,208,0.72)" }}>
+        <div style={{ fontSize: narrow ? "0.72rem" : "0.78rem", color: "rgba(201,168,76,0.7)", marginBottom: ".22rem", fontWeight: 600 }}>前年同月比較（2025年固定）</div>
+        <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "repeat(3, minmax(0, 1fr))", gap: ".2rem .55rem", fontSize: narrow ? "0.84rem" : "0.9rem", color: "rgba(240,232,208,0.72)" }}>
           <div>
-            前年同月売上 <strong style={{ color: "rgba(240,232,208,0.9)", fontSize: narrow ? "1.02rem" : "1rem" }}>{a.priorYearMonth.prevMonthSales != null ? dy(a.priorYearMonth.prevMonthSales) : "—"}</strong>
+            前年同月売上 <strong style={{ color: "rgba(240,232,208,0.9)", fontSize: narrow ? "1.02rem" : "1.08rem" }}>{a.priorYearMonth.prevMonthSales != null ? dy(a.priorYearMonth.prevMonthSales) : "—"}</strong>
           </div>
           <div>
             前年同月差額{" "}
             <strong
               style={{
-                fontSize: narrow ? "1.02rem" : "1rem",
+                fontSize: narrow ? "1.02rem" : "1.08rem",
                 color:
                   a.priorYearMonth.prevMonthDiff != null ? (a.priorYearMonth.prevMonthDiff >= 0 ? "#9ec9a8" : "#dca06a") : "rgba(240,232,208,0.9)",
               }}
@@ -5677,7 +5638,7 @@ function MonthlySummaryPanel({ monthlyAnalysis, narrow, dy, pct, pct1, signedDy 
             </strong>
           </div>
           <div>
-            前年同月比 <strong style={{ color: "rgba(240,232,208,0.9)", fontSize: narrow ? "1.02rem" : "1rem" }}>{a.priorYearMonth.prevMonthRate != null ? pct1(a.priorYearMonth.prevMonthRate) : "—"}</strong>
+            前年同月比 <strong style={{ color: "rgba(240,232,208,0.9)", fontSize: narrow ? "1.02rem" : "1.08rem" }}>{a.priorYearMonth.prevMonthRate != null ? pct1(a.priorYearMonth.prevMonthRate) : "—"}</strong>
           </div>
         </div>
       </div>
@@ -7109,7 +7070,7 @@ export default function SalesModule({ events = [], navigateBack }) {
                   paddingLeft: "1.2rem",
                   display: "grid",
                   gap: vp.narrow ? ".55rem" : ".5rem",
-                  fontSize: vp.narrow ? ".82rem" : ".88rem",
+                  fontSize: vp.narrow ? ".82rem" : ".94rem",
                   lineHeight: 1.65,
                   color: "rgba(240,232,208,0.86)",
                 }}
@@ -7175,7 +7136,7 @@ export default function SalesModule({ events = [], navigateBack }) {
             <CostProfitBarList bars={monthlyAnalysis.costProfitBars} maxValue={monthlyAnalysis.costProfitMax} taxMode={taxMode} narrow={vp.narrow} />
             <div style={{ marginTop: ".55rem", paddingTop: ".5rem", borderTop: "1px dashed rgba(201,168,76,0.2)" }}>
               <div style={{ fontSize: ".66rem", color: "rgba(201,168,76,0.85)", marginBottom: ".32rem" }}>営業粗利</div>
-              <div style={{ display: "grid", gridTemplateColumns: rGridCols(vp.narrow, 150), gap: ".32rem .55rem", fontSize: vp.narrow ? ".88rem" : ".74rem", color: "rgba(240,232,208,0.82)", ...analysisSectionWrap(vp.narrow) }}>
+              <div style={{ display: "grid", gridTemplateColumns: rGridCols(vp.narrow, 150), gap: ".32rem .55rem", fontSize: vp.narrow ? ".88rem" : ".86rem", color: "rgba(240,232,208,0.82)", ...analysisSectionWrap(vp.narrow) }}>
                 {vp.narrow ? (
                   <>
                     <AnalysisStackedRow narrow label="営業粗利" value={monthlyAnalysis.totalSalesSum > 0 ? dy(monthlyAnalysis.operatingGrossProfitSum) : "—"} border={false} />
@@ -7202,7 +7163,7 @@ export default function SalesModule({ events = [], navigateBack }) {
             </div>
             <div style={{ marginTop: ".55rem", paddingTop: ".5rem", borderTop: "1px dashed rgba(201,168,76,0.2)" }}>
               <div style={{ fontSize: ".66rem", color: "rgba(201,168,76,0.85)", marginBottom: ".32rem" }}>原価率</div>
-              <div style={{ display: "grid", gridTemplateColumns: rGridCols(vp.narrow, 150), gap: ".32rem .55rem", fontSize: vp.narrow ? ".88rem" : ".74rem", color: "rgba(240,232,208,0.82)", ...analysisSectionWrap(vp.narrow) }}>
+              <div style={{ display: "grid", gridTemplateColumns: rGridCols(vp.narrow, 150), gap: ".32rem .55rem", fontSize: vp.narrow ? ".88rem" : ".86rem", color: "rgba(240,232,208,0.82)", ...analysisSectionWrap(vp.narrow) }}>
                 {vp.narrow ? (
                   <>
                     <AnalysisStackedRow narrow label="総仕入率" value={pct1(monthlyAnalysis.purchaseCostRates.totalPurchaseRate)} border={false} />
@@ -7988,7 +7949,7 @@ export default function SalesModule({ events = [], navigateBack }) {
                 </div>
                 <div style={{ marginTop: ".55rem", paddingTop: ".5rem", borderTop: "1px dashed rgba(201,168,76,0.2)" }}>
                   <div style={{ fontSize: ".66rem", color: "rgba(201,168,76,0.85)", marginBottom: ".32rem" }}>年間原価率</div>
-                  <div style={{ display: "grid", gridTemplateColumns: rGridCols(vp.narrow, 150), gap: ".32rem .55rem", fontSize: vp.narrow ? ".88rem" : ".74rem", color: "rgba(240,232,208,0.82)" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: rGridCols(vp.narrow, 150), gap: ".32rem .55rem", fontSize: vp.narrow ? ".88rem" : ".86rem", color: "rgba(240,232,208,0.82)" }}>
                     <div>総仕入率 <span style={{ color: "#f0e8d0" }}>{pct1(yearlyAnalysis.yearlyPurchaseCostRates.totalPurchaseRate)}</span></div>
                     <div>ドリンク原価率 <span style={{ color: "#f0e8d0" }}>{pct1(yearlyAnalysis.yearlyPurchaseCostRates.drinkCostRate)}</span></div>
                     <div>フード原価率 <span style={{ color: "#f0e8d0" }}>{pct1(yearlyAnalysis.yearlyPurchaseCostRates.foodCostRate)}</span></div>
