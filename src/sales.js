@@ -8,6 +8,14 @@ const SALES_ADMIN_TAB_KEY = "honeybee:salesAdminTab";
 const SALES_TARGET_MONTH_KEY = "honeybee:salesTargetMonth";
 const SALES_TAX_MODE_KEY = "honeybee:salesTaxMode";
 const TAX_RATE = 0.10;
+// 損益分岐目安：固定費287.9万円 ÷ 限界利益率80.8% ≒ 税抜356万円
+const BREAK_EVEN_SALES_EX_TAX = 3560000;
+const BREAK_EVEN_SAFE_LINE_EX_TAX = 3600000;
+const BREAK_EVEN_SMALL_PROFIT_EX_TAX = 3800000;
+const BREAK_EVEN_STABLE_LINE_EX_TAX = 4000000;
+const BREAK_EVEN_GOOD_LINE_EX_TAX = 4500000;
+const BREAK_EVEN_STRONG_LINE_EX_TAX = 5000000;
+const BREAK_EVEN_LINE_NOTE = "※損益分岐判定は税抜売上ベースです。";
 const SALES_MONTH_OPTIONS_2026 = Array.from({ length: 12 }, (_, i) => {
   const mm = String(i + 1).padStart(2, "0");
   return { value: `2026-${mm}`, label: `2026年${mm}月` };
@@ -697,6 +705,142 @@ function formatSignedDisplayYen(value, taxMode) {
   const sign = n > 0 ? "+" : "-";
   return `${sign}${yen(Math.abs(n))}`;
 }
+function toExTaxSales_(grossSales) {
+  if (grossSales == null || Number.isNaN(Number(grossSales))) return null;
+  return displayMoneyValue(grossSales, "net");
+}
+function formatExTaxYen_(value) {
+  if (value == null || !Number.isFinite(Number(value))) return "—";
+  return yen(Math.round(Number(value)));
+}
+function formatSignedExTaxYen_(value) {
+  if (value == null || !Number.isFinite(Number(value))) return "—";
+  const n = Math.round(Number(value));
+  if (n === 0) return yen(0);
+  return `${n > 0 ? "+" : "-"}${yen(Math.abs(n))}`;
+}
+const BREAK_EVEN_LINE_DEFINITIONS = [
+  { key: "strong", threshold: BREAK_EVEN_STRONG_LINE_EX_TAX, label: "強い月", badge: "強い" },
+  { key: "good", threshold: BREAK_EVEN_GOOD_LINE_EX_TAX, label: "かなり良い", badge: "良い" },
+  { key: "stable", threshold: BREAK_EVEN_STABLE_LINE_EX_TAX, label: "安定ライン", badge: "安定" },
+  { key: "smallProfit", threshold: BREAK_EVEN_SMALL_PROFIT_EX_TAX, label: "小幅黒字ライン", badge: "小幅黒字" },
+  { key: "minimum", threshold: BREAK_EVEN_SAFE_LINE_EX_TAX, label: "最低ライン到達", badge: "最低" },
+  { key: "below", threshold: 0, label: "損益分岐未達", badge: "未達" },
+];
+function resolveBreakEvenLine_(exTaxSales) {
+  const sales = exTaxSales != null && Number.isFinite(Number(exTaxSales)) ? Number(exTaxSales) : null;
+  if (sales == null || sales <= 0) {
+    return {
+      exTaxSales: sales,
+      tierKey: null,
+      label: null,
+      badge: null,
+      gapFromBreakEven: null,
+      gapLabel: null,
+      isAboveBreakEven: false,
+      isAboveSafeLine: false,
+      hasActualSales: false,
+    };
+  }
+  let tier = BREAK_EVEN_LINE_DEFINITIONS.find((d) => d.key === "below");
+  for (const def of BREAK_EVEN_LINE_DEFINITIONS) {
+    if (def.key !== "below" && sales >= def.threshold) {
+      tier = def;
+      break;
+    }
+  }
+  const gap = sales - BREAK_EVEN_SALES_EX_TAX;
+  return {
+    exTaxSales: sales,
+    tierKey: tier.key,
+    label: tier.label,
+    badge: tier.badge,
+    gapFromBreakEven: gap,
+    gapLabel: gap >= 0 ? `損益分岐超過：${formatSignedExTaxYen_(gap)}` : `損益分岐まで：${formatExTaxYen_(Math.abs(gap))}`,
+    isAboveBreakEven: sales >= BREAK_EVEN_SALES_EX_TAX,
+    isAboveSafeLine: sales >= BREAK_EVEN_SAFE_LINE_EX_TAX,
+    hasActualSales: true,
+  };
+}
+function buildBreakEvenAnalysis_(totalSalesSum) {
+  const line = resolveBreakEvenLine_(toExTaxSales_(totalSalesSum));
+  return {
+    breakEvenLineExTax: BREAK_EVEN_SALES_EX_TAX,
+    safeLineExTax: BREAK_EVEN_SAFE_LINE_EX_TAX,
+    ...line,
+  };
+}
+function breakEvenLineBadgeTone_(tierKey) {
+  switch (tierKey) {
+    case "strong":
+      return { bg: "rgba(102,197,124,0.22)", bd: "rgba(102,197,124,0.45)", tx: "#9ec9a8" };
+    case "good":
+      return { bg: "rgba(126,200,126,0.18)", bd: "rgba(126,200,126,0.4)", tx: "#9ec9b8" };
+    case "stable":
+      return { bg: "rgba(126,180,200,0.16)", bd: "rgba(126,180,200,0.38)", tx: "#a8c4d4" };
+    case "smallProfit":
+      return { bg: "rgba(201,168,76,0.14)", bd: "rgba(201,168,76,0.32)", tx: "rgba(230,210,160,0.92)" };
+    case "minimum":
+      return { bg: "rgba(201,168,76,0.1)", bd: "rgba(201,168,76,0.26)", tx: "rgba(210,195,150,0.85)" };
+    case "below":
+    default:
+      return { bg: "rgba(190,120,88,0.14)", bd: "rgba(190,120,88,0.32)", tx: "#dca06a" };
+  }
+}
+function countBreakEvenMonths_(months) {
+  const actualMonths = (months || []).filter((m) => m.breakEvenAnalysis?.hasActualSales);
+  const countTier = (key) =>
+    actualMonths.filter((m) => {
+      const sales = Number(m.breakEvenAnalysis?.exTaxSales || 0);
+      if (key === "aboveBreakEven") return sales >= BREAK_EVEN_SALES_EX_TAX;
+      if (key === "safeLine") return sales >= BREAK_EVEN_SAFE_LINE_EX_TAX;
+      if (key === "stable") return sales >= BREAK_EVEN_STABLE_LINE_EX_TAX;
+      if (key === "good") return sales >= BREAK_EVEN_GOOD_LINE_EX_TAX;
+      if (key === "strong") return sales >= BREAK_EVEN_STRONG_LINE_EX_TAX;
+      return false;
+    }).length;
+  return {
+    actualMonthCount: actualMonths.length,
+    aboveBreakEvenCount: countTier("aboveBreakEven"),
+    safeLineCount: countTier("safeLine"),
+    stableLineCount: countTier("stable"),
+    goodLineCount: countTier("good"),
+    strongLineCount: countTier("strong"),
+  };
+}
+function buildBreakEvenMonthlyComment_(ctx) {
+  const { analysis: a, tier, phase } = ctx;
+  const be = a.breakEvenAnalysis;
+  if (!be?.hasActualSales) return null;
+
+  const safeMan = Math.round(BREAK_EVEN_SAFE_LINE_EX_TAX / 10000);
+
+  if (be.tierKey === "good") {
+    return "税抜450万円を超えており、かなり良い月です。ここからは売上だけでなく、営業利益率・人件費率・仕入れ率が崩れていないかを確認してください。";
+  }
+  if (be.tierKey === "strong") {
+    return "税抜500万円前後の強い月です。売上だけでなく、営業利益率・人件費率・仕入れ率が崩れていないかを確認してください。";
+  }
+  if (!be.isAboveSafeLine) {
+    const tail = phase.currentMonth
+      ? "残り営業日は集客不足日と単価不足日のどちらを埋めるかを絞って対応してください。"
+      : "次月はまず損益分岐超えを最優先にし、目標設定と集客・単価のどちらがボトルネックかを確認してください。";
+    return `税抜${safeMan}万円の最低ラインに届いていません。まずは損益分岐超えを最優先にし、${tail}`;
+  }
+  if (tier !== "achieved" && be.isAboveSafeLine) {
+    const tail = phase.currentMonth
+      ? "残り営業日は利益の上積みを狙う局面です。"
+      : "赤字回避ラインはクリアしています。";
+    return `月間目標には届いていませんが、税抜${safeMan}万円の最低ラインは超えています。${tail}`;
+  }
+  if (tier === "achieved" && (be.tierKey === "minimum" || be.tierKey === "smallProfit")) {
+    return `目標は達成していますが、税抜${safeMan}万円の最低ライン付近です。目標設定が低い可能性があるため、来月は損益分岐ラインを下回らない目標設計にしてください。`;
+  }
+  if (be.tierKey === "stable") {
+    return "税抜400万円の安定ラインを超えています。目標達成とあわせ、営業利益率・仕入れ率が崩れていないかも確認してください。";
+  }
+  return null;
+}
 function formatPtDiff(value) {
   if (value == null || Number.isNaN(Number(value))) return "—";
   const n = Number(value);
@@ -1375,8 +1519,9 @@ function buildMonthlyImprovementComments_(analysis, taxMode, targetMonth, curren
   const causeOrSuccess = buildCauseOrSuccessComment_(ctx, used);
   const customerAction = buildCustomerAcquisitionActionComment_(ctx, used);
   const action = customerAction || buildMonthlyActionComment_(ctx, used);
+  const breakEvenComment = buildBreakEvenMonthlyComment_(ctx);
 
-  return [conclusion, comparison, causeOrSuccess, action].filter(Boolean).slice(0, 4);
+  return [conclusion, breakEvenComment, comparison, causeOrSuccess, action].filter(Boolean).slice(0, 4);
 }
 function classifyUnderTargetDay_(ctx) {
   const customerCount = ctx.customerCount != null ? Number(ctx.customerCount) : null;
@@ -2987,6 +3132,7 @@ function emptyMonthAggregate_(targetMonth, status, fetchError) {
     hasMonthlyCostSummary: false,
     purchaseCostRates: { totalPurchaseRate: null, drinkCostRate: null, foodCostRate: null },
     shortfall: 0,
+    breakEvenAnalysis: buildBreakEvenAnalysis_(0),
   };
 }
 function aggregateMonthFromRecords_(records, targetMonth, currentBusinessDate, monthlySummary) {
@@ -3073,6 +3219,7 @@ function aggregateMonthFromRecords_(records, targetMonth, currentBusinessDate, m
       bandFoodSalesSum
     ),
     shortfall: Math.max(0, targetSalesSum - totalSalesSum),
+    breakEvenAnalysis: buildBreakEvenAnalysis_(totalSalesSum),
   };
 }
 async function fetchSalesMonth_(targetMonth) {
@@ -4331,6 +4478,7 @@ const YEARLY_BASIC_COL = {
   month: 48,
   yen: 120,
   pct: 80,
+  breakEven: 72,
   status: 80,
 };
 const YEARLY_PURCHASE_COL = {
@@ -4555,6 +4703,118 @@ function YearlyMonthStatusBadge({ m }) {
     </span>
   );
 }
+function BreakEvenLineBadge({ breakEvenAnalysis, compact = false }) {
+  const be = breakEvenAnalysis;
+  if (!be?.hasActualSales || !be.badge) return null;
+  const tone = breakEvenLineBadgeTone_(be.tierKey);
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        fontSize: compact ? ".6rem" : ".62rem",
+        fontWeight: 600,
+        lineHeight: 1.25,
+        padding: compact ? ".05rem .28rem" : ".06rem .34rem",
+        borderRadius: 999,
+        border: `1px solid ${tone.bd}`,
+        background: tone.bg,
+        color: tone.tx,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {be.badge}
+    </span>
+  );
+}
+function BreakEvenMonthlySummaryBlock({ breakEvenAnalysis, narrow }) {
+  const be = breakEvenAnalysis;
+  if (!be) return null;
+  const tone = be.tierKey ? breakEvenLineBadgeTone_(be.tierKey) : null;
+  const rowStyle = narrow
+    ? undefined
+    : { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: ".28rem .65rem" };
+  return (
+    <div
+      style={{
+        marginTop: ".55rem",
+        paddingTop: ".5rem",
+        borderTop: "1px dashed rgba(201,168,76,0.16)",
+      }}
+    >
+      <div style={{ ...analysisNote({ color: "rgba(201,168,76,0.72)", marginBottom: ".28rem", fontWeight: 600 }, narrow) }}>
+        経営ライン（損益分岐）
+      </div>
+      {be.hasActualSales ? (
+        <div style={rowStyle}>
+          {narrow ? (
+            <>
+              <AnalysisStackedRow narrow label="損益分岐ライン" value={`税抜 ${formatExTaxYen_(be.breakEvenLineExTax)}`} />
+              <AnalysisStackedRow narrow label="現在（税抜）" value={formatExTaxYen_(be.exTaxSales)} valueStyle={analysisMetricStrong(narrow)} />
+              <AnalysisStackedRow
+                narrow
+                label="経営ライン判定"
+                value={
+                  <span
+                    style={{
+                      display: "inline-block",
+                      fontSize: ".76rem",
+                      fontWeight: 700,
+                      padding: ".12rem .5rem",
+                      borderRadius: 999,
+                      border: `1px solid ${tone.bd}`,
+                      background: tone.bg,
+                      color: tone.tx,
+                    }}
+                  >
+                    {be.label}
+                  </span>
+                }
+              />
+              <AnalysisStackedRow narrow label={be.gapFromBreakEven >= 0 ? "損益分岐超過額" : "損益分岐まで"} value={be.gapFromBreakEven >= 0 ? formatSignedExTaxYen_(be.gapFromBreakEven) : formatExTaxYen_(Math.abs(be.gapFromBreakEven))} border={false} />
+            </>
+          ) : (
+            <>
+              <div>
+                損益分岐ライン <strong style={{ color: "rgba(240,232,208,0.88)" }}>税抜 {formatExTaxYen_(be.breakEvenLineExTax)}</strong>
+              </div>
+              <div>
+                現在 <strong style={ANALYSIS_METRIC_STRONG}>税抜 {formatExTaxYen_(be.exTaxSales)}</strong>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: ".35rem", flexWrap: "wrap" }}>
+                判定{" "}
+                <span
+                  style={{
+                    display: "inline-block",
+                    fontSize: ".76rem",
+                    fontWeight: 700,
+                    padding: ".12rem .5rem",
+                    borderRadius: 999,
+                    border: `1px solid ${tone.bd}`,
+                    background: tone.bg,
+                    color: tone.tx,
+                  }}
+                >
+                  {be.label}
+                </span>
+              </div>
+              <div>
+                {be.gapFromBreakEven >= 0 ? "損益分岐超過" : "損益分岐まで"}{" "}
+                <strong style={{ color: be.gapFromBreakEven >= 0 ? "#9ec9a8" : "#dca06a" }}>
+                  {be.gapFromBreakEven >= 0 ? formatSignedExTaxYen_(be.gapFromBreakEven) : formatExTaxYen_(Math.abs(be.gapFromBreakEven))}
+                </strong>
+              </div>
+            </>
+          )}
+        </div>
+      ) : (
+        <div style={{ fontSize: narrow ? ".78rem" : ".76rem", color: "rgba(240,232,208,0.58)", lineHeight: 1.55 }}>
+          実績売上がないため、損益分岐判定はまだ出せません。
+        </div>
+      )}
+      <div style={analysisNote({ marginTop: ".28rem" }, narrow)}>{BREAK_EVEN_LINE_NOTE}</div>
+    </div>
+  );
+}
 function YearlyMonthCardsBasic({ monthRows, onMonthClick, taxMode, dy }) {
   return (
     <div style={{ display: "grid", gap: ".55rem" }}>
@@ -4593,11 +4853,19 @@ function YearlyMonthCardsBasic({ monthRows, onMonthClick, taxMode, dy }) {
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: ".5rem", gap: ".5rem", flexWrap: "wrap" }}>
               <div style={MOBILE_CARD_MONTH_TITLE_STYLE}>{m.monthLabel}</div>
-              <YearlyMonthStatusBadge m={m} />
+              <div style={{ display: "flex", alignItems: "center", gap: ".28rem", flexWrap: "wrap" }}>
+                <BreakEvenLineBadge breakEvenAnalysis={m.breakEvenAnalysis} compact />
+                <YearlyMonthStatusBadge m={m} />
+              </div>
             </div>
             <YearlyCardMetricRow label="売上" value={salesCell.text} muted={salesCell.muted} />
             <YearlyCardMetricRow label="目標" value={targetCell.text} muted={targetCell.muted} />
             <YearlyCardMetricRow label="進捗率" value={progressCell.text} muted={progressCell.muted} />
+            <YearlyCardMetricRow
+              label="経営ライン"
+              value={m.breakEvenAnalysis?.hasActualSales ? m.breakEvenAnalysis.label || "—" : "—"}
+              muted={!m.breakEvenAnalysis?.hasActualSales}
+            />
             <YearlyCardMetricRow label="飲食" value={foodCell.text} muted={foodCell.muted} />
             <YearlyCardMetricRow label="営業利益" value={profitCell.text} muted={profitCell.muted} />
             <YearlyCardMetricRow label="人件費" value={laborCell.text} muted={laborCell.muted} />
@@ -5226,6 +5494,7 @@ export default function SalesModule({ events = [], navigateBack }) {
       },
       (r) => resolveEventNameForAdmin(r, r.resolvedEventNames) || "イベント未登録"
     );
+    const breakEvenAnalysis = buildBreakEvenAnalysis_(totalSalesSum);
 
     return {
       targetMonth,
@@ -5289,6 +5558,7 @@ export default function SalesModule({ events = [], navigateBack }) {
       foodDrinkRankingTop10,
       drinkRankingTop10,
       foodRankingTop10,
+      breakEvenAnalysis,
     };
   }, [rows, events, targetMonth, currentBusinessDate, monthlySummary]);
   useEffect(() => {
@@ -5522,6 +5792,7 @@ export default function SalesModule({ events = [], navigateBack }) {
     const landing = buildLandingForecast_(monthRows, yearlyTotalSales, targetMetrics);
     const momComparison = buildMomComparison_(monthRows);
     const yearlyCustomerUnitPrice = unitPriceByCustomerCount_(yearlyTotalSales, yearlyCustomerCount);
+    const breakEvenMonthCounts = countBreakEvenMonths_(aggregatedMonths);
     return {
       targetYear,
       monthRows,
@@ -5569,6 +5840,7 @@ export default function SalesModule({ events = [], navigateBack }) {
       yearlyFoodDrinkGrossProfitRate,
       yearlyOperatingGrossProfit,
       yearlyOperatingGrossProfitRate,
+      breakEvenMonthCounts,
     };
   }, [yearlyMonthData, targetYear, currentBusinessDate]);
   const staffTodayRows = useMemo(
@@ -5896,6 +6168,7 @@ export default function SalesModule({ events = [], navigateBack }) {
                   <AnalysisStackedRow narrow label="実績日数" value={`${num(monthlyAnalysis.actualDayCount)}日`} />
                   <AnalysisStackedRow narrow label="本日以降の予定" value={`${num(monthlyAnalysis.futureDayCount)}件`} />
                   <AnalysisStackedRow narrow label="1日平均売上" value={dy(monthlyAnalysis.avgDailySales)} border={false} />
+                  <BreakEvenMonthlySummaryBlock breakEvenAnalysis={monthlyAnalysis.breakEvenAnalysis} narrow />
                 </>
               ) : (
                 <>
@@ -5945,6 +6218,7 @@ export default function SalesModule({ events = [], navigateBack }) {
                     <div>本日以降の予定 <strong>{num(monthlyAnalysis.futureDayCount)}件</strong></div>
                     <div>1日平均売上 <strong>{dy(monthlyAnalysis.avgDailySales)}</strong></div>
                   </div>
+                  <BreakEvenMonthlySummaryBlock breakEvenAnalysis={monthlyAnalysis.breakEvenAnalysis} narrow={false} />
                 </>
               )}
               <div
@@ -6621,6 +6895,46 @@ export default function SalesModule({ events = [], navigateBack }) {
                   <div>年間フード <strong>{dy(yearlyAnalysis.yearlyFood)}</strong></div>
                   <div>集計済み月数 <strong>{num(yearlyAnalysis.aggregatedMonthCount)}ヶ月</strong></div>
                 </div>
+                {yearlyAnalysis.breakEvenMonthCounts?.actualMonthCount > 0 ? (
+                  <div
+                    style={{
+                      marginTop: ".55rem",
+                      paddingTop: ".5rem",
+                      borderTop: "1px dashed rgba(201,168,76,0.16)",
+                      display: "grid",
+                      gridTemplateColumns: rGridCols(vp.narrow, 220),
+                      gap: ".28rem .65rem",
+                      fontSize: vp.narrow ? ".84rem" : ".82rem",
+                      color: "rgba(240,232,208,0.82)",
+                    }}
+                  >
+                    <div style={{ gridColumn: "1 / -1", fontSize: ".72rem", color: "rgba(201,168,76,0.78)", fontWeight: 600 }}>
+                      損益分岐達成月数
+                    </div>
+                    <div>
+                      損益分岐超え{" "}
+                      <strong>
+                        {num(yearlyAnalysis.breakEvenMonthCounts.aboveBreakEvenCount)}ヶ月 / 実績
+                        {num(yearlyAnalysis.breakEvenMonthCounts.actualMonthCount)}ヶ月
+                      </strong>
+                    </div>
+                    <div>
+                      最低ライン到達 <strong>{num(yearlyAnalysis.breakEvenMonthCounts.safeLineCount)}ヶ月</strong>
+                    </div>
+                    <div>
+                      安定ライン超え <strong>{num(yearlyAnalysis.breakEvenMonthCounts.stableLineCount)}ヶ月</strong>
+                    </div>
+                    <div>
+                      かなり良い月 <strong>{num(yearlyAnalysis.breakEvenMonthCounts.goodLineCount)}ヶ月</strong>
+                    </div>
+                    <div>
+                      強い月 <strong>{num(yearlyAnalysis.breakEvenMonthCounts.strongLineCount)}ヶ月</strong>
+                    </div>
+                    <div style={{ gridColumn: "1 / -1", fontSize: ".68rem", color: "rgba(240,232,208,0.48)", lineHeight: 1.45 }}>
+                      {BREAK_EVEN_LINE_NOTE}
+                    </div>
+                  </div>
+                ) : null}
               </div>
 
               {(() => {
@@ -6839,6 +7153,7 @@ export default function SalesModule({ events = [], navigateBack }) {
                           <th style={yearlyThStyle_(YEARLY_BASIC_COL.yen)}>売上</th>
                           <th style={yearlyThStyle_(YEARLY_BASIC_COL.yen)}>目標</th>
                           <th style={yearlyThStyle_(YEARLY_BASIC_COL.pct)}>進捗率</th>
+                          <th style={yearlyThStyle_(YEARLY_BASIC_COL.breakEven, "center")}>経営ライン</th>
                           <th style={yearlyThStyle_(YEARLY_BASIC_COL.yen)}>飲食</th>
                           <th style={yearlyThStyle_(YEARLY_BASIC_COL.yen)}>営業利益</th>
                           <th style={yearlyThStyle_(YEARLY_BASIC_COL.yen)}>人件費</th>
@@ -6857,6 +7172,9 @@ export default function SalesModule({ events = [], navigateBack }) {
                             <YearlyTableNumberCell m={m} value={m.totalSalesSum} width={YEARLY_BASIC_COL.yen} taxMode={taxMode} />
                             <YearlyTableNumberCell m={m} value={m.targetSalesSum} width={YEARLY_BASIC_COL.yen} taxMode={taxMode} />
                             <YearlyTableNumberCell m={m} value={m.progressRate} kind="pct" width={YEARLY_BASIC_COL.pct} />
+                            <td style={yearlyNumTdStyle_(YEARLY_BASIC_COL.breakEven, !m.breakEvenAnalysis?.hasActualSales)}>
+                              <BreakEvenLineBadge breakEvenAnalysis={m.breakEvenAnalysis} compact />
+                            </td>
                             <YearlyTableNumberCell m={m} value={m.foodDrinkSalesIncludingBandSum} width={YEARLY_BASIC_COL.yen} taxMode={taxMode} />
                             <YearlyTableNumberCell m={m} value={m.operatingProfitSum} width={YEARLY_BASIC_COL.yen} taxMode={taxMode} />
                             <YearlyTableNumberCell m={m} value={m.laborCostSum} width={YEARLY_BASIC_COL.yen} taxMode={taxMode} />
