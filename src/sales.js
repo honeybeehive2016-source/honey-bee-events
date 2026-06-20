@@ -1507,6 +1507,35 @@ function buildMonthlyActionComment_(ctx, used) {
     ? "次月は未達日の分類結果を起点に、集客設計と来店後の注文導線のどちらを優先するか決めてください。"
     : "残り営業日は未達日の分類結果を起点に、集客設計と来店後の注文導線のどちらを優先するか決めてください。";
 }
+function buildVenueUnitPriceMonthlyComment_(ctx) {
+  const a = ctx.analysis;
+  const venueSum = Number(a.venueFeeSum || 0);
+  const total = Number(a.totalSalesSum || 0);
+  if (venueSum <= 0 || total <= 0 || venueSum / total < 0.06) return null;
+
+  const totalUnit = a.customerUnitPrice;
+  const foodUnit = a.foodDrinkUnitPrice;
+  const exVenueUnit = a.customerUnitPriceExVenue;
+
+  if (
+    totalUnit != null &&
+    foodUnit != null &&
+    exVenueUnit != null &&
+    totalUnit > foodUnit * 1.05 &&
+    totalUnit > exVenueUnit * 1.03
+  ) {
+    return "総客単価は高く見えますが、会場費の影響があります。飲食単価を見ると伸びしろがあるため、ドリンク・フードの注文設計を確認してください。";
+  }
+  if (
+    exVenueUnit != null &&
+    foodUnit != null &&
+    a.normalFoodDrinkUnitPrice != null &&
+    foodUnit >= a.normalFoodDrinkUnitPrice * 0.98
+  ) {
+    return "会場費を除いても飲食単価が高く、来店後の売上化は良好です。";
+  }
+  return null;
+}
 function buildMonthlyImprovementComments_(analysis, taxMode, targetMonth, currentBusinessDate, yearlyMonthData) {
   const ctx = buildAdviceContext_(analysis, taxMode, targetMonth, currentBusinessDate, yearlyMonthData);
   if (ctx.phase.futureMonth) {
@@ -1520,8 +1549,9 @@ function buildMonthlyImprovementComments_(analysis, taxMode, targetMonth, curren
   const customerAction = buildCustomerAcquisitionActionComment_(ctx, used);
   const action = customerAction || buildMonthlyActionComment_(ctx, used);
   const breakEvenComment = buildBreakEvenMonthlyComment_(ctx);
+  const venueUnitComment = buildVenueUnitPriceMonthlyComment_(ctx);
 
-  return [conclusion, breakEvenComment, comparison, causeOrSuccess, action].filter(Boolean).slice(0, 4);
+  return [conclusion, breakEvenComment, venueUnitComment, comparison, causeOrSuccess, action].filter(Boolean).slice(0, 4);
 }
 function classifyUnderTargetDay_(ctx) {
   const customerCount = ctx.customerCount != null ? Number(ctx.customerCount) : null;
@@ -2475,6 +2505,16 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison,
           : "目標が未入力です。次回までに目標売上と、タブレット/QRで出すおすすめ枠の仮決めをしてください。";
   }
 
+  const venueFee = row.venueFee != null ? Number(row.venueFee) : 0;
+  const venueFeeRate = totalSales > 0 ? venueFee / totalSales : 0;
+  const venueFeeNote =
+    venueFee > 0 && venueFeeRate >= 0.08
+      ? "この日は会場費売上が含まれているため、総客単価だけで飲食の強さを判断しないでください。飲食単価とドリンク/フード売上を分けて確認してください。"
+      : "";
+  if (venueFeeNote) {
+    businessSummary = businessSummary ? `${businessSummary} ${venueFeeNote}` : venueFeeNote;
+  }
+
   const judgmentPoints = [];
   if (achievementTier === "strongSuccess") {
     judgmentPoints.push({
@@ -2563,6 +2603,12 @@ function buildSelectedDayAnalysis_(row, monthly, taxMode, pastSimilarComparison,
         runKind === "booking"
           ? "初回イベントのため、次回は出演者への告知協力内容を事前に決め、1週間前に予約数を確認する運用にしてください。"
           : "初回イベントのため、次回は固定客向け案内とイベント専用おすすめ表示の構成を記録してください。",
+    });
+  }
+  if (venueFeeNote) {
+    judgmentPoints.push({
+      label: "会場費",
+      text: "会場費が総売上の一定割合を占めています。総客単価ではなく飲食単価・ドリンク/フード売上で来店後の実力を確認してください。",
     });
   }
   if (drinkFood.hasData && drinkFood.drinkSales != null) {
@@ -3160,6 +3206,18 @@ function aggregateMonthFromRecords_(records, targetMonth, currentBusinessDate, m
     : null;
   const drinkSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.drinkSales || 0), 0);
   const foodSalesSum = actualRows.reduce((s, r) => s + Number(r?.metrics?.foodSales || 0), 0);
+  const venueFeeSum = actualRows.reduce((s, r) => s + pickMetricValue(r?.metrics, VENUE_FEE_KEYS), 0);
+  const rentalSalesSum = actualRows.reduce((s, r) => s + pickMetricValue(r?.metrics, RENTAL_SALES_KEYS), 0);
+  const unitPrices = buildUnitPriceMetrics_({
+    totalSales: totalSalesSum,
+    customerCount: customerCountSum,
+    drinkSales: drinkSalesSum,
+    foodSales: foodSalesSum,
+    foodDrinkSales: foodDrinkSalesSum,
+    bandFoodDrinkSales: bandFoodDrinkSalesSum,
+    venueFee: venueFeeSum,
+    rentalSales: rentalSalesSum,
+  });
   const operatingProfitSum = pickMonthlyCostMetric_(monthlySummary, actualRows, "operatingProfit");
   const laborCostSum = pickMonthlyCostMetric_(monthlySummary, actualRows, "laborCost");
   const purchaseTotalSum = pickMonthlyCostMetric_(monthlySummary, actualRows, "purchaseTotal");
@@ -3186,8 +3244,15 @@ function aggregateMonthFromRecords_(records, targetMonth, currentBusinessDate, m
     liveTimeCustomerCountSum,
     barTimeCustomerRate,
     avgDailyCustomerCount: actualRows.length > 0 ? customerCountSum / actualRows.length : null,
-    customerUnitPrice: unitPriceByCustomerCount_(totalSalesSum, customerCountSum),
-    normalCustomerUnitPrice: unitPriceByCustomerCount_(totalSalesSum - bandFoodDrinkSalesSum, customerCountSum),
+    customerUnitPrice: unitPrices.customerUnitPrice,
+    normalCustomerUnitPrice: unitPrices.normalCustomerUnitPrice,
+    foodDrinkUnitPrice: unitPrices.foodDrinkUnitPrice,
+    foodDrinkUnitPriceIncludingBand: unitPrices.foodDrinkUnitPrice,
+    normalFoodDrinkUnitPrice: unitPrices.normalFoodDrinkUnitPrice,
+    customerUnitPriceExVenue: unitPrices.customerUnitPriceExVenue,
+    normalCustomerUnitPriceExVenue: unitPrices.normalCustomerUnitPriceExVenue,
+    venueFeeSum,
+    rentalSalesSum,
     hasBandDrinkBreakdown,
     hasBandFoodBreakdown,
     bandDrinkSalesSum,
@@ -3413,7 +3478,16 @@ function readSalesTargetMonth() {
     return normalizeMonth("");
   }
 }
-const VENUE_SALES_KEYS = ["venueFee", "venueSales"];
+const VENUE_FEE_KEYS = [
+  "venueFee",
+  "hallFee",
+  "venueSales",
+  "hallRental",
+  "roomFee",
+  "spaceFee",
+  "rentalVenueFee",
+];
+const VENUE_SALES_KEYS = VENUE_FEE_KEYS;
 const RENTAL_SALES_KEYS = ["hallRentalSales", "rentalSales", "hallRentalFee", "rentalFee"];
 const BAND_FOOD_DRINK_SALES_KEYS = ["bandFoodDrinkSales"];
 const BAND_DRINK_SALES_KEYS = ["bandDrinkSales", "bandMealDrinkSales", "bandDrink"];
@@ -3432,6 +3506,53 @@ const CUSTOMER_COUNT_KEYS = [
 const BAR_TIME_CUSTOMER_COUNT_KEYS = ["barTimeCustomerCount"];
 const BAR_TIME_UNIT_PRICE_NOTE =
   "※バータイム売上は分けていないため、バータイム単価は表示していません。";
+const VENUE_FEE_EXCLUSION_NOTE =
+  "※会場費除外単価は、総売上から会場費を除いた補助指標です。レンタル・その他売上は含まれます。";
+function sumFoodDrinkSalesBase_(drinkSales, foodSales, foodDrinkSales) {
+  if (drinkSales != null && foodSales != null) {
+    const drink = Number(drinkSales);
+    const food = Number(foodSales);
+    if (Number.isFinite(drink) && Number.isFinite(food)) return drink + food;
+  }
+  if (foodDrinkSales != null && Number.isFinite(Number(foodDrinkSales))) return Number(foodDrinkSales);
+  return null;
+}
+function buildUnitPriceMetrics_({
+  totalSales,
+  customerCount,
+  drinkSales,
+  foodSales,
+  foodDrinkSales,
+  bandFoodDrinkSales,
+  venueFee,
+  rentalSales,
+}) {
+  const band = bandFoodDrinkSales != null ? Number(bandFoodDrinkSales) : 0;
+  const venue = venueFee != null ? Number(venueFee) : 0;
+  const rental = rentalSales != null ? Number(rentalSales) : 0;
+  const totalN = Number(totalSales || 0);
+  const foodBase = sumFoodDrinkSalesBase_(drinkSales, foodSales, foodDrinkSales);
+  const foodIncludingBand =
+    foodBase != null ? foodBase + band : foodDrinkSalesIncludingBand_(foodDrinkSales, bandFoodDrinkSales);
+  const otherNonFood = Math.max(
+    0,
+    totalN - Number(drinkSales || 0) - Number(foodSales || 0) - band - venue - rental
+  );
+  return {
+    customerUnitPrice: unitPriceByCustomerCount_(totalSales, customerCount),
+    normalCustomerUnitPrice: unitPriceByCustomerCount_(totalN - band, customerCount),
+    foodDrinkUnitPrice: unitPriceByCustomerCount_(foodIncludingBand, customerCount),
+    normalFoodDrinkUnitPrice: unitPriceByCustomerCount_(foodBase, customerCount),
+    customerUnitPriceExVenue: unitPriceByCustomerCount_(totalN - venue, customerCount),
+    normalCustomerUnitPriceExVenue: unitPriceByCustomerCount_(totalN - venue - band, customerCount),
+    hasVenueFee: venue > 0,
+    hasAuxiliarySalesNote: venue > 0 || rental > 0 || otherNonFood > 0,
+  };
+}
+function formatUnitYen_(value) {
+  if (value == null || Number.isNaN(Number(value))) return "—";
+  return `¥${num(value)}`;
+}
 function barTimeCustomerCountFromMetrics_(metrics) {
   return pickMetricNullable(metrics, BAR_TIME_CUSTOMER_COUNT_KEYS);
 }
@@ -4730,88 +4851,213 @@ function BreakEvenMonthlySummaryBlock({ breakEvenAnalysis, narrow }) {
   const be = breakEvenAnalysis;
   if (!be) return null;
   const tone = be.tierKey ? breakEvenLineBadgeTone_(be.tierKey) : null;
-  const rowStyle = narrow
-    ? undefined
-    : { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: ".28rem .65rem" };
+  const gapLabel = be.gapFromBreakEven >= 0 ? "超過" : "不足";
+  const gapValue =
+    be.gapFromBreakEven != null
+      ? be.gapFromBreakEven >= 0
+        ? formatSignedExTaxYen_(be.gapFromBreakEven)
+        : formatExTaxYen_(Math.abs(be.gapFromBreakEven))
+      : "—";
+
   return (
     <div
       style={{
-        marginTop: ".55rem",
-        paddingTop: ".5rem",
-        borderTop: "1px dashed rgba(201,168,76,0.16)",
+        padding: ".55rem .62rem",
+        borderRadius: 6,
+        border: `1px solid ${tone?.bd || "rgba(201,168,76,0.22)"}`,
+        background: tone?.bg || "rgba(0,0,0,0.14)",
+        minWidth: 0,
+        maxWidth: "100%",
+        boxSizing: "border-box",
       }}
     >
-      <div style={{ ...analysisNote({ color: "rgba(201,168,76,0.72)", marginBottom: ".28rem", fontWeight: 600 }, narrow) }}>
-        経営ライン（損益分岐）
+      <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.82)", fontWeight: 600, marginBottom: ".35rem", letterSpacing: ".04em" }}>
+        経営ライン
       </div>
       {be.hasActualSales ? (
-        <div style={rowStyle}>
-          {narrow ? (
-            <>
-              <AnalysisStackedRow narrow label="損益分岐ライン" value={`税抜 ${formatExTaxYen_(be.breakEvenLineExTax)}`} />
-              <AnalysisStackedRow narrow label="現在（税抜）" value={formatExTaxYen_(be.exTaxSales)} valueStyle={analysisMetricStrong(narrow)} />
-              <AnalysisStackedRow
-                narrow
-                label="経営ライン判定"
-                value={
-                  <span
-                    style={{
-                      display: "inline-block",
-                      fontSize: ".76rem",
-                      fontWeight: 700,
-                      padding: ".12rem .5rem",
-                      borderRadius: 999,
-                      border: `1px solid ${tone.bd}`,
-                      background: tone.bg,
-                      color: tone.tx,
-                    }}
-                  >
-                    {be.label}
-                  </span>
-                }
-              />
-              <AnalysisStackedRow narrow label={be.gapFromBreakEven >= 0 ? "損益分岐超過額" : "損益分岐まで"} value={be.gapFromBreakEven >= 0 ? formatSignedExTaxYen_(be.gapFromBreakEven) : formatExTaxYen_(Math.abs(be.gapFromBreakEven))} border={false} />
-            </>
-          ) : (
-            <>
-              <div>
-                損益分岐ライン <strong style={{ color: "rgba(240,232,208,0.88)" }}>税抜 {formatExTaxYen_(be.breakEvenLineExTax)}</strong>
-              </div>
-              <div>
-                現在 <strong style={ANALYSIS_METRIC_STRONG}>税抜 {formatExTaxYen_(be.exTaxSales)}</strong>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: ".35rem", flexWrap: "wrap" }}>
-                判定{" "}
-                <span
-                  style={{
-                    display: "inline-block",
-                    fontSize: ".76rem",
-                    fontWeight: 700,
-                    padding: ".12rem .5rem",
-                    borderRadius: 999,
-                    border: `1px solid ${tone.bd}`,
-                    background: tone.bg,
-                    color: tone.tx,
-                  }}
-                >
-                  {be.label}
-                </span>
-              </div>
-              <div>
-                {be.gapFromBreakEven >= 0 ? "損益分岐超過" : "損益分岐まで"}{" "}
-                <strong style={{ color: be.gapFromBreakEven >= 0 ? "#9ec9a8" : "#dca06a" }}>
-                  {be.gapFromBreakEven >= 0 ? formatSignedExTaxYen_(be.gapFromBreakEven) : formatExTaxYen_(Math.abs(be.gapFromBreakEven))}
-                </strong>
-              </div>
-            </>
-          )}
-        </div>
+        <>
+          <div style={{ display: "flex", alignItems: "center", gap: ".4rem", flexWrap: "wrap", marginBottom: ".38rem" }}>
+            <span style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.62)" }}>判定</span>
+            <BreakEvenLineBadge breakEvenAnalysis={be} />
+            {be.label ? (
+              <span style={{ fontSize: ".76rem", color: tone?.tx || "rgba(240,232,208,0.88)", fontWeight: 700 }}>{be.label}</span>
+            ) : null}
+          </div>
+          <div style={{ display: "grid", gap: ".22rem", fontSize: narrow ? ".8rem" : ".78rem", lineHeight: 1.5 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: ".5rem", minWidth: 0 }}>
+              <span style={{ color: "rgba(240,232,208,0.58)" }}>損益分岐目安</span>
+              <strong style={{ color: "rgba(240,232,208,0.9)", wordBreak: "break-word", textAlign: "right" }}>税抜 {formatExTaxYen_(be.breakEvenLineExTax)}</strong>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: ".5rem", minWidth: 0 }}>
+              <span style={{ color: "rgba(240,232,208,0.58)" }}>現在</span>
+              <strong style={{ color: "rgba(240,232,208,0.95)", fontSize: narrow ? ".92rem" : ".88rem", wordBreak: "break-word", textAlign: "right" }}>
+                税抜 {formatExTaxYen_(be.exTaxSales)}
+              </strong>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: ".5rem", minWidth: 0 }}>
+              <span style={{ color: "rgba(240,232,208,0.58)" }}>損益分岐まで{gapLabel === "超過" ? "の超過" : ""}</span>
+              <strong style={{ color: gapLabel === "超過" ? "#9ec9a8" : "#dca06a", wordBreak: "break-word", textAlign: "right" }}>{gapValue}</strong>
+            </div>
+          </div>
+        </>
       ) : (
         <div style={{ fontSize: narrow ? ".78rem" : ".76rem", color: "rgba(240,232,208,0.58)", lineHeight: 1.55 }}>
           実績売上がないため、損益分岐判定はまだ出せません。
         </div>
       )}
-      <div style={analysisNote({ marginTop: ".28rem" }, narrow)}>{BREAK_EVEN_LINE_NOTE}</div>
+      <div style={analysisNote({ marginTop: ".32rem" }, narrow)}>{BREAK_EVEN_LINE_NOTE}</div>
+    </div>
+  );
+}
+function SummaryMetricLine({ label, value, valueStyle, strong }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        gap: ".5rem",
+        alignItems: "baseline",
+        minWidth: 0,
+        maxWidth: "100%",
+        fontSize: ".8rem",
+        lineHeight: 1.5,
+      }}
+    >
+      <span style={{ color: "rgba(240,232,208,0.6)", flexShrink: 0 }}>{label}</span>
+      <strong
+        style={{
+          color: "rgba(240,232,208,0.92)",
+          wordBreak: "break-word",
+          textAlign: "right",
+          ...(strong ? { fontSize: ".9rem" } : {}),
+          ...valueStyle,
+        }}
+      >
+        {value}
+      </strong>
+    </div>
+  );
+}
+function SummarySubCard({ title, children, accent }) {
+  return (
+    <div
+      style={{
+        padding: ".5rem .58rem",
+        borderRadius: 6,
+        border: accent ? "1px solid rgba(201,168,76,0.24)" : "1px solid rgba(201,168,76,0.16)",
+        background: accent ? "rgba(201,168,76,0.05)" : "rgba(0,0,0,0.12)",
+        minWidth: 0,
+        maxWidth: "100%",
+        boxSizing: "border-box",
+      }}
+    >
+      <div style={{ fontSize: ".68rem", color: "rgba(201,168,76,0.82)", fontWeight: 600, marginBottom: ".32rem", letterSpacing: ".04em" }}>{title}</div>
+      <div style={{ display: "grid", gap: ".2rem" }}>{children}</div>
+    </div>
+  );
+}
+function MonthlySummaryPanel({ monthlyAnalysis, narrow, dy, pct, pct1, signedDy }) {
+  const a = monthlyAnalysis;
+  const tone = achievementTone(a.monthlyProgressRate, a.fullMonthTargetSalesSum > 0);
+  const targetReached = a.fullMonthTargetSalesSum > 0 && a.totalSalesSum >= a.fullMonthTargetSalesSum;
+  const targetGapLabel = targetReached ? "目標超過" : "目標まで";
+  const targetGapValue = targetReached
+    ? `+${dy(Math.abs(a.totalSalesSum - a.fullMonthTargetSalesSum))}`
+    : dy(Math.max(0, a.fullMonthTargetSalesSum - a.totalSalesSum));
+  const topGrid = narrow ? "1fr" : "minmax(0, 1.1fr) minmax(0, .9fr)";
+  const subGrid = narrow ? "1fr" : "repeat(2, minmax(0, 1fr))";
+
+  return (
+    <div style={{ display: "grid", gap: ".55rem", minWidth: 0, maxWidth: "100%" }}>
+      <div style={{ display: "grid", gridTemplateColumns: topGrid, gap: ".55rem", minWidth: 0, maxWidth: "100%" }}>
+        <SummarySubCard title="進捗・売上" accent>
+          <div style={{ display: "flex", alignItems: "baseline", gap: ".45rem", flexWrap: "wrap", marginBottom: ".15rem" }}>
+            <div style={{ fontSize: narrow ? "1.35rem" : "1.28rem", fontWeight: 700, color: "#f0e8d0", lineHeight: 1.2 }}>{pct(a.monthlyProgressRate)}</div>
+            <span
+              style={{
+                fontSize: ".72rem",
+                fontWeight: 700,
+                padding: ".14rem .5rem",
+                borderRadius: 999,
+                background: tone.chipBg,
+                border: `1px solid ${tone.chipBd}`,
+                color: tone.chipTx,
+              }}
+            >
+              {tone.label}
+            </span>
+          </div>
+          <SummaryMetricLine label="月間進捗率" value={pct(a.monthlyProgressRate)} />
+          <SummaryMetricLine label={targetGapLabel} value={targetGapValue} strong valueStyle={{ color: "#f3ead2" }} />
+          <SummaryMetricLine label="月間売上 / 目標" value={`${dy(a.totalSalesSum)} / ${dy(a.fullMonthTargetSalesSum)}`} />
+          <SummaryMetricLine label="実績日達成率" value={pct(a.actualAchievementRate)} />
+          <div style={{ fontSize: ".66rem", color: "rgba(240,232,208,0.45)", lineHeight: 1.45, marginTop: ".08rem" }}>
+            実績日ベース目標 {dy(a.actualTargetSalesSum)}
+          </div>
+        </SummarySubCard>
+        <BreakEvenMonthlySummaryBlock breakEvenAnalysis={a.breakEvenAnalysis} narrow={narrow} />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: subGrid, gap: ".55rem", minWidth: 0, maxWidth: "100%" }}>
+        <SummarySubCard title="集客・単価">
+          <SummaryMetricLine label="月間総集客" value={formatCustomerCountLabel_(a.customerCountSum)} />
+          <SummaryMetricLine
+            label="1日平均集客"
+            value={a.avgDailyCustomerCount != null ? `${num(a.avgDailyCustomerCount)}名` : "—"}
+          />
+          <SummaryMetricLine label="総客単価" value={formatUnitYen_(a.customerUnitPrice)} />
+          <SummaryMetricLine label="飲食単価" value={formatUnitYen_(a.foodDrinkUnitPrice)} />
+          <SummaryMetricLine label="通常飲食単価" value={formatUnitYen_(a.normalFoodDrinkUnitPrice)} />
+          <SummaryMetricLine label="会場費除外単価" value={formatUnitYen_(a.customerUnitPriceExVenue)} />
+          <div style={{ fontSize: ".64rem", color: "rgba(240,232,208,0.45)", lineHeight: 1.45, marginTop: ".1rem" }}>{BAR_TIME_UNIT_PRICE_NOTE}</div>
+          {a.hasVenueFeeInMonth ? (
+            <div style={{ fontSize: ".64rem", color: "rgba(240,232,208,0.45)", lineHeight: 1.45 }}>{VENUE_FEE_EXCLUSION_NOTE}</div>
+          ) : null}
+        </SummarySubCard>
+        <SummarySubCard title="利益">
+          <SummaryMetricLine label="営業粗利" value={a.totalSalesSum > 0 ? dy(a.operatingGrossProfitSum) : "—"} strong />
+          <SummaryMetricLine label="営業粗利率" value={a.operatingGrossProfitRate != null ? pct1(a.operatingGrossProfitRate) : "—"} />
+          <SummaryMetricLine label="営業利益" value={dy(a.operatingProfitSum)} />
+          <SummaryMetricLine label="営業利益率" value={pct(a.operatingProfitRate)} />
+          <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "repeat(3, minmax(0, 1fr))", gap: ".18rem .45rem", marginTop: ".18rem", fontSize: ".68rem", color: "rgba(240,232,208,0.52)" }}>
+            <span>実績 {num(a.actualDayCount)}日</span>
+            <span>予定 {num(a.futureDayCount)}件</span>
+            <span>日平均 {dy(a.avgDailySales)}</span>
+          </div>
+        </SummarySubCard>
+      </div>
+
+      <div
+        style={{
+          padding: ".45rem .55rem",
+          borderRadius: 6,
+          border: "1px dashed rgba(201,168,76,0.14)",
+          background: "rgba(0,0,0,0.08)",
+          minWidth: 0,
+          maxWidth: "100%",
+        }}
+      >
+        <div style={{ fontSize: ".66rem", color: "rgba(201,168,76,0.62)", marginBottom: ".22rem", fontWeight: 600 }}>前年同月比較（2025年固定）</div>
+        <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "repeat(3, minmax(0, 1fr))", gap: ".2rem .55rem", fontSize: ".76rem", color: "rgba(240,232,208,0.68)" }}>
+          <div>
+            前年同月売上 <strong style={{ color: "rgba(240,232,208,0.82)" }}>{a.priorYearMonth.prevMonthSales != null ? dy(a.priorYearMonth.prevMonthSales) : "—"}</strong>
+          </div>
+          <div>
+            前年同月差額{" "}
+            <strong
+              style={{
+                color:
+                  a.priorYearMonth.prevMonthDiff != null ? (a.priorYearMonth.prevMonthDiff >= 0 ? "#9ec9a8" : "#dca06a") : "rgba(240,232,208,0.82)",
+              }}
+            >
+              {a.priorYearMonth.prevMonthDiff != null ? signedDy(a.priorYearMonth.prevMonthDiff) : "—"}
+            </strong>
+          </div>
+          <div>
+            前年同月比 <strong style={{ color: "rgba(240,232,208,0.82)" }}>{a.priorYearMonth.prevMonthRate != null ? pct1(a.priorYearMonth.prevMonthRate) : "—"}</strong>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -5236,10 +5482,6 @@ export default function SalesModule({ events = [], navigateBack }) {
     const barTimeCustomerCountSum = actualRows.reduce((s, r) => s + pickMetricValue(r?.metrics, BAR_TIME_CUSTOMER_COUNT_KEYS), 0);
     const liveTimeCustomerCountSum = deriveLiveTimeCustomerCount_(customerCountSum, barTimeCustomerCountSum);
     const barTimeCustomerRate = calcRate(barTimeCustomerCountSum, customerCountSum);
-    const customerUnitPrice = unitPriceByCustomerCount_(totalSalesSum, customerCountSum);
-    const normalCustomerUnitPrice = unitPriceByCustomerCount_(totalSalesSum - bandFoodDrinkSalesSum, customerCountSum);
-    const foodDrinkUnitPrice = unitPriceByCustomerCount_(foodDrinkSalesSum, customerCountSum);
-    const foodDrinkUnitPriceIncludingBand = unitPriceByCustomerCount_(foodDrinkSalesIncludingBandSum, customerCountSum);
     const hasBandDrinkBreakdown = actualRows.some((r) => pickMetricNullable(r?.metrics, BAND_DRINK_SALES_KEYS) != null);
     const hasBandFoodBreakdown = actualRows.some((r) => pickMetricNullable(r?.metrics, BAND_FOOD_SALES_KEYS) != null);
     const bandDrinkSalesSum = hasBandDrinkBreakdown
@@ -5248,8 +5490,25 @@ export default function SalesModule({ events = [], navigateBack }) {
     const bandFoodSalesSum = hasBandFoodBreakdown
       ? actualRows.reduce((s, r) => s + pickMetricValue(r?.metrics, BAND_FOOD_SALES_KEYS), 0)
       : null;
-    const venueFeeSum = actualRows.reduce((s, r) => s + pickMetricValue(r?.metrics, VENUE_SALES_KEYS), 0);
+    const venueFeeSum = actualRows.reduce((s, r) => s + pickMetricValue(r?.metrics, VENUE_FEE_KEYS), 0);
     const rentalSalesSum = actualRows.reduce((s, r) => s + pickMetricValue(r?.metrics, RENTAL_SALES_KEYS), 0);
+    const customerUnitPrice = unitPriceByCustomerCount_(totalSalesSum, customerCountSum);
+    const unitPrices = buildUnitPriceMetrics_({
+      totalSales: totalSalesSum,
+      customerCount: customerCountSum,
+      drinkSales: drinkSalesSum,
+      foodSales: foodSalesSum,
+      foodDrinkSales: foodDrinkSalesSum,
+      bandFoodDrinkSales: bandFoodDrinkSalesSum,
+      venueFee: venueFeeSum,
+      rentalSales: rentalSalesSum,
+    });
+    const normalCustomerUnitPrice = unitPrices.normalCustomerUnitPrice;
+    const foodDrinkUnitPrice = unitPrices.foodDrinkUnitPrice;
+    const foodDrinkUnitPriceIncludingBand = unitPrices.foodDrinkUnitPrice;
+    const normalFoodDrinkUnitPrice = unitPrices.normalFoodDrinkUnitPrice;
+    const customerUnitPriceExVenue = unitPrices.customerUnitPriceExVenue;
+    const normalCustomerUnitPriceExVenue = unitPrices.normalCustomerUnitPriceExVenue;
     const otherSalesSum = Math.max(
       0,
       totalSalesSum - drinkSalesSum - foodSalesSum - bandFoodDrinkSalesSum - venueFeeSum - rentalSalesSum
@@ -5377,6 +5636,20 @@ export default function SalesModule({ events = [], navigateBack }) {
         const bandFoodDrinkSales = pickMetricNullable(r?.metrics, BAND_FOOD_DRINK_SALES_KEYS);
         const foodDrinkSalesBase = r?.metrics?.foodDrinkSales != null ? Number(r.metrics.foodDrinkSales) : null;
         const foodDrinkSalesIncludingBand = foodDrinkSalesIncludingBand_(foodDrinkSalesBase, bandFoodDrinkSales);
+        const drinkSalesVal = r?.metrics?.drinkSales != null ? Number(r.metrics.drinkSales) : null;
+        const foodSalesVal = r?.metrics?.foodSales != null ? Number(r.metrics.foodSales) : null;
+        const venueFeeVal = pickMetricNullable(r?.metrics, VENUE_FEE_KEYS);
+        const rentalSalesVal = pickMetricNullable(r?.metrics, RENTAL_SALES_KEYS);
+        const unitPrices = buildUnitPriceMetrics_({
+          totalSales,
+          customerCount,
+          drinkSales: drinkSalesVal,
+          foodSales: foodSalesVal,
+          foodDrinkSales: foodDrinkSalesBase,
+          bandFoodDrinkSales: bandFoodDrinkSales,
+          venueFee: venueFeeVal,
+          rentalSales: rentalSalesVal,
+        });
         const achievementRate = calcRate(totalSales, targetSales);
         const eventName = resolveEventNameForAdmin(r, r.resolvedEventNames) || "イベント未登録";
         const matchedEvent = matchEventForRecord(r, eventsForDate(events, r.businessDate));
@@ -5399,16 +5672,19 @@ export default function SalesModule({ events = [], navigateBack }) {
           trendLabel: trendTone.label,
           foodDrinkSalesBase,
           foodDrinkSalesIncludingBand,
-          drinkSales: r?.metrics?.drinkSales != null ? Number(r.metrics.drinkSales) : null,
-          foodSales: r?.metrics?.foodSales != null ? Number(r.metrics.foodSales) : null,
+          drinkSales: drinkSalesVal,
+          foodSales: foodSalesVal,
           customerCount,
           barTimeCustomerCount,
           liveTimeCustomerCount,
           barTimeCustomerRate,
-          customerUnitPrice: unitPriceByCustomerCount_(totalSales, customerCount),
-          normalCustomerUnitPrice: unitPriceByCustomerCount_(totalSales - Number(bandFoodDrinkSales || 0), customerCount),
-          foodDrinkUnitPrice: unitPriceByCustomerCount_(foodDrinkSalesBase, customerCount),
-          foodDrinkUnitPriceIncludingBand: unitPriceByCustomerCount_(foodDrinkSalesIncludingBand, customerCount),
+          customerUnitPrice: unitPrices.customerUnitPrice,
+          normalCustomerUnitPrice: unitPrices.normalCustomerUnitPrice,
+          foodDrinkUnitPrice: unitPrices.foodDrinkUnitPrice,
+          foodDrinkUnitPriceIncludingBand: unitPrices.foodDrinkUnitPrice,
+          normalFoodDrinkUnitPrice: unitPrices.normalFoodDrinkUnitPrice,
+          customerUnitPriceExVenue: unitPrices.customerUnitPriceExVenue,
+          normalCustomerUnitPriceExVenue: unitPrices.normalCustomerUnitPriceExVenue,
           operatingProfit: r?.metrics?.operatingProfit != null ? Number(r.metrics.operatingProfit) : null,
           cash: r?.metrics?.cash != null ? Number(r.metrics.cash) : null,
           creditCardSales: r?.metrics?.creditCardSales != null ? Number(r.metrics.creditCardSales) : null,
@@ -5423,8 +5699,8 @@ export default function SalesModule({ events = [], navigateBack }) {
           bandFoodDrinkSales: pickMetricNullable(r?.metrics, BAND_FOOD_DRINK_SALES_KEYS),
           bandDrinkSales: pickMetricNullable(r?.metrics, BAND_DRINK_SALES_KEYS),
           bandFoodSales: pickMetricNullable(r?.metrics, BAND_FOOD_SALES_KEYS),
-          venueFee: pickMetricNullable(r?.metrics, VENUE_SALES_KEYS),
-          rentalSales: pickMetricNullable(r?.metrics, RENTAL_SALES_KEYS),
+          venueFee: venueFeeVal,
+          rentalSales: rentalSalesVal,
         };
       });
     const trendMaxSales = dailyTrendRows.reduce((m, r) => Math.max(m, Number(r.totalSales || 0)), 0);
@@ -5518,6 +5794,10 @@ export default function SalesModule({ events = [], navigateBack }) {
       normalCustomerUnitPrice,
       foodDrinkUnitPrice,
       foodDrinkUnitPriceIncludingBand,
+      normalFoodDrinkUnitPrice,
+      customerUnitPriceExVenue,
+      normalCustomerUnitPriceExVenue,
+      hasVenueFeeInMonth: unitPrices.hasVenueFee,
       avgDailySales,
       operatingProfitSum,
       operatingProfitRate,
@@ -6119,175 +6399,14 @@ export default function SalesModule({ events = [], navigateBack }) {
         <div style={{ display:"grid", gap:".75rem", marginBottom:".75rem", ...analysisSectionWrap(vp.narrow) }}>
           <div style={analysisCardWrap("summary", vp.narrow)}>
             <div style={analysisSecTitle("summary", ".55rem")}>月次サマリー</div>
-            <div style={{ display:"grid", gap:".52rem", ...analysisSectionWrap(vp.narrow) }}>
-              <div style={{ display:"flex", alignItems:"baseline", gap:".45rem", flexWrap:"wrap", minWidth: 0, maxWidth: "100%" }}>
-                <div style={{ ...analysisMetricHero(vp.narrow, vp.mobile), maxWidth: "100%", wordBreak: "break-word" }}>{pct(monthlyAnalysis.monthlyProgressRate)}</div>
-                <span style={{ fontSize: vp.narrow ? ".8rem" : ".76rem", fontWeight: 700, padding: ".16rem .58rem", borderRadius: 999, background: achievementTone(monthlyAnalysis.monthlyProgressRate, monthlyAnalysis.fullMonthTargetSalesSum > 0).chipBg, border: "1px solid " + achievementTone(monthlyAnalysis.monthlyProgressRate, monthlyAnalysis.fullMonthTargetSalesSum > 0).chipBd, color: achievementTone(monthlyAnalysis.monthlyProgressRate, monthlyAnalysis.fullMonthTargetSalesSum > 0).chipTx }}>
-                  {achievementTone(monthlyAnalysis.monthlyProgressRate, monthlyAnalysis.fullMonthTargetSalesSum > 0).label}
-                </span>
-              </div>
-              {vp.narrow ? (
-                <>
-                  <AnalysisStackedRow
-                    narrow
-                    label={monthlyAnalysis.fullMonthTargetSalesSum > 0 && monthlyAnalysis.totalSalesSum >= monthlyAnalysis.fullMonthTargetSalesSum ? "月間目標達成" : "目標まで"}
-                    value={
-                      monthlyAnalysis.fullMonthTargetSalesSum > 0 && monthlyAnalysis.totalSalesSum >= monthlyAnalysis.fullMonthTargetSalesSum
-                        ? `+${dy(Math.abs(monthlyAnalysis.totalSalesSum - monthlyAnalysis.fullMonthTargetSalesSum))}`
-                        : dy(Math.max(0, monthlyAnalysis.fullMonthTargetSalesSum - monthlyAnalysis.totalSalesSum))
-                    }
-                    valueStyle={{ fontSize: "1.15rem" }}
-                  />
-                  <AnalysisStackedRow narrow label="月間進捗率" value={pct(monthlyAnalysis.monthlyProgressRate)} valueStyle={analysisMetricMid(vp.narrow)} />
-                  <AnalysisStackedRow narrow label="月間売上" value={dy(monthlyAnalysis.totalSalesSum)} valueStyle={analysisMetricStrong(vp.narrow)} />
-                  <CustomerCountSummaryBlock
-                    narrow={vp.narrow}
-                    parentItems={[
-                      { label: "月間総集客人数", value: formatCustomerCountLabel_(monthlyAnalysis.customerCountSum) },
-                      {
-                        label: "1日平均集客",
-                        value: monthlyAnalysis.avgDailyCustomerCount != null ? `${num(monthlyAnalysis.avgDailyCustomerCount)}名` : "—",
-                      },
-                    ]}
-                    breakdownItems={[
-                      { label: "ライブタイム人数", value: formatCustomerCountLabel_(monthlyAnalysis.liveTimeCustomerCountSum) },
-                      { label: "バータイム人数", value: formatCustomerCountLabel_(monthlyAnalysis.barTimeCustomerCountSum) },
-                      { label: "バータイム比率", value: pct(monthlyAnalysis.barTimeCustomerRate) },
-                    ]}
-                  />
-                  <div style={analysisNote({ marginTop: ".35rem" }, vp.narrow)}>{BAR_TIME_UNIT_PRICE_NOTE}</div>
-                  <AnalysisStackedRow narrow label="客単価" value={num(monthlyAnalysis.customerUnitPrice)} valueStyle={analysisMetricMid(vp.narrow)} />
-                  <AnalysisStackedRow narrow label="通常客単価" value={num(monthlyAnalysis.normalCustomerUnitPrice)} valueStyle={analysisMetricMid(vp.narrow)} />
-                  <AnalysisStackedRow narrow label="月間目標" value={dy(monthlyAnalysis.fullMonthTargetSalesSum)} valueStyle={analysisMetricStrong(vp.narrow)} />
-                  <AnalysisStackedRow narrow label="実績日達成率" value={pct(monthlyAnalysis.actualAchievementRate)} valueStyle={analysisMetricMid(vp.narrow)} />
-                  <div style={analysisNote({}, vp.narrow)}>※終了済み営業日の目標に対する達成率（実績日ベース目標 {dy(monthlyAnalysis.actualTargetSalesSum)}）</div>
-                  <AnalysisStackedRow narrow label="営業粗利" value={monthlyAnalysis.totalSalesSum > 0 ? dy(monthlyAnalysis.operatingGrossProfitSum) : "—"} valueStyle={analysisMetricStrong(vp.narrow)} />
-                  <AnalysisStackedRow narrow label="営業粗利率" value={monthlyAnalysis.operatingGrossProfitRate != null ? pct1(monthlyAnalysis.operatingGrossProfitRate) : "—"} valueStyle={analysisMetricMid(vp.narrow)} />
-                  <AnalysisStackedRow narrow label="営業利益" value={dy(monthlyAnalysis.operatingProfitSum)} valueStyle={analysisMetricMid(vp.narrow)} />
-                  <AnalysisStackedRow narrow label="営業利益率" value={pct(monthlyAnalysis.operatingProfitRate)} border={false} />
-                  <AnalysisStackedRow narrow label="実績日数" value={`${num(monthlyAnalysis.actualDayCount)}日`} />
-                  <AnalysisStackedRow narrow label="本日以降の予定" value={`${num(monthlyAnalysis.futureDayCount)}件`} />
-                  <AnalysisStackedRow narrow label="1日平均売上" value={dy(monthlyAnalysis.avgDailySales)} border={false} />
-                  <BreakEvenMonthlySummaryBlock breakEvenAnalysis={monthlyAnalysis.breakEvenAnalysis} narrow />
-                </>
-              ) : (
-                <>
-                  <div style={{ fontSize: ".94rem", color: "rgba(240,232,208,0.95)", fontWeight: 700 }}>
-                    {monthlyAnalysis.fullMonthTargetSalesSum > 0 && monthlyAnalysis.totalSalesSum >= monthlyAnalysis.fullMonthTargetSalesSum
-                      ? `月間目標達成 +${dy(Math.abs(monthlyAnalysis.totalSalesSum - monthlyAnalysis.fullMonthTargetSalesSum))}`
-                      : `目標まで ${dy(Math.max(0, monthlyAnalysis.fullMonthTargetSalesSum - monthlyAnalysis.totalSalesSum))}`}
-                  </div>
-                  <div style={{ fontSize: ".88rem" }}>
-                    月間進捗率 <strong style={ANALYSIS_METRIC_MID}>{pct(monthlyAnalysis.monthlyProgressRate)}</strong>
-                  </div>
-                  <div style={{ fontSize: ".88rem" }}>
-                    月間売上 <strong style={ANALYSIS_METRIC_STRONG}>{dy(monthlyAnalysis.totalSalesSum)}</strong> / 月間目標 <strong style={ANALYSIS_METRIC_STRONG}>{dy(monthlyAnalysis.fullMonthTargetSalesSum)}</strong>
-                  </div>
-                  <CustomerCountSummaryBlock
-                    narrow={vp.narrow}
-                    parentItems={[
-                      { label: "月間総集客人数", value: formatCustomerCountLabel_(monthlyAnalysis.customerCountSum) },
-                      {
-                        label: "1日平均集客",
-                        value: monthlyAnalysis.avgDailyCustomerCount != null ? `${num(monthlyAnalysis.avgDailyCustomerCount)}名` : "—",
-                      },
-                    ]}
-                    breakdownItems={[
-                      { label: "ライブタイム人数", value: formatCustomerCountLabel_(monthlyAnalysis.liveTimeCustomerCountSum) },
-                      { label: "バータイム人数", value: formatCustomerCountLabel_(monthlyAnalysis.barTimeCustomerCountSum) },
-                      { label: "バータイム比率", value: pct(monthlyAnalysis.barTimeCustomerRate) },
-                    ]}
-                  />
-                  <div style={{ fontSize: ".84rem", color:"rgba(240,232,208,0.85)", marginTop: ".35rem" }}>
-                    客単価 <strong>{num(monthlyAnalysis.customerUnitPrice)}</strong> / 通常客単価 <strong>{num(monthlyAnalysis.normalCustomerUnitPrice)}</strong>
-                  </div>
-                  <div style={analysisNote()}>{BAR_TIME_UNIT_PRICE_NOTE}</div>
-                  <div style={{ fontSize: ".82rem", color:"rgba(240,232,208,0.72)" }}>
-                    実績日達成率: <strong style={ANALYSIS_METRIC_SUB}>{pct(monthlyAnalysis.actualAchievementRate)}</strong>
-                    <span style={{ marginLeft: ".35rem", fontWeight: 400 }}>（実績日ベース目標 {dy(monthlyAnalysis.actualTargetSalesSum)}）</span>
-                  </div>
-                  <div style={analysisNote()}>※終了済み営業日の目標に対する達成率</div>
-                  <div style={{ fontSize: ".88rem" }}>
-                    営業粗利 <strong style={ANALYSIS_METRIC_STRONG}>{monthlyAnalysis.totalSalesSum > 0 ? dy(monthlyAnalysis.operatingGrossProfitSum) : "—"}</strong> / 営業粗利率 <strong style={ANALYSIS_METRIC_MID}>{monthlyAnalysis.operatingGrossProfitRate != null ? pct1(monthlyAnalysis.operatingGrossProfitRate) : "—"}</strong>
-                  </div>
-                  <div style={{ fontSize: ".88rem" }}>
-                    営業利益 <strong style={ANALYSIS_METRIC_MID}>{dy(monthlyAnalysis.operatingProfitSum)}</strong> / 営業利益率 <strong style={ANALYSIS_METRIC_SUB}>{pct(monthlyAnalysis.operatingProfitRate)}</strong>
-                  </div>
-                  <div style={{ display:"grid", gridTemplateColumns:rGridCols(vp.narrow, 180), gap:".35rem .8rem", fontSize:".84rem", color:"rgba(240,232,208,0.85)" }}>
-                    <div>実績日数 <strong>{num(monthlyAnalysis.actualDayCount)}日</strong></div>
-                    <div>本日以降の予定 <strong>{num(monthlyAnalysis.futureDayCount)}件</strong></div>
-                    <div>1日平均売上 <strong>{dy(monthlyAnalysis.avgDailySales)}</strong></div>
-                  </div>
-                  <BreakEvenMonthlySummaryBlock breakEvenAnalysis={monthlyAnalysis.breakEvenAnalysis} narrow={false} />
-                </>
-              )}
-              <div
-                style={{
-                  marginTop: ".55rem",
-                  paddingTop: ".5rem",
-                  borderTop: "1px dashed rgba(201,168,76,0.16)",
-                  fontSize: ".78rem",
-                  color: "rgba(240,232,208,0.68)",
-                }}
-              >
-                <div style={{ ...analysisNote({ color: "rgba(201,168,76,0.62)", marginBottom: ".28rem" }, vp.narrow) }}>前年同月比較（2025年固定）</div>
-                <div style={{ display: "grid", gridTemplateColumns: rGridCols(vp.narrow, 160), gap: ".28rem .65rem" }}>
-                  {vp.narrow ? (
-                    <>
-                      <AnalysisStackedRow narrow label="前年同月売上" value={monthlyAnalysis.priorYearMonth.prevMonthSales != null ? dy(monthlyAnalysis.priorYearMonth.prevMonthSales) : "—"} />
-                      <AnalysisStackedRow
-                        narrow
-                        label="前年同月差額"
-                        value={monthlyAnalysis.priorYearMonth.prevMonthDiff != null ? signedDy(monthlyAnalysis.priorYearMonth.prevMonthDiff) : "—"}
-                        valueStyle={{
-                          color:
-                            monthlyAnalysis.priorYearMonth.prevMonthDiff != null
-                              ? monthlyAnalysis.priorYearMonth.prevMonthDiff >= 0
-                                ? "#9ec9a8"
-                                : "#dca06a"
-                              : undefined,
-                        }}
-                      />
-                      <AnalysisStackedRow narrow label="前年同月比" value={monthlyAnalysis.priorYearMonth.prevMonthRate != null ? pct1(monthlyAnalysis.priorYearMonth.prevMonthRate) : "—"} border={false} />
-                    </>
-                  ) : (
-                    <>
-                      <div>
-                        前年同月売上{" "}
-                        <strong style={{ color: "rgba(240,232,208,0.88)" }}>
-                          {monthlyAnalysis.priorYearMonth.prevMonthSales != null ? dy(monthlyAnalysis.priorYearMonth.prevMonthSales) : "—"}
-                        </strong>
-                      </div>
-                      <div>
-                        前年同月差額{" "}
-                        <strong
-                          style={{
-                            color:
-                              monthlyAnalysis.priorYearMonth.prevMonthDiff != null
-                                ? monthlyAnalysis.priorYearMonth.prevMonthDiff >= 0
-                                  ? "#9ec9a8"
-                                  : "#dca06a"
-                                : undefined,
-                          }}
-                        >
-                          {monthlyAnalysis.priorYearMonth.prevMonthDiff != null
-                            ? signedDy(monthlyAnalysis.priorYearMonth.prevMonthDiff)
-                            : "—"}
-                        </strong>
-                      </div>
-                      <div>
-                        前年同月比{" "}
-                        <strong style={{ color: "rgba(240,232,208,0.88)" }}>
-                          {monthlyAnalysis.priorYearMonth.prevMonthRate != null
-                            ? pct1(monthlyAnalysis.priorYearMonth.prevMonthRate)
-                            : "—"}
-                        </strong>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
+            <MonthlySummaryPanel
+              monthlyAnalysis={monthlyAnalysis}
+              narrow={vp.narrow}
+              dy={dy}
+              pct={pct}
+              pct1={pct1}
+              signedDy={signedDy}
+            />
           </div>
 
           <div style={analysisCardWrap("insight", vp.narrow)}>
@@ -6522,8 +6641,10 @@ export default function SalesModule({ events = [], navigateBack }) {
                       <MobileFieldRow narrow={vp.narrow} label="バータイム比率" value={pct(selectedTrendRow.barTimeCustomerRate)} />
                       <MobileFieldRow narrow={vp.narrow} label="目標" value={dy(selectedTrendRow.targetSales)} />
                       <MobileFieldRow narrow={vp.narrow} label="達成率" value={pct(selectedTrendRow.achievementRate)} valueStyle={{ color: "#f3ead2" }} />
-                      <MobileFieldRow narrow={vp.narrow} label="客単価" value={num(selectedTrendRow.customerUnitPrice)} />
-                      <MobileFieldRow narrow={vp.narrow} label="通常客単価" value={num(selectedTrendRow.normalCustomerUnitPrice)} />
+                      <MobileFieldRow narrow={vp.narrow} label="客単価（総）" value={formatUnitYen_(selectedTrendRow.customerUnitPrice)} />
+                      <MobileFieldRow narrow={vp.narrow} label="飲食単価" value={formatUnitYen_(selectedTrendRow.foodDrinkUnitPrice)} />
+                      <MobileFieldRow narrow={vp.narrow} label="通常飲食単価" value={formatUnitYen_(selectedTrendRow.normalFoodDrinkUnitPrice)} />
+                      <MobileFieldRow narrow={vp.narrow} label="会場費除外単価" value={formatUnitYen_(selectedTrendRow.customerUnitPriceExVenue)} />
                     </div>
                     <div style={{ ...analysisNote({ marginTop: ".28rem" }, vp.narrow) }}>{BAR_TIME_UNIT_PRICE_NOTE}</div>
                   </div>
@@ -6556,8 +6677,10 @@ export default function SalesModule({ events = [], navigateBack }) {
                       />
                       <DayReportFoodMetricRow narrow={vp.narrow} label="ドリンク売上" value={dy(selectedTrendRow.drinkSales)} />
                       <DayReportFoodMetricRow narrow={vp.narrow} label="フード売上" value={dy(selectedTrendRow.foodSales)} />
-                      <DayReportFoodMetricRow narrow={vp.narrow} label="飲食単価" value={num(selectedTrendRow.foodDrinkUnitPrice)} />
-                      <DayReportFoodMetricRow narrow={vp.narrow} label="バンド込単価" value={num(selectedTrendRow.foodDrinkUnitPriceIncludingBand)} />
+                      <DayReportFoodMetricRow narrow={vp.narrow} label="会場費" value={dy(selectedTrendRow.venueFee)} />
+                      <DayReportFoodMetricRow narrow={vp.narrow} label="飲食単価" value={formatUnitYen_(selectedTrendRow.foodDrinkUnitPrice)} />
+                      <DayReportFoodMetricRow narrow={vp.narrow} label="通常飲食単価" value={formatUnitYen_(selectedTrendRow.normalFoodDrinkUnitPrice)} />
+                      <DayReportFoodMetricRow narrow={vp.narrow} label="会場費除外単価" value={formatUnitYen_(selectedTrendRow.customerUnitPriceExVenue)} />
                       {selectedTrendRow.bandDrinkSales != null ? (
                         <DayReportFoodMetricRow narrow={vp.narrow} label="バンドドリンク" value={dy(selectedTrendRow.bandDrinkSales)} />
                       ) : null}

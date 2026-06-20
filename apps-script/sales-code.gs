@@ -34,6 +34,7 @@ var BLOCKS = [
 /**
  * metrics フィールド対応
  * [firstHalfRow, secondHalfRow]
+ * venueFee: スプレッドシート上の「会場費」行（ラベル検索で補正可）
  */
 var METRIC_ROW_MAP = {
   customerCount: [7, 48],
@@ -71,6 +72,33 @@ var METRIC_ROW_MAP = {
 };
 
 var METRIC_KEYS = Object.keys(METRIC_ROW_MAP);
+
+var METRIC_ROW_LABEL_ALIASES = {
+  venueFee: ["会場費", "会場費売上"]
+};
+
+function findMetricRowByLabels_(values, block, labels) {
+  var r;
+  for (r = block.dataStartRow; r <= block.dataEndRow; r++) {
+    var labelA = readCell_(values, r, 1);
+    var labelB = readCell_(values, r, 2);
+    var combined = String(labelA || labelB || "").trim();
+    if (!combined) continue;
+    var i;
+    for (i = 0; i < labels.length; i++) {
+      if (combined === labels[i]) return r;
+    }
+  }
+  return null;
+}
+
+function resolveMetricRow_(values, block, blockIndex, key) {
+  var defaultRow = METRIC_ROW_MAP[key][blockIndex];
+  var aliases = METRIC_ROW_LABEL_ALIASES[key];
+  if (!aliases) return defaultRow;
+  var found = findMetricRowByLabels_(values, block, aliases);
+  return found != null ? found : defaultRow;
+}
 
 function doGet(e) {
   try {
@@ -126,7 +154,7 @@ function doGet(e) {
         var k;
         for (k = 0; k < METRIC_KEYS.length; k++) {
           var key = METRIC_KEYS[k];
-          var row = METRIC_ROW_MAP[key][blockIndex];
+          var row = resolveMetricRow_(values, block, blockIndex, key);
           var rawValue = readCell_(values, row, col);
           var parsed = parseNumericCell_(rawValue);
 
@@ -166,7 +194,7 @@ function doGet(e) {
 
     var payload = {
       meta: {
-        schemaVersion: "1.3.2",
+        schemaVersion: "1.3.3",
         spreadsheetId: SPREADSHEET_ID,
         sheetName: sheet.getName(),
         targetMonth: targetMonth,
@@ -208,7 +236,7 @@ function buildMonthlySummary_(values, blocks, warnings) {
 
     var metrics = readMetricsAtColumn_(values, bi, col);
     partials.push(metrics);
-    sources.push(buildMonthlySummarySource_(block, bi, col));
+    sources.push(buildMonthlySummarySource_(values, block, bi, col));
   }
 
   if (partials.length === 0) {
@@ -239,7 +267,7 @@ function readMetricsAtColumn_(values, blockIndex, col) {
   var k;
   for (k = 0; k < METRIC_KEYS.length; k++) {
     var key = METRIC_KEYS[k];
-    var row = METRIC_ROW_MAP[key][blockIndex];
+    var row = resolveMetricRow_(values, BLOCKS[blockIndex], blockIndex, key);
     var rawValue = readCell_(values, row, col);
     var parsed = parseNumericCell_(rawValue);
     metrics[key] = parsed.value;
@@ -247,12 +275,12 @@ function readMetricsAtColumn_(values, blockIndex, col) {
   return metrics;
 }
 
-function buildMonthlySummarySource_(block, blockIndex, col) {
+function buildMonthlySummarySource_(values, block, blockIndex, col) {
   var metricRows = {};
   var k;
   for (k = 0; k < METRIC_KEYS.length; k++) {
     var key = METRIC_KEYS[k];
-    metricRows[key] = METRIC_ROW_MAP[key][blockIndex];
+    metricRows[key] = resolveMetricRow_(values, BLOCKS[blockIndex], blockIndex, key);
   }
 
   return {
@@ -617,7 +645,7 @@ function buildSheetNotFoundError_(message, availableSheets, candidates) {
 function buildErrorPayload_(err) {
   var payload = {
     meta: {
-      schemaVersion: "1.3.2",
+      schemaVersion: "1.3.3",
       generatedAt: new Date().toISOString(),
       warnings: []
     },
