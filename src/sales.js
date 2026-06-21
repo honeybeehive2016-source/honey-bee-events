@@ -1062,7 +1062,8 @@ function buildLandingForecast_(monthRows, yearlyTotalSales, targetMetrics) {
   const performanceMonthCount = performanceMonths.length;
   const remainingMonths = Math.max(0, 12 - performanceMonthCount);
   const performanceSalesSum = performanceMonths.reduce((s, m) => s + Number(m.totalSalesSum || 0), 0);
-  const avgMonthlySales = performanceMonthCount > 0 ? performanceSalesSum / performanceMonthCount : null;
+  const avgMonthlySales =
+    performanceMonthCount > 0 ? Math.round(performanceSalesSum / performanceMonthCount) : null;
   const paceForecast = avgMonthlySales != null ? avgMonthlySales * 12 : null;
   const remainingNeeded =
     hasFullYearTarget && fullYearTargetSum != null ? fullYearTargetSum - yearlyTotalSales : null;
@@ -1074,14 +1075,14 @@ function buildLandingForecast_(monthRows, yearlyTotalSales, targetMetrics) {
     remainingNeeded != null &&
     remainingNeeded > 0 &&
     remainingMonths > 0
-      ? remainingNeeded / remainingMonths
+      ? Math.round(remainingNeeded / remainingMonths)
       : null;
   const forecastGap =
     hasFullYearTarget && paceForecast != null && fullYearTargetSum != null && fullYearTargetSum > 0
       ? paceForecast - fullYearTargetSum
       : null;
   const avgMonthlySalesFromYearlyTotal =
-    performanceMonthCount > 0 ? yearlyTotalSales / performanceMonthCount : null;
+    performanceMonthCount > 0 ? Math.round(yearlyTotalSales / performanceMonthCount) : null;
   return {
     hasFullYearTarget,
     enteredTargetSum,
@@ -1097,6 +1098,188 @@ function buildLandingForecast_(monthRows, yearlyTotalSales, targetMetrics) {
     requiredMonthly,
     targetAchievedOutlook,
     forecastGap,
+  };
+}
+function signedMetricColor_(value) {
+  if (value == null || !Number.isFinite(Number(value))) return undefined;
+  if (Number(value) === 0) return "rgba(240,232,208,0.94)";
+  return Number(value) > 0 ? "#9ec9a8" : "#dca06a";
+}
+function formatSignedCustomerCountDiff_(diff) {
+  if (diff == null || !Number.isFinite(Number(diff))) return "—";
+  const n = Math.round(Number(diff));
+  const sign = n > 0 ? "+" : "";
+  return `${sign}${num(n)}名`;
+}
+function formatSignedUnitYenDiff_(diff) {
+  if (diff == null || !Number.isFinite(Number(diff))) return "—";
+  const n = Math.round(Number(diff));
+  if (n === 0) return yen(0);
+  const sign = n > 0 ? "+" : "-";
+  return `${sign}${yen(Math.abs(n))}`;
+}
+function buildSamePeriodMetricPair_(current, prior) {
+  const diff = current != null && prior != null ? current - prior : null;
+  const rate = prior != null && prior > 0 && current != null ? (current / prior) * 100 : null;
+  return { current, prior, diff, rate };
+}
+function flattenYearMonthRecords_(yearlyMonthData) {
+  const out = [];
+  for (const item of yearlyMonthData || []) {
+    if (!item.ok) continue;
+    for (const r of item.records || []) out.push(r);
+  }
+  return out;
+}
+function findMaxActualBusinessDateInYear_(yearlyMonthData, targetYear) {
+  const prefix = `${targetYear}-`;
+  let maxDate = null;
+  for (const item of yearlyMonthData || []) {
+    if (!item.ok) continue;
+    for (const r of item.records || []) {
+      if (r?.metrics?.totalSales == null) continue;
+      const bd = r.businessDate;
+      if (!bd || !bd.startsWith(prefix)) continue;
+      if (!maxDate || bd > maxDate) maxDate = bd;
+    }
+  }
+  return maxDate;
+}
+function shiftDateYear_(dateStr, deltaYears) {
+  if (!dateStr) return null;
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return `${y + deltaYears}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+function sumMetricsFromRecords_(records, opts = {}) {
+  const { startDateInclusive, endDateInclusive, yearPrefix } = opts;
+  let rows = (records || []).filter((r) => r?.metrics?.totalSales != null);
+  if (yearPrefix) rows = rows.filter((r) => (r.businessDate || "").startsWith(yearPrefix));
+  if (startDateInclusive) rows = rows.filter((r) => (r.businessDate || "") >= startDateInclusive);
+  if (endDateInclusive) rows = rows.filter((r) => (r.businessDate || "") <= endDateInclusive);
+  const totalSales = rows.reduce((s, r) => s + Number(r?.metrics?.totalSales || 0), 0);
+  const customerCount = rows.reduce((s, r) => s + pickMetricValue(r?.metrics, CUSTOMER_COUNT_KEYS), 0);
+  const drinkSales = rows.reduce((s, r) => s + Number(r?.metrics?.drinkSales || 0), 0);
+  const foodSales = rows.reduce((s, r) => s + Number(r?.metrics?.foodSales || 0), 0);
+  return { totalSales, customerCount, drinkSales, foodSales };
+}
+function sumMonthRowMetrics_(months) {
+  const totalSales = (months || []).reduce((s, m) => s + Number(m.totalSalesSum || 0), 0);
+  const customerCount = (months || []).reduce((s, m) => s + Number(m.customerCountSum || 0), 0);
+  const drinkSales = (months || []).reduce((s, m) => s + Number(m.drinkSalesSum || 0), 0);
+  const foodSales = (months || []).reduce((s, m) => s + Number(m.foodSalesSum || 0), 0);
+  return { totalSales, customerCount, drinkSales, foodSales };
+}
+function sumPriorYearSalesThroughMonth_(endMonthNum, lastMonthProrate = 1) {
+  let sum = 0;
+  for (let mo = 1; mo < endMonthNum; mo++) {
+    sum += PREVIOUS_YEAR_SALES_2025_MAP[mo] || 0;
+  }
+  if (endMonthNum >= 1 && endMonthNum <= 12) {
+    sum += (PREVIOUS_YEAR_SALES_2025_MAP[endMonthNum] || 0) * lastMonthProrate;
+  }
+  return sum;
+}
+function sumPriorYearSalesThroughDate_(endDateStr) {
+  if (!endDateStr) return 0;
+  const endMonth = Number(endDateStr.slice(5, 7));
+  const endDay = Number(endDateStr.slice(8, 10));
+  const priorYear = Number(endDateStr.slice(0, 4)) - 1;
+  const daysInMonth = new Date(priorYear, endMonth, 0).getDate();
+  const prorate = daysInMonth > 0 ? endDay / daysInMonth : 1;
+  return sumPriorYearSalesThroughMonth_(endMonth, prorate);
+}
+function buildMonthRowsFromYearData_(yearlyMonthData, year, currentBusinessDate, endMonthNum) {
+  const rows = [];
+  for (const item of yearlyMonthData || []) {
+    if (!item.ok) continue;
+    if (!String(item.month || "").startsWith(`${year}-`)) continue;
+    const mn = Number(String(item.month).slice(5, 7));
+    if (!Number.isFinite(mn) || mn > endMonthNum) continue;
+    rows.push(aggregateMonthFromRecords_(item.records, item.month, currentBusinessDate, item.monthlySummary));
+  }
+  return rows.filter((m) => m.status === "集計済み" && Number(m.totalSalesSum || 0) > 0);
+}
+function buildYearlySamePeriodComparison_(monthRows, yearlyMonthData, priorYearMonthData, currentBusinessDate, targetYear) {
+  const year = Number(targetYear) || new Date().getFullYear();
+  const priorYear = year - 1;
+  const aggregatedMonths = (monthRows || []).filter((m) => m.status === "集計済み" && Number(m.totalSalesSum || 0) > 0);
+  if (!aggregatedMonths.length) return null;
+
+  const sortedMonths = [...aggregatedMonths].sort((a, b) => a.targetMonth.localeCompare(b.targetMonth));
+  const lastMonth = sortedMonths[sortedMonths.length - 1];
+  const endMonthNum = Number(lastMonth.targetMonth.slice(5, 7));
+  const lastMonthPhase = resolveMonthPhase_(lastMonth.targetMonth, currentBusinessDate);
+  const maxBusinessDate = findMaxActualBusinessDateInYear_(yearlyMonthData, year);
+  const canUseDaily = lastMonthPhase.currentMonth && maxBusinessDate;
+
+  let mode = "monthly";
+  const notes = ["※前年同期間は、現在年の実績済み期間に合わせて比較しています。"];
+  let currentMetrics;
+  let priorMetrics;
+
+  if (canUseDaily) {
+    mode = "daily";
+    const yearStart = `${year}-01-01`;
+    const priorEnd = shiftDateYear_(maxBusinessDate, -1);
+    const priorStart = `${priorYear}-01-01`;
+    const currentRecords = flattenYearMonthRecords_(yearlyMonthData);
+    const priorRecords = flattenYearMonthRecords_(priorYearMonthData);
+    currentMetrics = sumMetricsFromRecords_(currentRecords, {
+      startDateInclusive: yearStart,
+      endDateInclusive: maxBusinessDate,
+    });
+    priorMetrics = sumMetricsFromRecords_(priorRecords, {
+      startDateInclusive: priorStart,
+      endDateInclusive: priorEnd,
+    });
+    if (priorYear === 2025 && priorMetrics.totalSales <= 0) {
+      priorMetrics = {
+        ...priorMetrics,
+        totalSales: sumPriorYearSalesThroughDate_(maxBusinessDate),
+      };
+    }
+  } else {
+    notes.push("※前年同期間は月別集計データをもとにした比較です。");
+    const scopeMonths = sortedMonths.filter((m) => Number(m.targetMonth.slice(5, 7)) <= endMonthNum);
+    currentMetrics = sumMonthRowMetrics_(scopeMonths);
+    const priorMonthRows = buildMonthRowsFromYearData_(priorYearMonthData, priorYear, currentBusinessDate, endMonthNum);
+    if (priorMonthRows.length) {
+      priorMetrics = sumMonthRowMetrics_(priorMonthRows);
+    } else if (priorYear === 2025) {
+      priorMetrics = {
+        totalSales: sumPriorYearSalesThroughMonth_(endMonthNum, 1),
+        customerCount: null,
+        drinkSales: null,
+        foodSales: null,
+      };
+    } else {
+      priorMetrics = { totalSales: null, customerCount: null, drinkSales: null, foodSales: null };
+    }
+    if (priorYear === 2025 && (priorMetrics.totalSales == null || priorMetrics.totalSales <= 0)) {
+      priorMetrics = { ...priorMetrics, totalSales: sumPriorYearSalesThroughMonth_(endMonthNum, 1) };
+    }
+  }
+
+  const currentCustomerUnit = unitPriceByCustomerCount_(currentMetrics.totalSales, currentMetrics.customerCount);
+  const priorCustomerUnit = unitPriceByCustomerCount_(priorMetrics.totalSales, priorMetrics.customerCount);
+  const currentFoodDrinkUnit = unitPriceByCustomerCount_(
+    currentMetrics.drinkSales + currentMetrics.foodSales,
+    currentMetrics.customerCount
+  );
+  const priorFoodDrinkUnit = unitPriceByCustomerCount_(
+    (priorMetrics.drinkSales || 0) + (priorMetrics.foodSales || 0),
+    priorMetrics.customerCount
+  );
+
+  return {
+    mode,
+    notes,
+    endMonthNum,
+    maxBusinessDate: canUseDaily ? maxBusinessDate : null,
+    sales: buildSamePeriodMetricPair_(currentMetrics.totalSales, priorMetrics.totalSales),
+    customer: buildSamePeriodMetricPair_(currentMetrics.customerCount, priorMetrics.customerCount),
+    customerUnitPrice: buildSamePeriodMetricPair_(currentCustomerUnit, priorCustomerUnit),
+    foodDrinkUnitPrice: buildSamePeriodMetricPair_(currentFoodDrinkUnit, priorFoodDrinkUnit),
   };
 }
 function buildMomComparison_(monthRows) {
@@ -5154,12 +5337,59 @@ function YearlySummaryBlock({ title, children, narrow, accent }) {
     </div>
   );
 }
-function YearlySummaryFiveBlocks({ yearlyAnalysis, narrow, dy, pct, pct1, signedDy, formatUnitYen_ }) {
+function YearlySamePeriodMetricSection({ title, rows, narrow }) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div
+        style={{
+          fontSize: narrow ? "0.72rem" : "0.78rem",
+          color: "rgba(201,168,76,0.78)",
+          fontWeight: 600,
+          marginBottom: ".16rem",
+          letterSpacing: ".03em",
+        }}
+      >
+        {title}
+      </div>
+      <div style={{ display: "grid", gap: narrow ? ".1rem" : ".12rem" }}>
+        {rows.map((r) => (
+          <div
+            key={r.label}
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: ".45rem",
+              alignItems: "baseline",
+              fontSize: narrow ? "0.78rem" : "0.84rem",
+              lineHeight: 1.45,
+              minWidth: 0,
+            }}
+          >
+            <span style={{ color: "rgba(240,232,208,0.62)", flexShrink: 0 }}>{r.label}</span>
+            <strong
+              style={{
+                color: r.color || "rgba(240,232,208,0.94)",
+                fontWeight: r.strong ? 700 : 600,
+                textAlign: "right",
+                wordBreak: "break-word",
+                fontFamily: SALES_NUMBER_FONT_FAMILY,
+                ...SALES_NUMBER_TABULAR,
+              }}
+            >
+              {r.value}
+            </strong>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+function YearlySummarySixBlocks({ yearlyAnalysis, narrow, dy, pct, pct1, signedDy, formatUnitYen_ }) {
   const a = yearlyAnalysis;
   const landing = a.landing;
-  const progressLabel = a.hasFullYearTarget ? "年間進捗率" : "目標設定済み月の達成率";
-  const topGrid = narrow ? "1fr" : "repeat(2, minmax(0, 1fr))";
-  const subGrid = narrow ? "1fr" : "repeat(2, minmax(0, 1fr))";
+  const sp = a.samePeriodComparison;
+  const colGrid = narrow ? "1fr" : "repeat(2, minmax(0, 1fr))";
+  const compareGrid = narrow ? "1fr" : "repeat(2, minmax(0, 1fr))";
   const be = a.breakEvenMonthCounts;
   const landingAccent =
     landing?.hasFullYearTarget && (landing?.targetAchievedOutlook || (landing?.forecastGap != null && landing.forecastGap >= 0))
@@ -5167,29 +5397,85 @@ function YearlySummaryFiveBlocks({ yearlyAnalysis, narrow, dy, pct, pct1, signed
       : landing?.hasFullYearTarget
       ? "#dca06a"
       : "#9ec9b8";
+  const progressLabel = a.hasFullYearTarget ? "目標達成率" : "目標設定済み月の達成率";
+
+  const salesRows = sp
+    ? [
+        { label: "今年", value: dy(sp.sales.current) },
+        { label: "前年", value: sp.sales.prior != null ? dy(sp.sales.prior) : "—" },
+        {
+          label: "差額",
+          value: sp.sales.diff != null ? signedDy(sp.sales.diff) : "—",
+          color: signedMetricColor_(sp.sales.diff),
+          strong: true,
+        },
+        {
+          label: "前年比",
+          value: sp.sales.rate != null ? pct1(sp.sales.rate) : "—",
+          color: signedMetricColor_(sp.sales.diff),
+        },
+      ]
+    : [];
+  const customerRows = sp
+    ? [
+        { label: "今年", value: formatCustomerCountLabel_(sp.customer.current) },
+        { label: "前年", value: formatCustomerCountLabel_(sp.customer.prior) },
+        {
+          label: "差",
+          value: formatSignedCustomerCountDiff_(sp.customer.diff),
+          color: signedMetricColor_(sp.customer.diff),
+          strong: true,
+        },
+        {
+          label: "前年比",
+          value: sp.customer.rate != null ? pct1(sp.customer.rate) : "—",
+          color: signedMetricColor_(sp.customer.diff),
+        },
+      ]
+    : [];
+  const customerUnitRows = sp
+    ? [
+        { label: "今年", value: formatUnitYen_(sp.customerUnitPrice.current) },
+        { label: "前年", value: formatUnitYen_(sp.customerUnitPrice.prior) },
+        {
+          label: "差",
+          value: formatSignedUnitYenDiff_(sp.customerUnitPrice.diff),
+          color: signedMetricColor_(sp.customerUnitPrice.diff),
+          strong: true,
+        },
+      ]
+    : [];
+  const foodDrinkUnitRows = sp
+    ? [
+        { label: "今年", value: formatUnitYen_(sp.foodDrinkUnitPrice.current) },
+        { label: "前年", value: formatUnitYen_(sp.foodDrinkUnitPrice.prior) },
+        {
+          label: "差",
+          value: formatSignedUnitYenDiff_(sp.foodDrinkUnitPrice.diff),
+          color: signedMetricColor_(sp.foodDrinkUnitPrice.diff),
+          strong: true,
+        },
+      ]
+    : [];
 
   return (
     <div style={{ display: "grid", gap: ".55rem", minWidth: 0 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: ".45rem", flexWrap: "wrap", marginBottom: ".1rem" }}>
-        <div style={{ ...analysisMetricHero(narrow, false), fontSize: narrow ? "1.9rem" : "2.45rem" }}>{pct(a.yearlyProgressRate)}</div>
-        <span style={{ fontSize: narrow ? "0.84rem" : "0.94rem", color: "rgba(240,232,208,0.72)" }}>{progressLabel}</span>
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: topGrid, gap: ".55rem" }}>
-        <YearlySummaryBlock title="A. 年間進捗" narrow={narrow} accent>
+      <div style={{ display: "grid", gridTemplateColumns: colGrid, gap: ".55rem" }}>
+        <YearlySummaryBlock title="A. 今年の進捗" narrow={narrow} accent>
           <YearlySummaryMetricLine narrow={narrow} label="年間売上" value={dy(a.yearlyTotalSales)} emphasize />
-          {a.hasFullYearTarget ? (
-            <YearlySummaryMetricLine narrow={narrow} label="年間目標" value={dy(a.fullYearTargetSum)} />
-          ) : (
-            <YearlySummaryMetricLine narrow={narrow} label="設定済み目標の合計" value={dy(a.enteredTargetSum)} />
-          )}
-          <YearlySummaryMetricLine narrow={narrow} label="目標設定済み月の達成率" value={pct(a.yearlyProgressRate)} strong />
           <YearlySummaryMetricLine
             narrow={narrow}
-            label="目標設定済み月数"
-            value={`${num(a.enteredTargetMonthCount)}/12ヶ月`}
+            label={a.hasFullYearTarget ? "年間目標" : "設定済み目標の合計"}
+            value={dy(a.hasFullYearTarget ? a.fullYearTargetSum : a.enteredTargetSum)}
+          />
+          <YearlySummaryMetricLine narrow={narrow} label={progressLabel} value={pct(a.yearlyProgressRate)} strong />
+          <YearlySummaryMetricLine
+            narrow={narrow}
+            label="実績月数 / 目標設定済み月数"
+            value={`${num(a.aggregatedMonthCount)} / ${num(a.enteredTargetMonthCount)}ヶ月`}
           />
         </YearlySummaryBlock>
-        <YearlySummaryBlock title="B. 年間着地見込み" narrow={narrow}>
+        <YearlySummaryBlock title="C. 年間着地見込み" narrow={narrow}>
           <YearlySummaryMetricLine
             narrow={narrow}
             label="実績月の平均売上"
@@ -5207,25 +5493,58 @@ function YearlySummaryFiveBlocks({ yearlyAnalysis, narrow, dy, pct, pct1, signed
           {landing?.hasFullYearTarget ? (
             <YearlySummaryMetricLine
               narrow={narrow}
-              label="年間目標との差額"
+              label="設定済み年間目標との差額"
               value={landing?.forecastGap != null ? signedDy(landing.forecastGap) : "—"}
               valueStyle={{
-                color: landing?.forecastGap != null ? (landing.forecastGap >= 0 ? "#9ec9a8" : "#dca06a") : undefined,
+                color: landing?.forecastGap != null ? signedMetricColor_(landing.forecastGap) : undefined,
               }}
             />
           ) : null}
-          <div style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".06rem" }}>
+          {landing?.paceForecast != null ? (
+            <div style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".04rem" }}>
+              ※このままのペースなら、年間{dy(landing.paceForecast)}の見込みです。
+            </div>
+          ) : null}
+          <div style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".04rem" }}>
             ※実績月平均は年間売上合計 ÷ 実績月数（{num(landing?.performanceMonthCount)}ヶ月ベース）
           </div>
         </YearlySummaryBlock>
       </div>
+      {sp ? (
+        <YearlySummaryBlock title="B. 前年同期間比較" narrow={narrow} accent>
+          <div style={{ display: "grid", gridTemplateColumns: compareGrid, gap: narrow ? ".42rem" : ".55rem .75rem" }}>
+            <YearlySamePeriodMetricSection title="売上" rows={salesRows} narrow={narrow} />
+            <YearlySamePeriodMetricSection title="集客" rows={customerRows} narrow={narrow} />
+            <YearlySamePeriodMetricSection title="客単価" rows={customerUnitRows} narrow={narrow} />
+            <YearlySamePeriodMetricSection title="飲食単価" rows={foodDrinkUnitRows} narrow={narrow} />
+          </div>
+          {(sp.notes || []).map((note) => (
+            <div
+              key={note}
+              style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".12rem" }}
+            >
+              {note}
+            </div>
+          ))}
+        </YearlySummaryBlock>
+      ) : null}
       {be?.actualMonthCount > 0 ? (
-        <YearlySummaryBlock title="C. 経営ライン" narrow={narrow}>
+        <YearlySummaryBlock title="D. 経営ライン" narrow={narrow}>
+          <YearlySummaryMetricLine
+            narrow={narrow}
+            label="固定費ライン"
+            value={formatExTaxYen_(MONTHLY_FIXED_COST_EX_TAX)}
+            emphasize
+          />
           <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "repeat(3, minmax(0, 1fr))", gap: ".2rem .55rem" }}>
-            <YearlySummaryMetricLine narrow={narrow} label="損益分岐超え月数" value={`${num(be.aboveBreakEvenCount)}/${num(be.actualMonthCount)}ヶ月`} emphasize />
-            <YearlySummaryMetricLine narrow={narrow} label="最低ライン到達月数" value={`${num(be.safeLineCount)}ヶ月`} />
+            <YearlySummaryMetricLine
+              narrow={narrow}
+              label="損益分岐超え月数"
+              value={`${num(be.aboveBreakEvenCount)}/${num(be.actualMonthCount)}ヶ月`}
+              emphasize
+            />
             <YearlySummaryMetricLine narrow={narrow} label="安定ライン超え月数" value={`${num(be.stableLineCount)}ヶ月`} />
-            <YearlySummaryMetricLine narrow={narrow} label="かなり良い月数" value={`${num(be.goodLineCount)}ヶ月`} />
+            <YearlySummaryMetricLine narrow={narrow} label="良い月数" value={`${num(be.goodLineCount)}ヶ月`} />
             <YearlySummaryMetricLine narrow={narrow} label="強い月数" value={`${num(be.strongLineCount)}ヶ月`} />
           </div>
           <div style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".08rem" }}>
@@ -5237,21 +5556,7 @@ function YearlySummaryFiveBlocks({ yearlyAnalysis, narrow, dy, pct, pct1, signed
           </div>
         </YearlySummaryBlock>
       ) : null}
-      <div style={{ display: "grid", gridTemplateColumns: subGrid, gap: ".55rem" }}>
-        <YearlySummaryBlock title="D. 集客・飲食" narrow={narrow}>
-          <YearlySummaryMetricLine narrow={narrow} label="年間総集客人数" value={formatCustomerCountLabel_(a.yearlyCustomerCount)} emphasize />
-          <YearlySummaryMetricLine
-            narrow={narrow}
-            label="月平均集客"
-            value={a.monthlyAvgCustomerCount != null ? formatAvgCustomerCountLabel_(a.monthlyAvgCustomerCount) : "—"}
-            emphasize
-          />
-          <YearlySummaryMetricLine narrow={narrow} label="年間客単価" value={formatUnitYen_(a.yearlyCustomerUnitPrice)} emphasize />
-          <YearlySummaryMetricLine narrow={narrow} label="年間飲食単価" value={formatUnitYen_(a.yearlyFoodDrinkUnitPrice)} emphasize />
-          <YearlySummaryMetricLine narrow={narrow} label="年間ドリンク売上" value={dy(a.yearlyDrink)} />
-          <YearlySummaryMetricLine narrow={narrow} label="年間フード売上" value={dy(a.yearlyFood)} />
-          <div style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45 }}>{FOOD_DRINK_UNIT_PRICE_NOTE}</div>
-        </YearlySummaryBlock>
+      <div style={{ display: "grid", gridTemplateColumns: colGrid, gap: ".55rem" }}>
         <YearlySummaryBlock title="E. 利益" narrow={narrow}>
           <YearlySummaryMetricLine narrow={narrow} label="年間限界利益" value={dy(a.yearlyMarginalProfit)} strong />
           <YearlySummaryMetricLine
@@ -5285,7 +5590,24 @@ function YearlySummaryFiveBlocks({ yearlyAnalysis, narrow, dy, pct, pct1, signed
           <div style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".04rem" }}>
             {MARGINAL_PROFIT_NOTE}
             <span style={{ display: "block", marginTop: ".08rem" }}>{OPERATING_PROFIT_NOTE}</span>
+            {a.hasCurrentAggregatedMonth ? (
+              <span style={{ display: "block", marginTop: ".08rem" }}>※月数は終了済み月ベースです。進行中月は暫定評価のため含みません。</span>
+            ) : null}
           </div>
+        </YearlySummaryBlock>
+        <YearlySummaryBlock title="F. 集客・飲食" narrow={narrow}>
+          <YearlySummaryMetricLine narrow={narrow} label="年間総集客人数" value={formatCustomerCountLabel_(a.yearlyCustomerCount)} emphasize />
+          <YearlySummaryMetricLine
+            narrow={narrow}
+            label="月平均集客"
+            value={a.monthlyAvgCustomerCount != null ? formatAvgCustomerCountLabel_(a.monthlyAvgCustomerCount) : "—"}
+            emphasize
+          />
+          <YearlySummaryMetricLine narrow={narrow} label="年間客単価" value={formatUnitYen_(a.yearlyCustomerUnitPrice)} emphasize />
+          <YearlySummaryMetricLine narrow={narrow} label="年間飲食単価" value={formatUnitYen_(a.yearlyFoodDrinkUnitPrice)} emphasize />
+          <YearlySummaryMetricLine narrow={narrow} label="年間ドリンク売上" value={dy(a.yearlyDrink)} />
+          <YearlySummaryMetricLine narrow={narrow} label="年間フード売上" value={dy(a.yearlyFood)} />
+          <div style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45 }}>{FOOD_DRINK_UNIT_PRICE_NOTE}</div>
         </YearlySummaryBlock>
       </div>
     </div>
@@ -6159,6 +6481,7 @@ export default function SalesModule({ events = [], navigateBack }) {
   const [targetYear, setTargetYear] = useState(2026);
   const [yearlyLoading, setYearlyLoading] = useState(false);
   const [yearlyMonthData, setYearlyMonthData] = useState([]);
+  const [priorYearMonthData, setPriorYearMonthData] = useState([]);
   const [selectedTrendRowKey, setSelectedTrendRowKey] = useState("");
   const dayReportRef = useRef(null);
   const pendingReportReferenceRef = useRef(null);
@@ -6233,11 +6556,14 @@ export default function SalesModule({ events = [], navigateBack }) {
         ? targetYear
         : Number(String(targetMonth).slice(0, 4)) || targetYear;
     const months = buildYearMonths_(year);
+    const priorYear = year - 1;
+    const priorMonths = buildYearMonths_(priorYear);
     setYearlyLoading(true);
     setYearlyMonthData([]);
-    (async () => {
-      const results = await Promise.all(
-        months.map(async (month) => {
+    setPriorYearMonthData([]);
+    const fetchMonthBundle = (monthList) =>
+      Promise.all(
+        monthList.map(async (month) => {
           try {
             const json = await fetchSalesMonth_(month);
             return {
@@ -6252,8 +6578,14 @@ export default function SalesModule({ events = [], navigateBack }) {
           }
         })
       );
+    (async () => {
+      const [results, priorResults] = await Promise.all([
+        fetchMonthBundle(months),
+        adminTab === "yearly" ? fetchMonthBundle(priorMonths) : Promise.resolve([]),
+      ]);
       if (!cancelled) {
         setYearlyMonthData(results);
+        setPriorYearMonthData(priorResults);
         setYearlyLoading(false);
       }
     })();
@@ -6952,6 +7284,13 @@ export default function SalesModule({ events = [], navigateBack }) {
     const yoyDiff = yearlyTotalSales - previousYearTotal;
     const yoyRate = previousYearTotal > 0 ? (yearlyTotalSales / previousYearTotal) * 100 : null;
     const landing = buildLandingForecast_(monthRows, yearlyTotalSales, targetMetrics);
+    const samePeriodComparison = buildYearlySamePeriodComparison_(
+      monthRows,
+      yearlyMonthData,
+      priorYearMonthData,
+      currentBusinessDate,
+      targetYear
+    );
     const momComparison = buildMomComparison_(monthRows);
     const yearlyCustomerUnitPrice = unitPriceByCustomerCount_(yearlyTotalSales, yearlyCustomerCount);
     const yearlyFoodDrinkUnitPrice = unitPriceByCustomerCount_(yearlyDrink + yearlyFood, yearlyCustomerCount);
@@ -7068,6 +7407,7 @@ export default function SalesModule({ events = [], navigateBack }) {
       yoyRate,
       monthlyYoYRows,
       landing,
+      samePeriodComparison,
       momComparison,
       yearlyFoodDrinkGrossProfit,
       yearlyFoodDrinkGrossProfitRate,
@@ -7088,7 +7428,7 @@ export default function SalesModule({ events = [], navigateBack }) {
       customerCountTop3,
       operatingProfitRateTop3,
     };
-  }, [yearlyMonthData, targetYear, currentBusinessDate]);
+  }, [yearlyMonthData, priorYearMonthData, targetYear, currentBusinessDate]);
   const staffTodayRows = useMemo(
     () => rows.filter((r) => r.businessDate === currentBusinessDate),
     [rows, currentBusinessDate]
@@ -7873,10 +8213,7 @@ export default function SalesModule({ events = [], navigateBack }) {
             <>
               <div style={{ ...analysisCardWrap("summary", vp.narrow) }}>
                 <div style={analysisSecTitle("summary", ".55rem", vp.narrow)}>{targetYear}年 年次サマリー</div>
-                <div style={{ fontSize: vp.narrow ? "0.78rem" : "0.84rem", color: "rgba(240,232,208,0.55)", marginBottom: ".45rem" }}>
-                  実績月数 {num(yearlyAnalysis.aggregatedMonthCount)}ヶ月
-                </div>
-                <YearlySummaryFiveBlocks
+                <YearlySummarySixBlocks
                   yearlyAnalysis={yearlyAnalysis}
                   narrow={vp.narrow}
                   dy={dy}
