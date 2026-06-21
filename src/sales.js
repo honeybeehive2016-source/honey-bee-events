@@ -1129,171 +1129,6 @@ function buildMomComparison_(monthRows) {
     purchaseRatePtDiff,
   };
 }
-function buildYearlyCheckpoints_(ctx) {
-  const items = [];
-  const {
-    yearlyProgressRate,
-    hasFullYearTarget,
-    fullYearTargetSum,
-    enteredTargetMonthCount,
-    landing,
-    yearlyPurchaseCostRates,
-    yearlyOperatingProfitRate,
-    yearlyOperatingGrossProfitRate,
-    yearlyReviewOperatingProfitRate,
-    momComparison,
-    monthRows,
-    currentBusinessDate,
-    taxMode,
-  } = ctx;
-
-  const evalMonths = (monthRows || []).filter((m) => m.status === "集計済み");
-  const { endedMonths, currentMonths } = partitionMonthsByPhase_(evalMonths, currentBusinessDate);
-  const belowBreakEvenEnded = endedMonths.filter(isMonthBelowBreakEven_).length;
-  const belowBreakEvenCurrent = currentMonths.filter(isMonthBelowBreakEven_);
-  const negativeOperatingEnded = endedMonths.filter(isMonthNegativeOperatingProfit_).length;
-  const negativeOperatingCurrent = currentMonths.filter(isMonthNegativeOperatingProfit_);
-
-  if (momComparison && momComparison.salesDiff < 0) {
-    items.push({
-      key: "momSales",
-      title: "前月より売上減少",
-      message:
-        "前月より売上が落ちています。売上減の月は、集客減・客単価減・飲食単価減のどれが原因かを月別分析で確認してください。",
-      detail: formatSignedDisplayYen(momComparison.salesDiff, taxMode),
-    });
-  }
-  if (!hasFullYearTarget) {
-    items.push({
-      key: "noAnnualTarget",
-      title: "目標未設定の月があります",
-      message: "年間進捗を正確に見るため、未設定月の目標を入力してください。",
-      detail: `目標設定済み月 ${enteredTargetMonthCount}/12ヶ月`,
-    });
-  }
-  if (
-    hasFullYearTarget &&
-    yearlyProgressRate != null &&
-    yearlyProgressRate < 100 &&
-    landing?.paceForecast != null &&
-    fullYearTargetSum != null &&
-    fullYearTargetSum > 0 &&
-    landing.paceForecast < fullYearTargetSum
-  ) {
-    items.push({
-      key: "targetRisk",
-      title: "年間目標未達の見込み",
-      message: "現在ペースの着地見込みが年間目標を下回っています。弱い月の集客・単価を月別経営レビューで確認してください。",
-      detail: landing?.forecastGap != null ? `差額 ${formatSignedDisplayYen(landing.forecastGap, taxMode)}` : null,
-    });
-  }
-  if (belowBreakEvenEnded > 0) {
-    items.push({
-      key: "belowBreakEven",
-      title: "損益分岐未達の終了済み月があります",
-      message: "該当月は、集客不足か単価不足かを月次分析で確認してください。",
-      detail: `${belowBreakEvenEnded}ヶ月`,
-    });
-  }
-  for (const m of belowBreakEvenCurrent) {
-    const gap = m.breakEvenAnalysis?.gapFromBreakEven;
-    const gapText = gap != null && gap < 0 ? formatExTaxYen_(Math.abs(gap)) : "—";
-    const actualRateText =
-      m.actualAchievementRate != null ? `、実績日達成率は${pct1(m.actualAchievementRate)}` : "";
-    items.push({
-      key: `belowBreakEvenCurrent_${m.targetMonth}`,
-      title: `進行中の${m.monthLabel}`,
-      message: `進行中の${m.monthLabel}は現時点で限界利益が固定費163万円まであと${gapText}ですが${actualRateText}です。残り営業日の見込みで確認してください。`,
-      detail: m.futureDayCount > 0 ? `残り予定 ${num(m.futureDayCount)}件` : null,
-    });
-  }
-  if (negativeOperatingEnded > 0) {
-    items.push({
-      key: "negativeOpProfit",
-      title: "営業利益がマイナスの終了済み月があります",
-      message: "売上だけでなく、ドリンク仕入れ・フード仕入れ・人件費・経費も確認してください。",
-      detail: `${negativeOperatingEnded}ヶ月`,
-    });
-  }
-  for (const m of negativeOperatingCurrent) {
-    const op = resolveOperatingProfit_(m);
-    const profitText = op.profit != null ? formatSignedExTaxYen_(Math.round(op.profit)) : "—";
-    const actualRateText =
-      m.actualAchievementRate != null ? `、実績日達成率は${pct1(m.actualAchievementRate)}` : "";
-    items.push({
-      key: `negativeOperatingCurrent_${m.targetMonth}`,
-      title: `進行中の${m.monthLabel}`,
-      message: `進行中の${m.monthLabel}は営業利益が現時点${profitText}（暫定）${actualRateText}です。残り営業日の見込みで確認してください。`,
-      detail: m.futureDayCount > 0 ? `残り予定 ${num(m.futureDayCount)}件` : null,
-    });
-  }
-  const totalPurchaseRate = yearlyPurchaseCostRates?.totalPurchaseRate;
-  if (totalPurchaseRate != null && totalPurchaseRate >= 30) {
-    items.push({
-      key: "purchaseHigh",
-      title: "年間仕入率が高め",
-      message: "仕入率が高い月は、ドリンク・フードの原価率とメニュー構成を月次分析で確認してください。",
-      detail: pct1(totalPurchaseRate),
-    });
-  }
-  const foodCostRate = yearlyPurchaseCostRates?.foodCostRate;
-  if (foodCostRate != null && foodCostRate >= 35) {
-    items.push({
-      key: "foodCost",
-      title: "フード原価率が高め",
-      message: "フード仕入と販売メニューのバランスを、利益率の低い月から確認してください。",
-      detail: pct1(foodCostRate),
-    });
-  }
-  const drinkCostRate = yearlyPurchaseCostRates?.drinkCostRate;
-  if (drinkCostRate != null && drinkCostRate >= 25) {
-    items.push({
-      key: "drinkCost",
-      title: "ドリンク原価率が高め",
-      message: "ドリンク仕入と販売構成を、飲食単価の低い月とあわせて確認してください。",
-      detail: pct1(drinkCostRate),
-    });
-  }
-  if (yearlyReviewOperatingProfitRate != null && yearlyReviewOperatingProfitRate < 12) {
-    items.push({
-      key: "opProfit",
-      title: "営業利益率が低め",
-      message: "売上のある月でも営業利益率が弱い場合は、仕入れ・人件費・経費の月別差を確認してください。",
-      detail: pct1(yearlyReviewOperatingProfitRate),
-    });
-  }
-  if (yearlyOperatingProfitRate != null && yearlyOperatingProfitRate < 12) {
-    items.push({
-      key: "opBaseProfit",
-      title: "営業ベース利益率が低め",
-      message: "営業ベース利益率が低い場合は、仕入れ・経費・人件費の月別差を確認してください。",
-      detail: pct1(yearlyOperatingProfitRate),
-    });
-  }
-  if (yearlyOperatingGrossProfitRate != null && yearlyOperatingGrossProfitRate < 60) {
-    items.push({
-      key: "opGrossProfit",
-      title: "営業粗利率が低め",
-      message: "仕入れ・経費の影響が大きい月がないか、月別経営レビューで確認してください。",
-      detail: pct1(yearlyOperatingGrossProfitRate),
-    });
-  }
-  if (momComparison) {
-    const prevLabor = Number(momComparison.prev?.laborCostSum || 0);
-    const laborDiff = momComparison.laborDiff;
-    const laborIncreased =
-      laborDiff > 0 && (prevLabor > 0 ? laborDiff / prevLabor >= 0.15 : laborDiff >= 100000);
-    if (laborIncreased) {
-      items.push({
-        key: "momLabor",
-        title: "前月比で人件費が増加",
-        message: "人件費の増加が利益を圧迫していないか、営業利益の月別推移を確認してください。",
-        detail: formatSignedDisplayYen(laborDiff, taxMode),
-      });
-    }
-  }
-  return items.slice(0, 6);
-}
 function buildYearlyMonthReviewRows_(monthRows, monthlyYoYRows, currentBusinessDate) {
   const yoyMap = Object.fromEntries((monthlyYoYRows || []).map((r) => [r.targetMonth, r]));
   return (monthRows || []).map((m) => {
@@ -5331,40 +5166,6 @@ function YearlySummaryFiveBlocks({ yearlyAnalysis, narrow, dy, pct, pct1, signed
     </div>
   );
 }
-function YearlyCheckpointList({ items, narrow }) {
-  return (
-    <div style={{ display: "grid", gap: ".42rem" }}>
-      {items.length === 0 ? (
-        <div style={{ fontSize: narrow ? "0.82rem" : "0.94rem", color: "rgba(240,232,208,0.55)" }}>
-          大きなチェックポイントはありません。月別経営レビューで各月の状態を確認してください。
-        </div>
-      ) : (
-        items.map((item) => (
-          <div
-            key={item.key}
-            style={{
-              padding: ".45rem .55rem",
-              borderRadius: 6,
-              border: "1px solid rgba(168,118,88,0.18)",
-              background: "rgba(0,0,0,0.16)",
-              minWidth: 0,
-            }}
-          >
-            <div style={{ fontSize: narrow ? "0.84rem" : "0.98rem", color: "rgba(212,168,138,0.95)", fontWeight: 600, marginBottom: ".18rem" }}>
-              {item.title}
-              {item.detail ? (
-                <span style={{ marginLeft: ".35rem", fontSize: narrow ? "0.76rem" : "0.8rem", fontWeight: 500, color: "rgba(240,232,208,0.62)" }}>
-                  {item.detail}
-                </span>
-              ) : null}
-            </div>
-            <div style={{ fontSize: narrow ? "0.8rem" : "0.92rem", color: "rgba(240,232,208,0.72)", lineHeight: 1.5 }}>{item.message}</div>
-          </div>
-        ))
-      )}
-    </div>
-  );
-}
 function YearlyMonthReviewCard({ row, narrow, dy, pct, pct1, signedDy, formatUnitYen_, onMonthClick }) {
   const muted = row.status !== "集計済み";
   const operatingColor = reviewTableSignedValueColor_(row.reviewOperatingProfitSum);
@@ -7070,25 +6871,6 @@ export default function SalesModule({ events = [], navigateBack }) {
     if (readSalesAdminUnlocked()) setRoleMode("admin");
   };
 
-  const yearlyCheckpoints = useMemo(() => {
-    if (!yearlyAnalysis) return [];
-    return buildYearlyCheckpoints_({
-      yearlyProgressRate: yearlyAnalysis.yearlyProgressRate,
-      hasFullYearTarget: yearlyAnalysis.hasFullYearTarget,
-      fullYearTargetSum: yearlyAnalysis.fullYearTargetSum,
-      enteredTargetMonthCount: yearlyAnalysis.enteredTargetMonthCount,
-      landing: yearlyAnalysis.landing,
-      yearlyPurchaseCostRates: yearlyAnalysis.yearlyPurchaseCostRates,
-      yearlyOperatingProfitRate: yearlyAnalysis.yearlyOperatingBaseProfitRate,
-      yearlyOperatingGrossProfitRate: yearlyAnalysis.yearlyOperatingGrossProfitRate,
-      yearlyFixedCostAdjustedProfitRate: yearlyAnalysis.yearlyFixedCostAdjustedProfitRate,
-      momComparison: yearlyAnalysis.momComparison,
-      monthRows: yearlyAnalysis.monthRows,
-      currentBusinessDate,
-      taxMode,
-    });
-  }, [yearlyAnalysis, taxMode, currentBusinessDate]);
-
   return (
     <div
       style={salesPageShellStyle(vp.narrow, vp.mobile)}
@@ -7897,88 +7679,6 @@ export default function SalesModule({ events = [], navigateBack }) {
                 />
               </div>
 
-              <div style={analysisCardWrap("alert", vp.narrow)}>
-                <div style={analysisSecTitle("alert", ".5rem", vp.narrow)}>年次チェックポイント</div>
-                <YearlyCheckpointList items={yearlyCheckpoints} narrow={vp.narrow} />
-              </div>
-
-              {yearlyAnalysis.momComparison && (
-                <div style={analysisCardWrap("momCompare", vp.narrow)}>
-                  <div style={analysisSecTitle("momCompare", ".5rem", vp.narrow)}>前月比較</div>
-                  <div style={{ fontSize: vp.narrow ? ".72rem" : ".8rem", color: "rgba(240,232,208,0.62)", marginBottom: ".45rem" }}>
-                    {yearlyAnalysis.momComparison.latest.monthLabel} vs {yearlyAnalysis.momComparison.prev.monthLabel}
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: rGridCols(vp.narrow, 190), gap: ".35rem .8rem", fontSize: vp.narrow ? ".9rem" : ".9rem" }}>
-                    <div>
-                      前月売上差額{" "}
-                      <strong style={{ color: yearlyAnalysis.momComparison.salesDiff >= 0 ? "#9ec9a8" : "#dca06a" }}>
-                        {signedDy(yearlyAnalysis.momComparison.salesDiff)}
-                      </strong>
-                    </div>
-                    <div>
-                      前月売上比率{" "}
-                      <strong>{yearlyAnalysis.momComparison.salesRatio != null ? pct1(yearlyAnalysis.momComparison.salesRatio) : "—"}</strong>
-                    </div>
-                    <div>
-                      前月飲食売上差額{" "}
-                      <strong style={{ color: yearlyAnalysis.momComparison.foodDrinkDiff >= 0 ? "#9ec9a8" : "#dca06a" }}>
-                        {signedDy(yearlyAnalysis.momComparison.foodDrinkDiff)}
-                      </strong>
-                    </div>
-                    <div>
-                      前月営業ベース利益差額{" "}
-                      <strong style={{ color: yearlyAnalysis.momComparison.operatingProfitDiff >= 0 ? "#9ec9a8" : "#dca06a" }}>
-                        {signedDy(yearlyAnalysis.momComparison.operatingProfitDiff)}
-                      </strong>
-                    </div>
-                    <div>
-                      前月総仕入率差{" "}
-                      <strong
-                        style={{
-                          color:
-                            yearlyAnalysis.momComparison.purchaseRatePtDiff != null &&
-                            yearlyAnalysis.momComparison.purchaseRatePtDiff > 0
-                              ? "#dca06a"
-                              : "#9ec9a8",
-                        }}
-                      >
-                        {formatPtDiff(yearlyAnalysis.momComparison.purchaseRatePtDiff)}
-                      </strong>
-                    </div>
-                    <div>
-                      前月人件費差{" "}
-                      <strong
-                        style={{
-                          color: yearlyAnalysis.momComparison.laborDiff > 0 ? "#dca06a" : "#9ec9a8",
-                        }}
-                      >
-                        {signedDy(yearlyAnalysis.momComparison.laborDiff)}
-                      </strong>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div style={analysisCardWrap("yoyCompare", vp.narrow)}>
-                <div style={analysisSecTitle("yoyCompare", ".5rem", vp.narrow)}>前年比較（2025年固定データ）</div>
-                <div style={{ display: "grid", gridTemplateColumns: rGridCols(vp.narrow, 180), gap: ".35rem .8rem", fontSize: vp.narrow ? ".9rem" : ".9rem", color: "rgba(240,232,208,0.88)" }}>
-                  <div>今年売上合計 <strong style={vp.narrow ? MOBILE_METRIC_STRONG : { fontSize: "1.08rem" }}>{dy(yearlyAnalysis.yearlyTotalSales)}</strong></div>
-                  <div>前年売上合計 <strong style={vp.narrow ? MOBILE_METRIC_STRONG : { fontSize: "1.08rem" }}>{dy(yearlyAnalysis.previousYearTotal)}</strong></div>
-                  <div>
-                    前年差額{" "}
-                    <strong style={{ color: yearlyAnalysis.yoyDiff >= 0 ? "#9ec9a8" : "#dca06a" }}>
-                      {signedDy(yearlyAnalysis.yoyDiff)}
-                    </strong>
-                  </div>
-                  <div>
-                    前年比 <strong>{yearlyAnalysis.yoyRate != null ? pct1(yearlyAnalysis.yoyRate) : "—"}</strong>
-                  </div>
-                </div>
-                <div style={{ ...analysisNote({}, vp.narrow), marginTop: ".32rem" }}>
-                  ※2025年はスプレッドシート構造差のためAPI未取得。上記は税込固定値（合計 {dy(PREVIOUS_YEAR_SALES_2025_TOTAL)}）との比較です。
-                </div>
-              </div>
-
               <div style={analysisCardWrap("composition", vp.narrow)}>
                 <div style={analysisSecTitle("composition", ".5rem", vp.narrow)}>月別経営レビュー</div>
                 <div style={{ fontSize: vp.narrow ? "0.78rem" : "0.84rem", color: "rgba(240,232,208,0.58)", marginBottom: ".45rem" }}>
@@ -8008,8 +7708,10 @@ export default function SalesModule({ events = [], navigateBack }) {
                   />
                 )}
                 <div style={{ ...analysisNote({}, vp.narrow), marginTop: ".45rem" }}>{MARGINAL_OPERATING_PROFIT_NOTE}</div>
+              </div>
 
-                <div style={{ fontSize: vp.narrow ? "0.74rem" : "0.8rem", color: "rgba(201,168,76,0.82)", margin: ".75rem 0 .35rem", fontWeight: 600 }}>仕入・原価率（参考）</div>
+              <div style={analysisCardWrap("composition", vp.narrow)}>
+                <div style={analysisSecTitle("composition", ".5rem", vp.narrow)}>仕入・原価率（参考）</div>
                 {vp.narrow ? (
                   <YearlyMonthCardsPurchase monthRows={yearlyAnalysis.monthRows} onMonthClick={navigateToMonthAnalysis} taxMode={taxMode} />
                 ) : (
@@ -8100,77 +7802,83 @@ export default function SalesModule({ events = [], navigateBack }) {
                 )}
               </div>
 
-              <div style={{ fontSize: vp.narrow ? "0.78rem" : "0.84rem", color: "rgba(240,232,208,0.55)", marginBottom: ".35rem" }}>
-                グラフの月をクリックすると月次分析へ移動します
-              </div>
-              <YearlyYoYBarChart rows={yearlyAnalysis.monthlyYoYRows} onMonthClick={navigateToMonthAnalysis} />
+              <div style={analysisCardWrap("trend", vp.narrow)}>
+                <div style={analysisSecTitle("trend", ".5rem", vp.narrow)}>年次グラフ</div>
+                <div style={{ fontSize: vp.narrow ? "0.78rem" : "0.84rem", color: "rgba(240,232,208,0.55)", marginBottom: ".45rem" }}>
+                  グラフの月をクリックすると月次分析へ移動します
+                </div>
+                <YearlyYoYBarChart rows={yearlyAnalysis.monthlyYoYRows} onMonthClick={navigateToMonthAnalysis} />
 
-              <div style={{ display: "grid", gridTemplateColumns: yearlyMonthChartGridCols_(vp.narrow), gap: vp.narrow ? ".75rem" : ".9rem", width: "100%", maxWidth: "100%", minWidth: 0 }}>
-                <YearlyMonthBarChart narrow={vp.narrow} tall title="月別売上推移" rows={yearlyAnalysis.chartMonthRows} valueKey="totalSalesSum" barTone="linear-gradient(180deg, rgba(201,168,76,0.95), rgba(201,168,76,0.55))" taxMode={taxMode} onMonthClick={navigateToMonthAnalysis} />
-                <YearlyMonthBarChart
-                  narrow={vp.narrow}
-                  tall
-                  title="月別 損益分岐との差"
-                  rows={yearlyAnalysis.chartMonthRows}
-                  valueKey="breakEvenGapAbsExTax"
-                  barTone="linear-gradient(180deg, rgba(222,181,78,0.95), rgba(222,181,78,0.55))"
-                  formatTop={(r) => r.breakEvenAnalysis?.gapLabel || "—"}
-                  onMonthClick={navigateToMonthAnalysis}
-                />
-                <YearlyMonthBarChart
-                  narrow={vp.narrow}
-                  tall
-                  title="月別 営業利益"
-                  rows={yearlyAnalysis.chartMonthRows}
-                  valueKey="reviewOperatingProfitAbs"
-                  barTone="linear-gradient(180deg, rgba(126,200,126,0.95), rgba(126,200,126,0.55))"
-                  formatTop={(r) => formatReviewProfitYen_(r.reviewOperatingProfitSum)}
-                  onMonthClick={navigateToMonthAnalysis}
-                />
-                <YearlyMonthBarChart
-                  narrow={vp.narrow}
-                  tall
-                  title="月別 集客人数"
-                  rows={yearlyAnalysis.chartMonthRows}
-                  valueKey="customerCountSum"
-                  barTone="linear-gradient(180deg, rgba(167,126,255,0.95), rgba(167,126,255,0.55))"
-                  formatTop={(r) =>
-                    r.status === "集計済み" && r.customerCountSum != null ? `${num(r.customerCountSum)}名` : "—"
-                  }
-                  onMonthClick={navigateToMonthAnalysis}
-                />
-                <YearlyMonthBarChart
-                  narrow={vp.narrow}
-                  tall
-                  title="月別 飲食単価"
-                  rows={yearlyAnalysis.chartMonthRows}
-                  valueKey="foodDrinkUnitPrice"
-                  barTone="linear-gradient(180deg, rgba(102,197,124,0.9), rgba(102,197,124,0.5))"
-                  formatTop={(r) => (r.foodDrinkUnitPrice != null ? formatUnitYen_(r.foodDrinkUnitPrice) : "—")}
-                  onMonthClick={navigateToMonthAnalysis}
-                />
-                <YearlyMonthBarChart
-                  narrow={vp.narrow}
-                  tall
-                  title="月別 営業ベース利益率"
-                  rows={yearlyAnalysis.chartMonthRows}
-                  valueKey="operatingProfitRate"
-                  barTone="linear-gradient(180deg, rgba(86,156,255,0.95), rgba(86,156,255,0.55))"
-                  formatTop={(r) => (r.operatingProfitRate != null ? pct1(r.operatingProfitRate) : "—")}
-                  onMonthClick={navigateToMonthAnalysis}
-                />
+                <div style={{ display: "grid", gridTemplateColumns: yearlyMonthChartGridCols_(vp.narrow), gap: vp.narrow ? ".75rem" : ".9rem", width: "100%", maxWidth: "100%", minWidth: 0, marginTop: ".75rem" }}>
+                  <YearlyMonthBarChart narrow={vp.narrow} tall title="月別売上推移" rows={yearlyAnalysis.chartMonthRows} valueKey="totalSalesSum" barTone="linear-gradient(180deg, rgba(201,168,76,0.95), rgba(201,168,76,0.55))" taxMode={taxMode} onMonthClick={navigateToMonthAnalysis} />
+                  <YearlyMonthBarChart
+                    narrow={vp.narrow}
+                    tall
+                    title="月別 損益分岐との差"
+                    rows={yearlyAnalysis.chartMonthRows}
+                    valueKey="breakEvenGapAbsExTax"
+                    barTone="linear-gradient(180deg, rgba(222,181,78,0.95), rgba(222,181,78,0.55))"
+                    formatTop={(r) => r.breakEvenAnalysis?.gapLabel || "—"}
+                    onMonthClick={navigateToMonthAnalysis}
+                  />
+                  <YearlyMonthBarChart
+                    narrow={vp.narrow}
+                    tall
+                    title="月別 営業利益"
+                    rows={yearlyAnalysis.chartMonthRows}
+                    valueKey="reviewOperatingProfitAbs"
+                    barTone="linear-gradient(180deg, rgba(126,200,126,0.95), rgba(126,200,126,0.55))"
+                    formatTop={(r) => formatReviewProfitYen_(r.reviewOperatingProfitSum)}
+                    onMonthClick={navigateToMonthAnalysis}
+                  />
+                  <YearlyMonthBarChart
+                    narrow={vp.narrow}
+                    tall
+                    title="月別 集客人数"
+                    rows={yearlyAnalysis.chartMonthRows}
+                    valueKey="customerCountSum"
+                    barTone="linear-gradient(180deg, rgba(167,126,255,0.95), rgba(167,126,255,0.55))"
+                    formatTop={(r) =>
+                      r.status === "集計済み" && r.customerCountSum != null ? `${num(r.customerCountSum)}名` : "—"
+                    }
+                    onMonthClick={navigateToMonthAnalysis}
+                  />
+                  <YearlyMonthBarChart
+                    narrow={vp.narrow}
+                    tall
+                    title="月別 飲食単価"
+                    rows={yearlyAnalysis.chartMonthRows}
+                    valueKey="foodDrinkUnitPrice"
+                    barTone="linear-gradient(180deg, rgba(102,197,124,0.9), rgba(102,197,124,0.5))"
+                    formatTop={(r) => (r.foodDrinkUnitPrice != null ? formatUnitYen_(r.foodDrinkUnitPrice) : "—")}
+                    onMonthClick={navigateToMonthAnalysis}
+                  />
+                  <YearlyMonthBarChart
+                    narrow={vp.narrow}
+                    tall
+                    title="月別 営業ベース利益率"
+                    rows={yearlyAnalysis.chartMonthRows}
+                    valueKey="operatingProfitRate"
+                    barTone="linear-gradient(180deg, rgba(86,156,255,0.95), rgba(86,156,255,0.55))"
+                    formatTop={(r) => (r.operatingProfitRate != null ? pct1(r.operatingProfitRate) : "—")}
+                    onMonthClick={navigateToMonthAnalysis}
+                  />
+                </div>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: rGridCols(vp.narrow, 220), gap: ".65rem" }}>
-                <YearlyRankList narrow={vp.narrow} title="売上が強い月" variant="rankSales" items={yearlyAnalysis.salesTop3} valueLabel="売上" formatValue={(r) => dy(r.totalSalesSum)} />
-                <YearlyRankList narrow={vp.narrow} title="目標との差が大きい月" variant="rankUnder" items={yearlyAnalysis.underWorst3} valueLabel="達成率" formatValue={(r) => pct(r.progressRate)} />
-                <YearlyRankList narrow={vp.narrow} title="飲食が強い月" variant="rankFoodDrink" items={yearlyAnalysis.foodDrinkTop3} valueLabel="飲食売上" formatValue={(r) => dy(r.foodDrinkSalesIncludingBandSum)} />
-                <YearlyRankList narrow={vp.narrow} title="ドリンクが強い月" variant="rankDrink" items={yearlyAnalysis.drinkTop3} valueLabel="ドリンク売上" formatValue={(r) => dy(r.drinkSalesSum)} />
-                <YearlyRankList narrow={vp.narrow} title="フードが強い月" variant="rankFood" items={yearlyAnalysis.foodTop3} valueLabel="フード売上" formatValue={(r) => dy(r.foodSalesSum)} />
-                <YearlyRankList narrow={vp.narrow} title="営業利益が強い月" variant="rankSales" items={yearlyAnalysis.profitTop3} valueLabel="営業利益" formatValue={(r) => dy(r.reviewOperatingProfitSum)} />
-                <YearlyRankList narrow={vp.narrow} title="飲食単価が高い月" variant="rankFoodDrink" items={yearlyAnalysis.foodDrinkUnitPriceTop3} valueLabel="飲食単価" formatValue={(r) => formatUnitYen_(r.foodDrinkUnitPrice)} />
-                <YearlyRankList narrow={vp.narrow} title="集客が多い月" variant="rankDrink" items={yearlyAnalysis.customerCountTop3} valueLabel="集客人数" formatValue={(r) => formatCustomerCountLabel_(r.customerCountSum)} />
-                <YearlyRankList narrow={vp.narrow} title="営業ベース利益率が高い月" variant="rankFood" items={yearlyAnalysis.operatingProfitRateTop3} valueLabel="営業ベース利益率" formatValue={(r) => pct1(r.operatingProfitRate)} />
+              <div style={analysisCardWrap("trend", vp.narrow)}>
+                <div style={analysisSecTitle("trend", ".5rem", vp.narrow)}>ランキング</div>
+                <div style={{ display: "grid", gridTemplateColumns: rGridCols(vp.narrow, 220), gap: ".65rem" }}>
+                  <YearlyRankList narrow={vp.narrow} title="売上が強い月" variant="rankSales" items={yearlyAnalysis.salesTop3} valueLabel="売上" formatValue={(r) => dy(r.totalSalesSum)} />
+                  <YearlyRankList narrow={vp.narrow} title="目標との差が大きい月" variant="rankUnder" items={yearlyAnalysis.underWorst3} valueLabel="達成率" formatValue={(r) => pct(r.progressRate)} />
+                  <YearlyRankList narrow={vp.narrow} title="飲食が強い月" variant="rankFoodDrink" items={yearlyAnalysis.foodDrinkTop3} valueLabel="飲食売上" formatValue={(r) => dy(r.foodDrinkSalesIncludingBandSum)} />
+                  <YearlyRankList narrow={vp.narrow} title="ドリンクが強い月" variant="rankDrink" items={yearlyAnalysis.drinkTop3} valueLabel="ドリンク売上" formatValue={(r) => dy(r.drinkSalesSum)} />
+                  <YearlyRankList narrow={vp.narrow} title="フードが強い月" variant="rankFood" items={yearlyAnalysis.foodTop3} valueLabel="フード売上" formatValue={(r) => dy(r.foodSalesSum)} />
+                  <YearlyRankList narrow={vp.narrow} title="営業利益が強い月" variant="rankSales" items={yearlyAnalysis.profitTop3} valueLabel="営業利益" formatValue={(r) => dy(r.reviewOperatingProfitSum)} />
+                  <YearlyRankList narrow={vp.narrow} title="飲食単価が高い月" variant="rankFoodDrink" items={yearlyAnalysis.foodDrinkUnitPriceTop3} valueLabel="飲食単価" formatValue={(r) => formatUnitYen_(r.foodDrinkUnitPrice)} />
+                  <YearlyRankList narrow={vp.narrow} title="集客が多い月" variant="rankDrink" items={yearlyAnalysis.customerCountTop3} valueLabel="集客人数" formatValue={(r) => formatCustomerCountLabel_(r.customerCountSum)} />
+                  <YearlyRankList narrow={vp.narrow} title="営業ベース利益率が高い月" variant="rankFood" items={yearlyAnalysis.operatingProfitRateTop3} valueLabel="営業ベース利益率" formatValue={(r) => pct1(r.operatingProfitRate)} />
+                </div>
               </div>
 
               <div style={analysisCardWrap("costProfit", vp.narrow)}>
