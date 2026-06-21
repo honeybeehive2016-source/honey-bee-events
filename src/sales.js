@@ -3938,6 +3938,132 @@ function trendToneByAchievement(achievementRate, targetSales) {
     tone: "linear-gradient(180deg, rgba(166,74,84,0.95), rgba(166,74,84,0.58))",
   };
 }
+function parseTimeToMinutes_(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return null;
+  const m = s.match(/(\d{1,2})[:：](\d{2})/);
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (!Number.isFinite(h) || !Number.isFinite(min)) return null;
+  return h * 60 + min;
+}
+function dailyEventSlotRank_(record, events) {
+  const name = String(record?.sheetEventName || record?.eventName || "");
+  if (/昼|午前/i.test(name) || /[\[（(]昼[\]）)]/.test(name)) return 0;
+  if (/夜|深夜|午後/i.test(name) || /[\[（(]夜[\]）)]/.test(name)) return 1;
+  if (/^[\s　]*バー|bar/i.test(name)) return 2;
+
+  const ev = matchEventForRecord(record, eventsForDate(events, record?.businessDate));
+  const mins = parseTimeToMinutes_(pickEventText(ev, ["open", "start", "time", "startTime"]));
+  if (mins != null) {
+    if (mins < 17 * 60) return 0;
+    if (mins < 23 * 60) return 1;
+    return 2;
+  }
+  if (/貸切|貸し切り/.test(name)) return 0;
+  return 1;
+}
+function compareDailyEventRecords_(a, b, events) {
+  const slotA = dailyEventSlotRank_(a, events);
+  const slotB = dailyEventSlotRank_(b, events);
+  if (slotA !== slotB) return slotA - slotB;
+
+  const evA = matchEventForRecord(a, eventsForDate(events, a?.businessDate));
+  const evB = matchEventForRecord(b, eventsForDate(events, b?.businessDate));
+  const timeA = parseTimeToMinutes_(pickEventText(evA, ["open", "start", "time", "startTime"]));
+  const timeB = parseTimeToMinutes_(pickEventText(evB, ["open", "start", "time", "startTime"]));
+  if (timeA != null && timeB != null && timeA !== timeB) return timeA - timeB;
+  if (timeA != null && timeB == null) return -1;
+  if (timeA == null && timeB != null) return 1;
+
+  const blockRank = (block) => (block === "firstHalf" ? 0 : block === "secondHalf" ? 1 : 2);
+  const blockDiff = blockRank(a?.sourceBlock) - blockRank(b?.sourceBlock);
+  if (blockDiff !== 0) return blockDiff;
+
+  const colDiff = (a?.sourceColumn || 0) - (b?.sourceColumn || 0);
+  if (colDiff !== 0) return colDiff;
+  return (a?._idx || 0) - (b?._idx || 0);
+}
+function formatDailyReviewDate_(businessDate) {
+  const s = String(businessDate || "");
+  const m = s.match(/^\d{4}-(\d{2})-(\d{2})$/);
+  if (!m) return s || "—";
+  return `${m[1]}/${m[2]}`;
+}
+function dailyReviewAchievementVisual_(achievementRate, targetSales) {
+  const tone = trendToneByAchievement(achievementRate, targetSales);
+  if (tone.label === "目標未設定") {
+    return {
+      borderColor: "rgba(132,132,132,0.55)",
+      rowBg: "rgba(132,132,132,0.05)",
+      badge: null,
+      rateColor: "rgba(240,232,208,0.55)",
+    };
+  }
+  const rate = Number(achievementRate || 0);
+  if (rate >= 100) {
+    return {
+      borderColor: "rgba(102,197,124,0.85)",
+      rowBg: "rgba(102,197,124,0.06)",
+      badge: { label: "達成", bg: "rgba(102,197,124,0.22)", bd: "rgba(102,197,124,0.45)", tx: "#9ec9a8" },
+      rateColor: "#9ec9a8",
+    };
+  }
+  if (rate >= 90) {
+    return {
+      borderColor: "rgba(222,181,78,0.85)",
+      rowBg: "rgba(222,181,78,0.06)",
+      badge: { label: "あと少し", bg: "rgba(222,181,78,0.16)", bd: "rgba(222,181,78,0.38)", tx: "rgba(230,210,160,0.92)" },
+      rateColor: "rgba(230,210,160,0.92)",
+    };
+  }
+  if (tone.label === "未達 70%以上") {
+    return {
+      borderColor: "rgba(222,181,78,0.7)",
+      rowBg: "rgba(222,181,78,0.05)",
+      badge: { label: "未達", bg: "rgba(222,181,78,0.14)", bd: "rgba(222,181,78,0.32)", tx: "rgba(210,195,150,0.85)" },
+      rateColor: "#dca06a",
+    };
+  }
+  if (tone.label === "未達 50%以上") {
+    return {
+      borderColor: "rgba(223,137,79,0.8)",
+      rowBg: "rgba(223,137,79,0.06)",
+      badge: { label: "未達", bg: "rgba(223,137,79,0.14)", bd: "rgba(223,137,79,0.32)", tx: "#dfa060" },
+      rateColor: "#dfa060",
+    };
+  }
+  return {
+    borderColor: "rgba(166,74,84,0.85)",
+    rowBg: "rgba(166,74,84,0.06)",
+    badge: { label: "未達", bg: "rgba(166,74,84,0.14)", bd: "rgba(166,74,84,0.32)", tx: "#dca06a" },
+    rateColor: "#dca06a",
+  };
+}
+function DailyReviewAchievementBadge({ badge, compact = false }) {
+  if (!badge) return null;
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        marginLeft: compact ? ".28rem" : ".32rem",
+        fontSize: compact ? ".58rem" : ".6rem",
+        fontWeight: 600,
+        lineHeight: 1.25,
+        padding: ".05rem .32rem",
+        borderRadius: 2,
+        border: `1px solid ${badge.bd}`,
+        background: badge.bg,
+        color: badge.tx,
+        verticalAlign: "middle",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {badge.label}
+    </span>
+  );
+}
 
 function getCurrentBusinessDateForSales() {
   const d = new Date();
@@ -5307,27 +5433,29 @@ function YearlyMonthReviewTable({ rows, narrow, dy, pct, pct1, formatUnitYen_, o
   );
 }
 const DAILY_REVIEW_COL = {
-  date: 72,
-  weekday: 44,
-  event: 132,
-  yen: 84,
-  pct: 68,
-  count: 56,
+  date: 56,
+  weekday: 40,
+  event: 210,
+  yen: 80,
+  pct: 108,
+  count: 52,
   unit: 72,
 };
 function dailyReviewRowStyle_(row, selectedRowKey) {
   const selected = !!selectedRowKey && selectedRowKey === row.rowKey;
+  const ach = dailyReviewAchievementVisual_(row.achievementRate, row.targetSales);
   return {
     ...YEARLY_TABLE_ROW,
     cursor: "pointer",
-    background: selected ? "rgba(201,168,76,0.1)" : undefined,
-    boxShadow: selected ? "inset 2px 0 0 rgba(201,168,76,0.55)" : undefined,
+    background: selected ? "rgba(201,168,76,0.12)" : ach.rowBg,
+    boxShadow: selected ? "inset 3px 0 0 rgba(201,168,76,0.75)" : `inset 3px 0 0 ${ach.borderColor}`,
+    outline: selected ? "1px solid rgba(201,168,76,0.32)" : undefined,
   };
 }
-function DailyManagementReviewTable({ rows, selectedRowKey, onRowClick, dy, pct, formatUnitYen_, formatCustomerCountLabel_ }) {
+function DailyManagementReviewTable({ rows, selectedRowKey, onRowClick, dy, pct1, formatUnitYen_, formatCustomerCountLabel_ }) {
   return (
     <div style={YEARLY_TABLE_WRAP}>
-      <table style={{ ...YEARLY_TABLE_STYLE, minWidth: 1040 }}>
+      <table style={{ ...YEARLY_TABLE_STYLE, minWidth: 1080 }}>
         <thead>
           <tr>
             <th style={yearlyThStyle_(DAILY_REVIEW_COL.date, "left")}>日付</th>
@@ -5335,59 +5463,67 @@ function DailyManagementReviewTable({ rows, selectedRowKey, onRowClick, dy, pct,
             <th style={yearlyThStyle_(DAILY_REVIEW_COL.event, "left")}>イベント名</th>
             <th style={yearlyThStyle_(DAILY_REVIEW_COL.yen)}>売上</th>
             <th style={yearlyThStyle_(DAILY_REVIEW_COL.pct)}>目標達成率</th>
-            <th style={yearlyThStyle_(DAILY_REVIEW_COL.yen)}>飲食売上</th>
-            <th style={yearlyThStyle_(DAILY_REVIEW_COL.pct)}>飲食比率</th>
             <th style={yearlyThStyle_(DAILY_REVIEW_COL.count)}>集客</th>
+            <th style={yearlyThStyle_(DAILY_REVIEW_COL.yen)}>会場費</th>
+            <th style={yearlyThStyle_(DAILY_REVIEW_COL.yen)}>飲食売上</th>
             <th style={yearlyThStyle_(DAILY_REVIEW_COL.unit)}>客単価</th>
             <th style={yearlyThStyle_(DAILY_REVIEW_COL.unit)}>飲食単価</th>
-            <th style={yearlyThStyle_(DAILY_REVIEW_COL.yen)}>会場費</th>
-            <th style={yearlyThStyle_(DAILY_REVIEW_COL.yen)}>レンタル</th>
+            <th style={yearlyThStyle_(DAILY_REVIEW_COL.yen)}>レンタル費</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            <tr
-              key={row.rowKey}
-              style={dailyReviewRowStyle_(row, selectedRowKey)}
-              onClick={() => onRowClick(row.rowKey)}
-              title="クリックで営業レポートを表示"
-              {...yearlyRowHoverHandlers_()}
-            >
-              <td style={yearlyMonthTdStyle_(DAILY_REVIEW_COL.date)}>{row.businessDate || "—"}</td>
-              <td style={{ ...yearlyNumTdStyle_(DAILY_REVIEW_COL.weekday, false), textAlign: "center" }}>{row.weekday || "—"}</td>
-              <td
-                style={{
-                  ...yearlyMonthTdStyle_(DAILY_REVIEW_COL.event),
-                  maxWidth: DAILY_REVIEW_COL.event,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-                title={row.eventName || ""}
+          {rows.map((row) => {
+            const ach = dailyReviewAchievementVisual_(row.achievementRate, row.targetSales);
+            return (
+              <tr
+                key={row.rowKey}
+                style={dailyReviewRowStyle_(row, selectedRowKey)}
+                onClick={() => onRowClick(row.rowKey)}
+                title="クリックで営業レポートを表示"
+                {...yearlyRowHoverHandlers_()}
               >
-                {row.eventName || "イベント未登録"}
-              </td>
-              <td style={yearlyNumTdStyle_(DAILY_REVIEW_COL.yen, false)}>{dy(row.totalSales)}</td>
-              <td style={yearlyNumTdStyle_(DAILY_REVIEW_COL.pct, row.achievementRate == null)}>{row.achievementRate != null ? pct(row.achievementRate) : "—"}</td>
-              <td style={yearlyNumTdStyle_(DAILY_REVIEW_COL.yen, row.foodDrinkSalesIncludingBand == null)}>{row.foodDrinkSalesIncludingBand != null ? dy(row.foodDrinkSalesIncludingBand) : "—"}</td>
-              <td style={yearlyNumTdStyle_(DAILY_REVIEW_COL.pct, row.foodDrinkSalesIncludingBand == null)}>{pct(calcRate(row.foodDrinkSalesIncludingBand, row.totalSales))}</td>
-              <td style={yearlyNumTdStyle_(DAILY_REVIEW_COL.count, row.customerCount == null)}>{formatCustomerCountLabel_(row.customerCount)}</td>
-              <td style={yearlyNumTdStyle_(DAILY_REVIEW_COL.unit, row.customerUnitPrice == null)}>{formatUnitYen_(row.customerUnitPrice)}</td>
-              <td style={yearlyNumTdStyle_(DAILY_REVIEW_COL.unit, row.foodDrinkUnitPriceIncludingBand == null)}>{formatUnitYen_(row.foodDrinkUnitPriceIncludingBand ?? row.foodDrinkUnitPrice)}</td>
-              <td style={yearlyNumTdStyle_(DAILY_REVIEW_COL.yen, row.venueFee == null)}>{row.venueFee != null ? dy(row.venueFee) : "—"}</td>
-              <td style={yearlyNumTdStyle_(DAILY_REVIEW_COL.yen, row.rentalSales == null)}>{row.rentalSales != null ? dy(row.rentalSales) : "—"}</td>
-            </tr>
-          ))}
+                <td style={yearlyMonthTdStyle_(DAILY_REVIEW_COL.date)}>{formatDailyReviewDate_(row.businessDate)}</td>
+                <td style={{ ...yearlyNumTdStyle_(DAILY_REVIEW_COL.weekday, false), textAlign: "center" }}>{row.weekday || "—"}</td>
+                <td
+                  style={{
+                    ...yearlyMonthTdStyle_(DAILY_REVIEW_COL.event),
+                    whiteSpace: "normal",
+                    wordBreak: "break-word",
+                    lineHeight: 1.45,
+                    display: "-webkit-box",
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: "vertical",
+                    overflow: "hidden",
+                  }}
+                  title={row.eventName || ""}
+                >
+                  {row.eventName || "イベント未登録"}
+                </td>
+                <td style={yearlyNumTdStyle_(DAILY_REVIEW_COL.yen, false)}>{dy(row.totalSales)}</td>
+                <td style={{ ...yearlyNumTdStyle_(DAILY_REVIEW_COL.pct, row.achievementRate == null), color: ach.rateColor, whiteSpace: "nowrap" }}>
+                  {row.achievementRate != null ? pct1(row.achievementRate) : "—"}
+                  <DailyReviewAchievementBadge badge={ach.badge} />
+                </td>
+                <td style={yearlyNumTdStyle_(DAILY_REVIEW_COL.count, row.customerCount == null)}>{formatCustomerCountLabel_(row.customerCount)}</td>
+                <td style={yearlyNumTdStyle_(DAILY_REVIEW_COL.yen, row.venueFee == null)}>{row.venueFee != null ? dy(row.venueFee) : "—"}</td>
+                <td style={yearlyNumTdStyle_(DAILY_REVIEW_COL.yen, row.foodDrinkSalesIncludingBand == null)}>{row.foodDrinkSalesIncludingBand != null ? dy(row.foodDrinkSalesIncludingBand) : "—"}</td>
+                <td style={yearlyNumTdStyle_(DAILY_REVIEW_COL.unit, row.customerUnitPrice == null)}>{formatUnitYen_(row.customerUnitPrice)}</td>
+                <td style={yearlyNumTdStyle_(DAILY_REVIEW_COL.unit, row.foodDrinkUnitPriceIncludingBand == null && row.foodDrinkUnitPrice == null)}>{formatUnitYen_(row.foodDrinkUnitPriceIncludingBand ?? row.foodDrinkUnitPrice)}</td>
+                <td style={yearlyNumTdStyle_(DAILY_REVIEW_COL.yen, row.rentalSales == null)}>{row.rentalSales != null ? dy(row.rentalSales) : "—"}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
   );
 }
-function DailyManagementReviewSection({ rows, selectedRowKey, onRowClick, dy, pct, formatUnitYen_, formatCustomerCountLabel_ }) {
+function DailyManagementReviewSection({ rows, selectedRowKey, onRowClick, dy, pct1, formatUnitYen_, formatCustomerCountLabel_ }) {
   return (
     <div style={{ display: "grid", gap: ".45rem" }}>
       {rows.map((row) => {
         const selected = !!selectedRowKey && selectedRowKey === row.rowKey;
+        const ach = dailyReviewAchievementVisual_(row.achievementRate, row.targetSales);
         return (
           <div
             key={row.rowKey}
@@ -5403,29 +5539,33 @@ function DailyManagementReviewSection({ rows, selectedRowKey, onRowClick, dy, pc
             style={{
               padding: ".5rem .58rem",
               borderRadius: 6,
-              border: selected ? "1px solid rgba(201,168,76,0.42)" : "1px solid rgba(201,168,76,0.14)",
-              background: selected ? "rgba(201,168,76,0.08)" : "rgba(0,0,0,0.12)",
+              border: selected ? "1px solid rgba(201,168,76,0.42)" : `1px solid ${ach.borderColor}`,
+              borderLeft: selected ? "3px solid rgba(201,168,76,0.75)" : `3px solid ${ach.borderColor}`,
+              background: selected ? "rgba(201,168,76,0.1)" : ach.rowBg,
               cursor: "pointer",
               minWidth: 0,
+              boxShadow: selected ? "0 0 0 1px rgba(201,168,76,0.18)" : undefined,
             }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", gap: ".5rem", marginBottom: ".22rem", flexWrap: "wrap" }}>
-              <strong style={{ fontSize: ".82rem", color: "#f0e8d0" }}>{row.businessDate || "—"}</strong>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: ".5rem", marginBottom: ".22rem", flexWrap: "wrap", alignItems: "center" }}>
+              <strong style={{ fontSize: ".82rem", color: "#f0e8d0" }}>{formatDailyReviewDate_(row.businessDate)}</strong>
               <span style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.58)" }}>{row.weekday || "—"}</span>
+              <span style={{ fontSize: ".74rem", color: ach.rateColor, marginLeft: "auto" }}>
+                {row.achievementRate != null ? pct1(row.achievementRate) : "—"}
+                <DailyReviewAchievementBadge badge={ach.badge} compact />
+              </span>
             </div>
-            <div style={{ fontSize: ".78rem", color: "#f0e8d0", fontWeight: 600, marginBottom: ".28rem", wordBreak: "break-word", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+            <div style={{ fontSize: ".78rem", color: "#f0e8d0", fontWeight: 600, marginBottom: ".28rem", wordBreak: "break-word", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }} title={row.eventName || ""}>
               {row.eventName || "イベント未登録"}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: ".18rem .45rem", fontSize: ".74rem", color: "rgba(240,232,208,0.82)" }}>
               <div>売上 <strong>{dy(row.totalSales)}</strong></div>
-              <div>達成率 <strong>{row.achievementRate != null ? pct(row.achievementRate) : "—"}</strong></div>
-              <div>飲食売上 <strong>{row.foodDrinkSalesIncludingBand != null ? dy(row.foodDrinkSalesIncludingBand) : "—"}</strong></div>
-              <div>飲食比率 <strong>{pct(calcRate(row.foodDrinkSalesIncludingBand, row.totalSales))}</strong></div>
               <div>集客 <strong>{formatCustomerCountLabel_(row.customerCount)}</strong></div>
+              <div>会場費 <strong>{row.venueFee != null ? dy(row.venueFee) : "—"}</strong></div>
+              <div>飲食売上 <strong>{row.foodDrinkSalesIncludingBand != null ? dy(row.foodDrinkSalesIncludingBand) : "—"}</strong></div>
               <div>客単価 <strong>{formatUnitYen_(row.customerUnitPrice)}</strong></div>
               <div>飲食単価 <strong>{formatUnitYen_(row.foodDrinkUnitPriceIncludingBand ?? row.foodDrinkUnitPrice)}</strong></div>
-              <div>会場費 <strong>{row.venueFee != null ? dy(row.venueFee) : "—"}</strong></div>
-              <div>レンタル <strong>{row.rentalSales != null ? dy(row.rentalSales) : "—"}</strong></div>
+              <div>レンタル費 <strong>{row.rentalSales != null ? dy(row.rentalSales) : "—"}</strong></div>
             </div>
           </div>
         );
@@ -6334,7 +6474,7 @@ export default function SalesModule({ events = [], navigateBack }) {
       .sort((a, b) => {
         const d = (a.businessDate || "").localeCompare(b.businessDate || "");
         if (d !== 0) return d;
-        return (a.sourceColumn || 0) - (b.sourceColumn || 0);
+        return compareDailyEventRecords_(a, b, events);
       })
       .map((r) => {
         const totalSales = Number(r?.metrics?.totalSales || 0);
@@ -6370,6 +6510,9 @@ export default function SalesModule({ events = [], navigateBack }) {
           key: `${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}_trend`,
           rowKey: `${r.businessDate}_${r.sourceBlock}_${r.sourceColumn}_${r._idx}`,
           businessDate: r.businessDate,
+          sheetEventName: r.sheetEventName || null,
+          sourceBlock: r.sourceBlock,
+          sourceColumn: r.sourceColumn,
           weekday: r.weekday || "—",
           eventName,
           eventPerformContent: performFormatted.display,
@@ -6685,6 +6828,9 @@ export default function SalesModule({ events = [], navigateBack }) {
     window.setTimeout(() => {
       dayReportRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 60);
+  };
+  const closeSelectedDayReport_ = () => {
+    setSelectedTrendRowKey("");
   };
   const selectReferenceDayForReport_ = (row) => {
     if (!row?.rowKey && !row?.businessDate) return;
@@ -7401,7 +7547,25 @@ export default function SalesModule({ events = [], navigateBack }) {
 
           {selectedTrendRow ? (
             <div ref={dayReportRef} style={analysisCardWrap("dayReport", vp.narrow)}>
-              <div style={{ ...analysisSecTitle("dayReport"), fontSize: ".86rem", fontWeight: 700, letterSpacing: ".06em", textTransform: "none" }}>選択日の営業レポート</div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: ".5rem", flexWrap: "wrap", marginBottom: ".45rem" }}>
+                <div style={{ ...analysisSecTitle("dayReport"), fontSize: ".86rem", fontWeight: 700, letterSpacing: ".06em", textTransform: "none", marginBottom: 0, paddingBottom: 0, borderBottom: "none" }}>選択日の営業レポート</div>
+                <button
+                  type="button"
+                  onClick={closeSelectedDayReport_}
+                  style={{
+                    ...S.btn("ghost"),
+                    minHeight: vp.narrow ? 44 : 34,
+                    padding: vp.narrow ? ".45rem .85rem" : ".28rem .72rem",
+                    fontSize: vp.narrow ? ".82rem" : ".72rem",
+                    letterSpacing: ".06em",
+                    color: "rgba(201,168,76,0.88)",
+                    borderColor: "rgba(201,168,76,0.28)",
+                    flexShrink: 0,
+                  }}
+                >
+                  閉じる
+                </button>
+              </div>
 
                   <div style={{ marginBottom: ".55rem", ...DAY_REPORT_BOX }}>
                     <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>A. 基本情報</div>
@@ -7561,7 +7725,7 @@ export default function SalesModule({ events = [], navigateBack }) {
                 selectedRowKey={selectedTrendRowKey}
                 onRowClick={selectTrendDayForReport_}
                 dy={dy}
-                pct={pct}
+                pct1={pct1}
                 formatUnitYen_={formatUnitYen_}
                 formatCustomerCountLabel_={formatCustomerCountLabel_}
               />
@@ -7571,7 +7735,7 @@ export default function SalesModule({ events = [], navigateBack }) {
                 selectedRowKey={selectedTrendRowKey}
                 onRowClick={selectTrendDayForReport_}
                 dy={dy}
-                pct={pct}
+                pct1={pct1}
                 formatUnitYen_={formatUnitYen_}
                 formatCustomerCountLabel_={formatCustomerCountLabel_}
               />
