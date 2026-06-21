@@ -5531,6 +5531,43 @@ function YearlySummaryBlock({ title, children, narrow, accent }) {
     </div>
   );
 }
+function YearlySamePeriodSalesLines({ metric, narrow, dy, pct1, signedDy, taxMode, withHeading }) {
+  if (!metric?.comparable) return null;
+  const diffColor = signedMetricColor_(metric.diff);
+  return (
+    <>
+      {withHeading ? (
+        <div
+          style={{
+            fontSize: narrow ? "0.84rem" : "0.94rem",
+            color: "rgba(201,168,76,0.88)",
+            fontWeight: 600,
+            marginBottom: ".12rem",
+            letterSpacing: ".04em",
+          }}
+        >
+          売上
+        </div>
+      ) : null}
+      <YearlySummaryMetricLine narrow={narrow} label="今年" value={dy(metric.current)} emphasize />
+      <YearlySummaryMetricLine narrow={narrow} label="前年" value={metric.prior != null ? dy(metric.prior) : "—"} />
+      <YearlySummaryMetricLine
+        narrow={narrow}
+        label="差額"
+        value={metric.diff != null ? signedDy(metric.diff) : "—"}
+        strong
+        valueStyle={{ color: diffColor }}
+      />
+      <YearlySummaryMetricLine
+        narrow={narrow}
+        label="前年比"
+        value={metric.rate != null ? pct1(metric.rate) : "—"}
+        strong
+        valueStyle={{ color: diffColor }}
+      />
+    </>
+  );
+}
 function YearlySamePeriodCompareCard({
   title,
   metric,
@@ -5541,8 +5578,10 @@ function YearlySamePeriodCompareCard({
   taxMode,
   kind,
 }) {
+  if (!metric?.comparable) return null;
+
   const cardStyle = {
-    padding: narrow ? ".55rem .62rem" : ".65rem .75rem",
+    padding: narrow ? ".5rem .55rem" : ".55rem .62rem",
     borderRadius: 6,
     border: "1px solid rgba(201,168,76,0.18)",
     background: "rgba(0,0,0,0.14)",
@@ -5553,21 +5592,23 @@ function YearlySamePeriodCompareCard({
     fontSize: narrow ? "0.84rem" : "0.94rem",
     color: "rgba(201,168,76,0.88)",
     fontWeight: 600,
-    marginBottom: ".3rem",
+    marginBottom: ".22rem",
     letterSpacing: ".04em",
   };
-  const unavailableStyle = {
-    fontSize: narrow ? "0.84rem" : "0.92rem",
-    color: "rgba(240,232,208,0.62)",
-    lineHeight: 1.5,
-    padding: ".2rem 0",
-  };
 
-  if (!metric?.comparable) {
+  if (kind === "sales") {
     return (
       <div style={cardStyle}>
         <div style={titleStyle}>{title}</div>
-        <div style={unavailableStyle}>比較不可</div>
+        <YearlySamePeriodSalesLines
+          metric={metric}
+          narrow={narrow}
+          dy={dy}
+          pct1={pct1}
+          signedDy={signedDy}
+          taxMode={taxMode}
+          withHeading={false}
+        />
       </div>
     );
   }
@@ -5590,12 +5631,12 @@ function YearlySamePeriodCompareCard({
     return signedDy(metric.diff);
   };
   const diffColor = signedMetricColor_(metric.diff);
-  const showRate = kind === "sales" || kind === "customer";
+  const showRate = kind === "customer";
 
   return (
     <div style={cardStyle}>
       <div style={titleStyle}>{title}</div>
-      <div style={{ display: "grid", gap: narrow ? ".18rem" : ".22rem" }}>
+      <div style={{ display: "grid", gap: narrow ? ".16rem" : ".2rem" }}>
         <YearlySummaryMetricLine narrow={narrow} label="今年" value={formatCurrent()} emphasize />
         <YearlySummaryMetricLine narrow={narrow} label="前年" value={formatPrior()} />
         <YearlySummaryMetricLine
@@ -5618,12 +5659,86 @@ function YearlySamePeriodCompareCard({
     </div>
   );
 }
+function YearlySamePeriodBlockBody({ sp, narrow, dy, pct1, signedDy, taxMode, unavailableMessageStyle, noteStyle }) {
+  if (!sp) return null;
+
+  const fixedNote = "※前年売上は固定データ補完です。";
+  const renderNotes = () => {
+    if (sp.sourceType === "fixed_sales_only") {
+      return <div style={noteStyle}>{fixedNote}</div>;
+    }
+    return (sp.notes || []).map((note) => (
+      <div key={note} style={noteStyle}>
+        {note}
+      </div>
+    ));
+  };
+
+  if (sp.sourceType === "unavailable") {
+    return (
+      <>
+        <div style={unavailableMessageStyle}>{sp.unavailableMessage}</div>
+        {sp.sales?.current != null ? (
+          <YearlySummaryMetricLine narrow={narrow} label="今年売上（参考）" value={dy(sp.sales.current)} emphasize />
+        ) : null}
+      </>
+    );
+  }
+
+  if (sp.sourceType === "fixed_sales_only") {
+    return (
+      <>
+        <YearlySamePeriodSalesLines
+          metric={sp.sales}
+          narrow={narrow}
+          dy={dy}
+          pct1={pct1}
+          signedDy={signedDy}
+          taxMode={taxMode}
+          withHeading
+        />
+        {renderNotes()}
+      </>
+    );
+  }
+
+  const compareItems = [
+    { title: "売上", metric: sp.sales, kind: "sales" },
+    { title: "集客", metric: sp.customer, kind: "customer" },
+    { title: "客単価", metric: sp.customerUnitPrice, kind: "unit" },
+    { title: "飲食単価", metric: sp.foodDrinkUnitPrice, kind: "unit" },
+  ].filter((item) => item.metric?.comparable);
+
+  const compareGrid = narrow ? "1fr" : compareItems.length > 1 ? "repeat(2, minmax(0, 1fr))" : "1fr";
+
+  return (
+    <>
+      {compareItems.length > 0 ? (
+        <div style={{ display: "grid", gridTemplateColumns: compareGrid, gap: narrow ? ".4rem" : ".45rem" }}>
+          {compareItems.map((item) => (
+            <YearlySamePeriodCompareCard
+              key={item.kind + item.title}
+              title={item.title}
+              metric={item.metric}
+              narrow={narrow}
+              dy={dy}
+              pct1={pct1}
+              signedDy={signedDy}
+              taxMode={taxMode}
+              kind={item.kind}
+            />
+          ))}
+        </div>
+      ) : null}
+      {renderNotes()}
+    </>
+  );
+}
 function YearlySummarySixBlocks({ yearlyAnalysis, narrow, dy, pct, pct1, signedDy, taxMode }) {
   const a = yearlyAnalysis;
   const landing = a.landing;
   const sp = a.samePeriodComparison;
   const colGrid = narrow ? "1fr" : "repeat(2, minmax(0, 1fr))";
-  const compareGrid = narrow ? "1fr" : "repeat(2, minmax(0, 1fr))";
   const be = a.breakEvenMonthCounts;
   const landingAccent =
     landing?.hasFullYearTarget && (landing?.targetAchievedOutlook || (landing?.forecastGap != null && landing.forecastGap >= 0))
@@ -5662,7 +5777,7 @@ function YearlySummarySixBlocks({ yearlyAnalysis, narrow, dy, pct, pct1, signedD
             value={`${num(a.aggregatedMonthCount)} / ${num(a.enteredTargetMonthCount)}ヶ月`}
           />
         </YearlySummaryBlock>
-        <YearlySummaryBlock title="C. 年間着地見込み" narrow={narrow}>
+        <YearlySummaryBlock title="B. 年間着地見込み" narrow={narrow}>
           <YearlySummaryMetricLine
             narrow={narrow}
             label="実績月の平均売上"
@@ -5697,94 +5812,50 @@ function YearlySummarySixBlocks({ yearlyAnalysis, narrow, dy, pct, pct1, signedD
           </div>
         </YearlySummaryBlock>
       </div>
-      {sp ? (
-        <YearlySummaryBlock title="B. 前年同期間比較" narrow={narrow} accent>
-          {sp.sourceType === "unavailable" ? (
-            <>
-              <div style={unavailableMessageStyle}>{sp.unavailableMessage}</div>
-              {sp.sales?.current != null ? (
-                <YearlySummaryMetricLine narrow={narrow} label="今年売上（参考）" value={dy(sp.sales.current)} emphasize />
-              ) : null}
-            </>
-          ) : (
-            <div style={{ display: "grid", gridTemplateColumns: compareGrid, gap: narrow ? ".45rem" : ".55rem" }}>
-              <YearlySamePeriodCompareCard
-                title="売上"
-                metric={sp.sales}
-                narrow={narrow}
-                dy={dy}
-                pct1={pct1}
-                signedDy={signedDy}
-                taxMode={taxMode}
-                kind="sales"
-              />
-              <YearlySamePeriodCompareCard
-                title="集客"
-                metric={sp.customer}
-                narrow={narrow}
-                dy={dy}
-                pct1={pct1}
-                signedDy={signedDy}
-                taxMode={taxMode}
-                kind="customer"
-              />
-              <YearlySamePeriodCompareCard
-                title="客単価"
-                metric={sp.customerUnitPrice}
-                narrow={narrow}
-                dy={dy}
-                pct1={pct1}
-                signedDy={signedDy}
-                taxMode={taxMode}
-                kind="unit"
-              />
-              <YearlySamePeriodCompareCard
-                title="飲食単価"
-                metric={sp.foodDrinkUnitPrice}
-                narrow={narrow}
-                dy={dy}
-                pct1={pct1}
-                signedDy={signedDy}
-                taxMode={taxMode}
-                kind="unit"
-              />
-            </div>
-          )}
-          {(sp.notes || []).map((note) => (
-            <div key={note} style={noteStyle}>
-              {note}
-            </div>
-          ))}
-        </YearlySummaryBlock>
-      ) : null}
-      {be?.actualMonthCount > 0 ? (
-        <YearlySummaryBlock title="D. 経営ライン" narrow={narrow}>
-          <YearlySummaryMetricLine
-            narrow={narrow}
-            label="固定費ライン"
-            value={formatExTaxYen_(MONTHLY_FIXED_COST_EX_TAX)}
-            emphasize
-          />
-          <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "repeat(3, minmax(0, 1fr))", gap: ".2rem .55rem" }}>
+      <div style={{ display: "grid", gridTemplateColumns: colGrid, gap: ".55rem" }}>
+        {be?.actualMonthCount > 0 ? (
+          <YearlySummaryBlock title="C. 経営ライン" narrow={narrow}>
             <YearlySummaryMetricLine
               narrow={narrow}
-              label="損益分岐超え月数"
-              value={`${num(be.aboveBreakEvenCount)}/${num(be.actualMonthCount)}ヶ月`}
+              label="固定費ライン"
+              value={formatExTaxYen_(MONTHLY_FIXED_COST_EX_TAX)}
               emphasize
             />
-            <YearlySummaryMetricLine narrow={narrow} label="安定ライン超え月数" value={`${num(be.stableLineCount)}ヶ月`} />
-            <YearlySummaryMetricLine narrow={narrow} label="良い月数" value={`${num(be.goodLineCount)}ヶ月`} />
-            <YearlySummaryMetricLine narrow={narrow} label="強い月数" value={`${num(be.strongLineCount)}ヶ月`} />
-          </div>
-          <div style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".08rem" }}>
-            {MARGINAL_PROFIT_NOTE}
-            <span style={{ display: "block", marginTop: ".08rem" }}>{OPERATING_PROFIT_NOTE}</span>
-            {a.hasCurrentAggregatedMonth ? (
-              <span style={{ display: "block", marginTop: ".08rem" }}>※月数は終了済み月ベースです。進行中月は暫定評価のため含みません。</span>
-            ) : null}
-          </div>
-        </YearlySummaryBlock>
-      ) : null}
+            <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "repeat(3, minmax(0, 1fr))", gap: ".2rem .55rem" }}>
+              <YearlySummaryMetricLine
+                narrow={narrow}
+                label="損益分岐超え月数"
+                value={`${num(be.aboveBreakEvenCount)}/${num(be.actualMonthCount)}ヶ月`}
+                emphasize
+              />
+              <YearlySummaryMetricLine narrow={narrow} label="安定ライン超え月数" value={`${num(be.stableLineCount)}ヶ月`} />
+              <YearlySummaryMetricLine narrow={narrow} label="良い月数" value={`${num(be.goodLineCount)}ヶ月`} />
+              <YearlySummaryMetricLine narrow={narrow} label="強い月数" value={`${num(be.strongLineCount)}ヶ月`} />
+            </div>
+            <div style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".08rem" }}>
+              {MARGINAL_PROFIT_NOTE}
+              <span style={{ display: "block", marginTop: ".08rem" }}>{OPERATING_PROFIT_NOTE}</span>
+              {a.hasCurrentAggregatedMonth ? (
+                <span style={{ display: "block", marginTop: ".08rem" }}>※月数は終了済み月ベースです。進行中月は暫定評価のため含みません。</span>
+              ) : null}
+            </div>
+          </YearlySummaryBlock>
+        ) : null}
+        {sp ? (
+          <YearlySummaryBlock title="D. 前年同期間比較" narrow={narrow} accent>
+            <YearlySamePeriodBlockBody
+              sp={sp}
+              narrow={narrow}
+              dy={dy}
+              pct1={pct1}
+              signedDy={signedDy}
+              taxMode={taxMode}
+              unavailableMessageStyle={unavailableMessageStyle}
+              noteStyle={noteStyle}
+            />
+          </YearlySummaryBlock>
+        ) : null}
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: colGrid, gap: ".55rem" }}>
         <YearlySummaryBlock title="E. 利益" narrow={narrow}>
           <YearlySummaryMetricLine narrow={narrow} label="年間限界利益" value={dy(a.yearlyMarginalProfit)} strong />
