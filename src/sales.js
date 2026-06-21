@@ -13,11 +13,10 @@ const MONTHLY_FIXED_COST_EX_TAX = 1630000;
 const OPERATING_PROFIT_STRONG_THRESHOLD = 1000000;
 const OPERATING_PROFIT_GOOD_THRESHOLD = 700000;
 const OPERATING_PROFIT_STABLE_THRESHOLD = 400000;
-const BREAK_EVEN_LINE_NOTE = "※損益分岐判定は、限界利益が固定費163万円を超えたかで行います。";
 const MARGINAL_PROFIT_NOTE =
   "※限界利益は、売上からドリンク仕入・フード仕入・経費・人件費を引いた管理用の暫定値です。";
 const OPERATING_PROFIT_NOTE =
-  "※営業利益は、限界利益から人件費を除いた固定費163万円を引いた管理用の暫定値です。";
+  "※営業利益は、限界利益から固定費163万円を引いた管理用の暫定値です。";
 const MARGINAL_OPERATING_PROFIT_NOTE =
   "※限界利益・営業利益は入力済みの仕入れ・経費・人件費をもとにした管理用の暫定値です。月末請求・売掛・翌月反映分により変動します。";
 const OPERATING_BASE_PROFIT_NOTE =
@@ -5230,7 +5229,8 @@ function YearlySummaryFiveBlocks({ yearlyAnalysis, narrow, dy, pct, pct1, signed
             <YearlySummaryMetricLine narrow={narrow} label="強い月数" value={`${num(be.strongLineCount)}ヶ月`} />
           </div>
           <div style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".08rem" }}>
-            {BREAK_EVEN_LINE_NOTE}
+            {MARGINAL_PROFIT_NOTE}
+            <span style={{ display: "block", marginTop: ".08rem" }}>{OPERATING_PROFIT_NOTE}</span>
             {a.hasCurrentAggregatedMonth ? (
               <span style={{ display: "block", marginTop: ".08rem" }}>※月数は終了済み月ベースです。進行中月は暫定評価のため含みません。</span>
             ) : null}
@@ -5285,7 +5285,6 @@ function YearlySummaryFiveBlocks({ yearlyAnalysis, narrow, dy, pct, pct1, signed
           <div style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".04rem" }}>
             {MARGINAL_PROFIT_NOTE}
             <span style={{ display: "block", marginTop: ".08rem" }}>{OPERATING_PROFIT_NOTE}</span>
-            <span style={{ display: "block", marginTop: ".08rem" }}>{MARGINAL_OPERATING_PROFIT_NOTE}</span>
           </div>
         </YearlySummaryBlock>
       </div>
@@ -5655,13 +5654,14 @@ function BreakEvenMonthlySummaryBlock({ breakEvenAnalysis, reviewOperatingProfit
   const be = breakEvenAnalysis;
   if (!be) return null;
   const tone = be.tierKey ? breakEvenLineBadgeTone_(be.tierKey) : null;
-  const gapLabel = be.gapFromBreakEven >= 0 ? "超過" : "不足";
-  const gapValue =
-    be.gapFromBreakEven != null
-      ? be.gapFromBreakEven >= 0
-        ? formatSignedExTaxYen_(be.gapFromBreakEven)
-        : formatExTaxYen_(Math.abs(be.gapFromBreakEven))
-      : "—";
+  const marginalColor =
+    be.hasActualSales && be.isAboveBreakEven
+      ? "#9ec9a8"
+      : be.hasActualSales
+      ? "#dca06a"
+      : "rgba(240,232,208,0.96)";
+  const operatingColor =
+    reviewOperatingProfit != null ? (reviewOperatingProfit >= 0 ? "#9ec9a8" : "#dca06a") : "rgba(240,232,208,0.92)";
 
   return (
     <div
@@ -5689,37 +5689,29 @@ function BreakEvenMonthlySummaryBlock({ breakEvenAnalysis, reviewOperatingProfit
           </div>
           <div style={{ display: "grid", gap: ".22rem", fontSize: narrow ? "0.84rem" : "0.96rem", lineHeight: 1.5 }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: ".5rem", minWidth: 0 }}>
-              <span style={{ color: "rgba(240,232,208,0.6)" }}>損益分岐目安</span>
+              <span style={{ color: "rgba(240,232,208,0.6)" }}>固定費ライン</span>
               <strong style={{ color: "rgba(240,232,208,0.92)", fontSize: narrow ? "1.02rem" : "1.14rem", wordBreak: "break-word", textAlign: "right" }}>
-                限界利益 {formatExTaxYen_(be.breakEvenMarginalTarget)}
+                {formatExTaxYen_(be.breakEvenMarginalTarget)}
               </strong>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", gap: ".5rem", minWidth: 0 }}>
               <span style={{ color: "rgba(240,232,208,0.6)" }}>限界利益</span>
-              <strong style={{ color: "rgba(240,232,208,0.96)", fontSize: narrow ? "1.1rem" : "1.22rem", wordBreak: "break-word", textAlign: "right" }}>
+              <strong style={{ color: marginalColor, fontSize: narrow ? "1.1rem" : "1.22rem", wordBreak: "break-word", textAlign: "right" }}>
                 {formatExTaxYen_(be.marginalProfit)}
               </strong>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", gap: ".5rem", minWidth: 0 }}>
-              <span style={{ color: "rgba(240,232,208,0.6)" }}>損益分岐まで{gapLabel === "超過" ? "の超過" : ""}</span>
-              <strong style={{ color: gapLabel === "超過" ? "#9ec9a8" : "#dca06a", fontSize: narrow ? "1.02rem" : "1.14rem", wordBreak: "break-word", textAlign: "right" }}>{gapValue}</strong>
+              <span style={{ color: "rgba(240,232,208,0.6)" }}>営業利益</span>
+              <strong style={{ color: operatingColor, fontSize: narrow ? "1.02rem" : "1.14rem", textAlign: "right" }}>
+                {formatReviewProfitYen_(reviewOperatingProfit)}
+              </strong>
             </div>
-            {reviewOperatingProfit != null ? (
-              <>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: ".5rem", minWidth: 0, marginTop: ".12rem", paddingTop: ".18rem", borderTop: "1px dashed rgba(201,168,76,0.14)" }}>
-                  <span style={{ color: "rgba(240,232,208,0.6)" }}>営業利益</span>
-                  <strong style={{ color: reviewOperatingProfit >= 0 ? "#9ec9a8" : "#dca06a", fontSize: narrow ? "1.02rem" : "1.14rem", textAlign: "right" }}>
-                    {formatReviewProfitYen_(reviewOperatingProfit)}
-                  </strong>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: ".5rem", minWidth: 0 }}>
-                  <span style={{ color: "rgba(240,232,208,0.6)" }}>営業利益率</span>
-                  <strong style={{ color: "rgba(240,232,208,0.92)", fontSize: narrow ? "1rem" : "1.12rem", textAlign: "right" }}>
-                    {formatReviewProfitRate_(reviewOperatingProfitRate)}
-                  </strong>
-                </div>
-              </>
-            ) : null}
+            <div style={{ display: "flex", justifyContent: "space-between", gap: ".5rem", minWidth: 0 }}>
+              <span style={{ color: "rgba(240,232,208,0.6)" }}>営業利益率</span>
+              <strong style={{ color: operatingColor, fontSize: narrow ? "1rem" : "1.12rem", textAlign: "right" }}>
+                {formatReviewProfitRate_(reviewOperatingProfitRate)}
+              </strong>
+            </div>
           </div>
         </>
       ) : (
@@ -5728,8 +5720,7 @@ function BreakEvenMonthlySummaryBlock({ breakEvenAnalysis, reviewOperatingProfit
         </div>
       )}
       <div style={analysisNote({ marginTop: ".32rem" }, narrow)}>
-        {BREAK_EVEN_LINE_NOTE}
-        <span style={{ display: "block", marginTop: ".1rem" }}>{MARGINAL_PROFIT_NOTE}</span>
+        {MARGINAL_PROFIT_NOTE}
         <span style={{ display: "block", marginTop: ".08rem" }}>{OPERATING_PROFIT_NOTE}</span>
       </div>
     </div>
@@ -5870,7 +5861,6 @@ function MonthlySummaryPanel({ monthlyAnalysis, narrow, dy, pct, pct1, signedDy 
           <div style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".08rem" }}>
             {MARGINAL_PROFIT_NOTE}
             <span style={{ display: "block", marginTop: ".08rem" }}>{OPERATING_PROFIT_NOTE}</span>
-            <span style={{ display: "block", marginTop: ".08rem" }}>{MARGINAL_OPERATING_PROFIT_NOTE}</span>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "repeat(3, minmax(0, 1fr))", gap: ".18rem .45rem", marginTop: ".18rem", fontSize: narrow ? "0.72rem" : "0.76rem", color: "rgba(240,232,208,0.55)" }}>
             <span>実績 {num(a.actualDayCount)}日</span>
