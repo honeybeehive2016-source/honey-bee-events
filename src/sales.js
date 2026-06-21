@@ -8,28 +8,20 @@ const SALES_ADMIN_TAB_KEY = "honeybee:salesAdminTab";
 const SALES_TARGET_MONTH_KEY = "honeybee:salesTargetMonth";
 const SALES_TAX_MODE_KEY = "honeybee:salesTaxMode";
 const TAX_RATE = 0.10;
-// 損益分岐目安：固定費287.9万円 ÷ 限界利益率80.8% ≒ 税抜356万円
-// 管理会計用の概算：固定費287.9万円、限界利益率80.8%
-// 固定費控除後利益 = 税抜売上 × 限界利益率 − 固定費
-const MONTHLY_FIXED_COST_EX_TAX = 2879000;
-const CONTRIBUTION_MARGIN_RATE = 0.808;
-const FIXED_COST_STRONG_MONTH_EX_TAX = 1000000;
-const BREAK_EVEN_SALES_EX_TAX = 3560000;
-const BREAK_EVEN_SAFE_LINE_EX_TAX = 3600000;
-const BREAK_EVEN_SMALL_PROFIT_EX_TAX = 3800000;
-const BREAK_EVEN_STABLE_LINE_EX_TAX = 4000000;
-const BREAK_EVEN_GOOD_LINE_EX_TAX = 4500000;
-const BREAK_EVEN_STRONG_LINE_EX_TAX = 5000000;
-const BREAK_EVEN_LINE_NOTE = "※損益分岐判定は税抜売上ベースです。";
-const OPERATING_BASE_PROFIT_NOTE =
-  "※営業ベース利益は、固定費・税金・借入返済等を含む最終利益ではありません。";
+// 人件費を除いた固定費163万円。限界利益がこれを超えれば損益分岐、営業利益 = 限界利益 − 163万円
+const MONTHLY_FIXED_COST_EX_TAX = 1630000;
+const OPERATING_PROFIT_STRONG_THRESHOLD = 1000000;
+const OPERATING_PROFIT_GOOD_THRESHOLD = 700000;
+const OPERATING_PROFIT_STABLE_THRESHOLD = 400000;
+const BREAK_EVEN_LINE_NOTE = "※損益分岐判定は、限界利益が固定費163万円を超えたかで行います。";
+const MARGINAL_PROFIT_NOTE =
+  "※限界利益は、売上からドリンク仕入・フード仕入・経費・人件費を引いた管理用の暫定値です。";
+const OPERATING_PROFIT_NOTE =
+  "※営業利益は、限界利益から人件費を除いた固定費163万円を引いた管理用の暫定値です。";
 const MARGINAL_OPERATING_PROFIT_NOTE =
   "※限界利益・営業利益は入力済みの仕入れ・経費・人件費をもとにした管理用の暫定値です。月末請求・売掛・翌月反映分により変動します。";
-const OPERATING_PROFIT_INPUT_NOTE =
-  "※営業利益は入力済みの仕入れ・経費・人件費をもとにした暫定値です。人件費・月末仕入れ・売掛は翌月反映の場合があります。";
-const FIXED_COST_ADJUSTED_PROFIT_NOTE =
-  "※固定費控除後利益は、税抜売上×限界利益率80.8%−固定費287.9万円で算出した管理会計上の概算です。";
-const FIXED_COST_ADJUSTED_EX_TAX_NOTE = "※固定費控除後利益は税抜売上ベースの概算です。";
+const OPERATING_BASE_PROFIT_NOTE =
+  "※スプレッドシート入力の営業ベース利益は、固定費・税金・借入返済等を含む最終利益ではありません。";
 const SALES_MONTH_OPTIONS_2026 = Array.from({ length: 12 }, (_, i) => {
   const mm = String(i + 1).padStart(2, "0");
   return { value: `2026-${mm}`, label: `2026年${mm}月` };
@@ -750,19 +742,32 @@ function formatSignedExTaxYen_(value) {
   if (n === 0) return yen(0);
   return `${n > 0 ? "+" : "-"}${yen(Math.abs(n))}`;
 }
-const BREAK_EVEN_LINE_DEFINITIONS = [
-  { key: "strong", threshold: BREAK_EVEN_STRONG_LINE_EX_TAX, label: "強い月", badge: "強い" },
-  { key: "good", threshold: BREAK_EVEN_GOOD_LINE_EX_TAX, label: "かなり良い", badge: "良い" },
-  { key: "stable", threshold: BREAK_EVEN_STABLE_LINE_EX_TAX, label: "安定ライン", badge: "安定" },
-  { key: "smallProfit", threshold: BREAK_EVEN_SMALL_PROFIT_EX_TAX, label: "小幅黒字ライン", badge: "小幅黒字" },
-  { key: "minimum", threshold: BREAK_EVEN_SAFE_LINE_EX_TAX, label: "最低ライン到達", badge: "最低" },
-  { key: "below", threshold: 0, label: "損益分岐未達", badge: "未達" },
+const OPERATING_PROFIT_LINE_DEFINITIONS = [
+  { key: "strong", minOperatingProfit: OPERATING_PROFIT_STRONG_THRESHOLD, label: "強い月", badge: "強い" },
+  { key: "good", minOperatingProfit: OPERATING_PROFIT_GOOD_THRESHOLD, label: "かなり良い", badge: "良い" },
+  { key: "stable", minOperatingProfit: OPERATING_PROFIT_STABLE_THRESHOLD, label: "安定ライン", badge: "安定" },
+  { key: "smallProfit", minOperatingProfit: 1, label: "黒字ライン", badge: "最低" },
 ];
-function resolveBreakEvenLine_(exTaxSales) {
-  const sales = exTaxSales != null && Number.isFinite(Number(exTaxSales)) ? Number(exTaxSales) : null;
-  if (sales == null || sales <= 0) {
+function monthCostSnapshot_(m) {
+  if (m == null) return {};
+  if (typeof m === "number" || typeof m === "string") return { totalSalesSum: m };
+  return {
+    totalSalesSum: m.totalSalesSum,
+    drinkPurchaseSum: m.drinkPurchaseSum,
+    foodPurchaseSum: m.foodPurchaseSum,
+    expenseSum: m.expenseSum,
+    laborCostSum: m.laborCostSum,
+    hasMonthlyCostSummary: m.hasMonthlyCostSummary,
+  };
+}
+function resolveBreakEvenLine_(marginalProfit, operatingProfit, totalSales) {
+  const sales = Number(totalSales || 0);
+  const marginal = marginalProfit != null && Number.isFinite(Number(marginalProfit)) ? Number(marginalProfit) : null;
+  if (sales <= 0 || marginal == null) {
     return {
-      exTaxSales: sales,
+      totalSales: sales > 0 ? sales : null,
+      marginalProfit: marginal,
+      operatingProfit: null,
       tierKey: null,
       label: null,
       badge: null,
@@ -771,35 +776,48 @@ function resolveBreakEvenLine_(exTaxSales) {
       isAboveBreakEven: false,
       isAboveSafeLine: false,
       hasActualSales: false,
+      breakEvenMarginalTarget: MONTHLY_FIXED_COST_EX_TAX,
     };
   }
-  let tier = BREAK_EVEN_LINE_DEFINITIONS.find((d) => d.key === "below");
-  for (const def of BREAK_EVEN_LINE_DEFINITIONS) {
-    if (def.key !== "below" && sales >= def.threshold) {
-      tier = def;
-      break;
+  const operating =
+    operatingProfit != null && Number.isFinite(Number(operatingProfit))
+      ? Number(operatingProfit)
+      : marginal - MONTHLY_FIXED_COST_EX_TAX;
+  const gap = marginal - MONTHLY_FIXED_COST_EX_TAX;
+  const isAboveBreakEven = marginal >= MONTHLY_FIXED_COST_EX_TAX;
+  let tier = { key: "below", label: "損益分岐未達", badge: "未達" };
+  if (isAboveBreakEven) {
+    tier = { key: "minimum", label: "損益分岐到達", badge: "最低" };
+    for (const def of OPERATING_PROFIT_LINE_DEFINITIONS) {
+      if (operating >= def.minOperatingProfit) {
+        tier = def;
+        break;
+      }
     }
   }
-  const gap = sales - BREAK_EVEN_SALES_EX_TAX;
   return {
-    exTaxSales: sales,
+    totalSales: sales,
+    marginalProfit: marginal,
+    operatingProfit: operating,
     tierKey: tier.key,
     label: tier.label,
     badge: tier.badge,
     gapFromBreakEven: gap,
-    gapLabel: gap >= 0 ? `損益分岐超過：${formatSignedExTaxYen_(gap)}` : `損益分岐まで：${formatExTaxYen_(Math.abs(gap))}`,
-    isAboveBreakEven: sales >= BREAK_EVEN_SALES_EX_TAX,
-    isAboveSafeLine: sales >= BREAK_EVEN_SAFE_LINE_EX_TAX,
+    gapLabel:
+      gap >= 0
+        ? `損益分岐超過：${formatSignedExTaxYen_(gap)}`
+        : `損益分岐まで：${formatExTaxYen_(Math.abs(gap))}`,
+    isAboveBreakEven,
+    isAboveSafeLine: isAboveBreakEven,
     hasActualSales: true,
+    breakEvenMarginalTarget: MONTHLY_FIXED_COST_EX_TAX,
   };
 }
-function buildBreakEvenAnalysis_(totalSalesSum) {
-  const line = resolveBreakEvenLine_(toExTaxSales_(totalSalesSum));
-  return {
-    breakEvenLineExTax: BREAK_EVEN_SALES_EX_TAX,
-    safeLineExTax: BREAK_EVEN_SAFE_LINE_EX_TAX,
-    ...line,
-  };
+function buildBreakEvenAnalysis_(monthSnapshot) {
+  const snap = monthCostSnapshot_(monthSnapshot);
+  const marginal = calcMarginalProfitFromMonth_(snap);
+  const operating = resolveOperatingProfit_(snap);
+  return resolveBreakEvenLine_(marginal.profit, operating.profit, snap.totalSalesSum);
 }
 function breakEvenLineBadgeTone_(tierKey) {
   switch (tierKey) {
@@ -822,12 +840,12 @@ function countBreakEvenMonths_(months) {
   const actualMonths = (months || []).filter((m) => m.breakEvenAnalysis?.hasActualSales);
   const countTier = (key) =>
     actualMonths.filter((m) => {
-      const sales = Number(m.breakEvenAnalysis?.exTaxSales || 0);
-      if (key === "aboveBreakEven") return sales >= BREAK_EVEN_SALES_EX_TAX;
-      if (key === "safeLine") return sales >= BREAK_EVEN_SAFE_LINE_EX_TAX;
-      if (key === "stable") return sales >= BREAK_EVEN_STABLE_LINE_EX_TAX;
-      if (key === "good") return sales >= BREAK_EVEN_GOOD_LINE_EX_TAX;
-      if (key === "strong") return sales >= BREAK_EVEN_STRONG_LINE_EX_TAX;
+      const be = m.breakEvenAnalysis;
+      if (key === "aboveBreakEven") return be?.isAboveBreakEven;
+      if (key === "safeLine") return be?.tierKey !== "below";
+      if (key === "stable") return ["stable", "good", "strong"].includes(be?.tierKey);
+      if (key === "good") return ["good", "strong"].includes(be?.tierKey);
+      if (key === "strong") return be?.tierKey === "strong";
       return false;
     }).length;
   return {
@@ -843,80 +861,38 @@ function buildBreakEvenMonthlyComment_(ctx) {
   const { analysis: a, tier, phase } = ctx;
   const be = a.breakEvenAnalysis;
   if (!be?.hasActualSales) return null;
-
-  const safeMan = Math.round(BREAK_EVEN_SAFE_LINE_EX_TAX / 10000);
+  const fixedMan = Math.round(MONTHLY_FIXED_COST_EX_TAX / 10000);
+  const provisional = phase.currentMonth ? "月途中のため暫定評価ですが、" : "";
 
   if (phase.currentMonth) {
     if (!be.isAboveBreakEven) return null;
-    if (be.tierKey === "good") {
-      return "現時点で税抜450万円を超えています。月途中のため暫定評価ですが、営業ベース利益率・人件費率・仕入れ率が崩れていないかを確認してください。";
-    }
     if (be.tierKey === "strong") {
-      return "現時点で税抜500万円前後のペースです。月途中のため暫定評価ですが、営業ベース利益率・人件費率・仕入れ率が崩れていないかを確認してください。";
+      return `現時点で営業利益が${formatExTaxYen_(be.operatingProfit)}と強いペースです。${provisional}仕入れ・人件費・経費が崩れていないかを確認してください。`;
     }
-    if (tier !== "achieved" && be.isAboveSafeLine) {
-      return `月間目標には届いていませんが、現時点で税抜${safeMan}万円の最低ラインは超えています。残り営業日は利益の上積みを狙う局面です。`;
+    if (be.tierKey === "good") {
+      return `現時点で営業利益が${formatExTaxYen_(be.operatingProfit)}と好調です。${provisional}仕入れ・人件費・経費が崩れていないかを確認してください。`;
     }
     if (be.tierKey === "stable") {
-      return "現時点で税抜400万円の安定ラインを超えています。残り営業日も、営業ベース利益率・仕入れ率が崩れていないか確認してください。";
+      return `現時点で限界利益が固定費${fixedMan}万円を超え、営業利益も確保できています。${provisional}仕入れ・経費の入力状況も確認してください。`;
+    }
+    if (tier !== "achieved" && be.isAboveBreakEven) {
+      return `月間目標には届いていませんが、限界利益は損益分岐（固定費${fixedMan}万円）を超えています。残り営業日は利益の上積みを狙う局面です。`;
     }
     return null;
   }
 
-  if (be.tierKey === "good") {
-    return "税抜450万円を超えており、かなり良い月です。ここからは売上だけでなく、営業ベース利益率・人件費率・仕入れ率が崩れていないかを確認してください。";
+  if (be.tierKey === "strong" || be.tierKey === "good") {
+    return `営業利益 ${formatExTaxYen_(be.operatingProfit)} と好調な月です。仕入れ・人件費・経費が崩れていないかを確認してください。`;
   }
-  if (be.tierKey === "strong") {
-    return "税抜500万円前後の強い月です。売上だけでなく、営業ベース利益率・人件費率・仕入れ率が崩れていないかを確認してください。";
+  if (!be.isAboveBreakEven) {
+    const tail = "次月は限界利益が固定費163万円を超えるよう、売上と仕入れ・人件費・経費を確認してください。";
+    return `限界利益が固定費${fixedMan}万円に届いていません。${tail}`;
   }
-  if (!be.isAboveSafeLine) {
-    const tail = phase.currentMonth
-      ? "残り営業日は集客不足日と単価不足日のどちらを埋めるかを絞って対応してください。"
-      : "次月はまず損益分岐超えを最優先にし、目標設定と集客・単価のどちらがボトルネックかを確認してください。";
-    return `税抜${safeMan}万円の最低ラインに届いていません。まずは損益分岐超えを最優先にし、${tail}`;
-  }
-  if (tier !== "achieved" && be.isAboveSafeLine) {
-    const tail = phase.currentMonth
-      ? "残り営業日は利益の上積みを狙う局面です。"
-      : "赤字回避ラインはクリアしています。";
-    return `月間目標には届いていませんが、税抜${safeMan}万円の最低ラインは超えています。${tail}`;
-  }
-  if (tier === "achieved" && (be.tierKey === "minimum" || be.tierKey === "smallProfit")) {
-    return `目標は達成していますが、税抜${safeMan}万円の最低ライン付近です。目標設定が低い可能性があるため、来月は損益分岐ラインを下回らない目標設計にしてください。`;
+  if (tier !== "achieved" && be.isAboveBreakEven) {
+    return `月間目標には届いていませんが、限界利益は損益分岐（固定費${fixedMan}万円）を超えています。`;
   }
   if (be.tierKey === "stable") {
-    return "税抜400万円の安定ラインを超えています。目標達成とあわせ、営業ベース利益率・仕入れ率が崩れていないかも確認してください。";
-  }
-  return null;
-}
-function buildFixedCostAdjustedMonthlyComment_(ctx) {
-  const a = ctx.analysis;
-  const profit = a.fixedCostAdjustedProfit;
-  const be = a.breakEvenAnalysis;
-  if (profit == null || !(Number(a.totalSalesSum || 0) > 0)) return null;
-
-  if (ctx.phase?.currentMonth) {
-    if (profit <= 0) return null;
-    if (profit > FIXED_COST_STRONG_MONTH_EX_TAX) {
-      return "現時点で固定費控除後利益が100万円を超えるペースです。月途中のため暫定評価ですが、強かったイベントと飲食単価を確認してください。";
-    }
-    if (profit > 0 && be?.isAboveBreakEven) {
-      return "現時点で税抜売上は損益分岐を超えており、固定費控除後利益もプラスです。残り営業日も、営業ベース利益率・人件費率・仕入れ率が崩れていないかを確認してください。";
-    }
-    return null;
-  }
-
-  if (profit > FIXED_COST_STRONG_MONTH_EX_TAX) {
-    return "固定費控除後利益が100万円を超えており、かなり良い月です。売上が強かったイベントと飲食単価を確認し、来月以降も再現できる形にしてください。";
-  }
-  if (profit > 0 && be?.isAboveBreakEven) {
-    return "税抜売上は損益分岐を超えており、固定費控除後利益もプラスです。ここからは売上だけでなく、営業ベース利益率・人件費率・仕入れ率が崩れていないかを確認してください。";
-  }
-  if (profit <= 0) {
-    const tail = ctx.phase?.currentMonth
-      ? "残り営業日は、集客不足日と飲食単価不足日のどちらを埋めるかを絞って対応してください。"
-      : "次月はまず損益分岐超えを最優先にし、集客不足か単価不足かを確認してください。";
-    return `税抜売上が損益分岐に届いておらず、固定費控除後利益もマイナスです。${tail}`;
+    return `限界利益が固定費${fixedMan}万円を大きく超え、営業利益も確保できています。仕入れ・経費の月別差も確認してください。`;
   }
   return null;
 }
@@ -934,54 +910,41 @@ function previousYearSalesForMonth_(targetMonth) {
 function calcOperatingGrossProfit_(totalSales, purchaseTotal, expense) {
   return Number(totalSales || 0) - Number(purchaseTotal || 0) - Number(expense || 0);
 }
-/** 限界利益 = 売上 − ドリンク仕入れ − フード仕入れ */
-function calcMarginalProfit_(totalSales, drinkPurchase, foodPurchase) {
+/** 限界利益 = 売上 − ドリンク仕入 − フード仕入 − 経費 − 人件費 */
+function calcMarginalProfit_(totalSales, drinkPurchase, foodPurchase, expense, laborCost) {
   const sales = Number(totalSales || 0);
   if (!(sales > 0)) return { profit: null, rate: null };
-  const profit = sales - Number(drinkPurchase || 0) - Number(foodPurchase || 0);
+  const profit =
+    sales -
+    Number(drinkPurchase || 0) -
+    Number(foodPurchase || 0) -
+    Number(expense || 0) -
+    Number(laborCost || 0);
   return { profit, rate: calcRate(profit, sales) };
 }
 function calcMarginalProfitFromMonth_(m) {
-  return calcMarginalProfit_(m?.totalSalesSum, m?.drinkPurchaseSum, m?.foodPurchaseSum);
+  return calcMarginalProfit_(
+    m?.totalSalesSum,
+    m?.drinkPurchaseSum,
+    m?.foodPurchaseSum,
+    m?.expenseSum,
+    m?.laborCostSum
+  );
 }
-/** 営業利益：月次サマリーの operatingProfit を優先、なければ売上−仕入−経費−人件費 */
+/** 営業利益 = 限界利益 − 固定費163万円 */
 function resolveOperatingProfit_(m) {
   const sales = Number(m?.totalSalesSum || 0);
-  if (!(sales > 0)) return { profit: null, rate: null };
-  const hasCostInputs =
-    m?.hasMonthlyCostSummary ||
-    Number(m?.drinkPurchaseSum || 0) !== 0 ||
-    Number(m?.foodPurchaseSum || 0) !== 0 ||
-    Number(m?.expenseSum || 0) !== 0 ||
-    Number(m?.laborCostSum || 0) !== 0;
-  if (m?.hasMonthlyCostSummary && m?.operatingProfitSum != null) {
-    const profit = Number(m.operatingProfitSum);
-    return { profit, rate: calcRate(profit, sales) };
-  }
-  if (hasCostInputs) {
-    const profit =
-      sales -
-      Number(m?.drinkPurchaseSum || 0) -
-      Number(m?.foodPurchaseSum || 0) -
-      Number(m?.expenseSum || 0) -
-      Number(m?.laborCostSum || 0);
-    return { profit, rate: calcRate(profit, sales) };
-  }
-  return { profit: null, rate: null };
+  const marginal = calcMarginalProfitFromMonth_(m);
+  if (!(sales > 0) || marginal.profit == null) return { profit: null, rate: null };
+  const profit = marginal.profit - MONTHLY_FIXED_COST_EX_TAX;
+  return { profit, rate: calcRate(profit, sales) };
 }
-/** 固定費控除後利益 = 税抜売上 × 限界利益率 − 固定費（管理会計概算） */
-function calcFixedCostAdjustedProfitFromExTax_(exTaxSales) {
-  const sales = exTaxSales != null && Number.isFinite(Number(exTaxSales)) ? Number(exTaxSales) : null;
-  if (sales == null || sales <= 0) return { profit: null, rate: null, exTaxSales: sales };
-  const profit = sales * CONTRIBUTION_MARGIN_RATE - MONTHLY_FIXED_COST_EX_TAX;
-  return { profit, rate: (profit / sales) * 100, exTaxSales: sales };
-}
-function calcFixedCostAdjustedProfitFromGrossSales_(totalSalesSum) {
-  return calcFixedCostAdjustedProfitFromExTax_(toExTaxSales_(totalSalesSum));
-}
-function formatFixedCostAdjustedProfit_(profit) {
+function formatReviewProfitYen_(profit) {
   if (profit == null || !Number.isFinite(Number(profit))) return "—";
-  return `約 ${formatExTaxYen_(Math.round(Number(profit)))}`;
+  return yen(Math.round(Number(profit)));
+}
+function formatReviewProfitRate_(rate) {
+  return pct1(rate);
 }
 function formatReviewTableBreakEvenGap_(breakEvenAnalysis) {
   const gap = breakEvenAnalysis?.gapFromBreakEven;
@@ -1022,10 +985,6 @@ function buildSalesComposition_(parts, totalSales) {
     rentalRate: calcRate(rental, total),
     otherRate: calcRate(other, total),
   };
-}
-function formatFixedCostAdjustedProfitRate_(rate) {
-  if (rate == null || !Number.isFinite(Number(rate))) return "—";
-  return pct1(rate);
 }
 function fixedCostProfitBadgeLabel_(profit) {
   if (profit == null || !Number.isFinite(Number(profit))) return null;
@@ -1181,7 +1140,7 @@ function buildYearlyCheckpoints_(ctx) {
     yearlyPurchaseCostRates,
     yearlyOperatingProfitRate,
     yearlyOperatingGrossProfitRate,
-    yearlyFixedCostAdjustedProfitRate,
+    yearlyReviewOperatingProfitRate,
     momComparison,
     monthRows,
     currentBusinessDate,
@@ -1192,8 +1151,8 @@ function buildYearlyCheckpoints_(ctx) {
   const { endedMonths, currentMonths } = partitionMonthsByPhase_(evalMonths, currentBusinessDate);
   const belowBreakEvenEnded = endedMonths.filter(isMonthBelowBreakEven_).length;
   const belowBreakEvenCurrent = currentMonths.filter(isMonthBelowBreakEven_);
-  const negativeFixedCostEnded = endedMonths.filter(isMonthNegativeFixedCost_).length;
-  const negativeFixedCostCurrent = currentMonths.filter(isMonthNegativeFixedCost_);
+  const negativeOperatingEnded = endedMonths.filter(isMonthNegativeOperatingProfit_).length;
+  const negativeOperatingCurrent = currentMonths.filter(isMonthNegativeOperatingProfit_);
 
   if (momComparison && momComparison.salesDiff < 0) {
     items.push({
@@ -1244,27 +1203,27 @@ function buildYearlyCheckpoints_(ctx) {
     items.push({
       key: `belowBreakEvenCurrent_${m.targetMonth}`,
       title: `進行中の${m.monthLabel}`,
-      message: `進行中の${m.monthLabel}は現時点で損益分岐まであと${gapText}（税抜）ですが${actualRateText}です。残り営業日の見込みで確認してください。`,
+      message: `進行中の${m.monthLabel}は現時点で限界利益が固定費163万円まであと${gapText}ですが${actualRateText}です。残り営業日の見込みで確認してください。`,
       detail: m.futureDayCount > 0 ? `残り予定 ${num(m.futureDayCount)}件` : null,
     });
   }
-  if (negativeFixedCostEnded > 0) {
+  if (negativeOperatingEnded > 0) {
     items.push({
       key: "negativeOpProfit",
-      title: "固定費控除後利益がマイナスの終了済み月があります",
-      message: "売上だけでなく、仕入れ・人件費・飲食比率も確認してください。",
-      detail: `${negativeFixedCostEnded}ヶ月`,
+      title: "営業利益がマイナスの終了済み月があります",
+      message: "売上だけでなく、ドリンク仕入れ・フード仕入れ・人件費・経費も確認してください。",
+      detail: `${negativeOperatingEnded}ヶ月`,
     });
   }
-  for (const m of negativeFixedCostCurrent) {
-    const fc = calcFixedCostAdjustedProfitFromGrossSales_(m.totalSalesSum);
-    const profitText = fc.profit != null ? formatSignedExTaxYen_(Math.round(fc.profit)) : "—";
+  for (const m of negativeOperatingCurrent) {
+    const op = resolveOperatingProfit_(m);
+    const profitText = op.profit != null ? formatSignedExTaxYen_(Math.round(op.profit)) : "—";
     const actualRateText =
       m.actualAchievementRate != null ? `、実績日達成率は${pct1(m.actualAchievementRate)}` : "";
     items.push({
-      key: `negativeFixedCostCurrent_${m.targetMonth}`,
+      key: `negativeOperatingCurrent_${m.targetMonth}`,
       title: `進行中の${m.monthLabel}`,
-      message: `進行中の${m.monthLabel}は固定費控除後利益が現時点${profitText}（暫定）${actualRateText}です。残り営業日の見込みで確認してください。`,
+      message: `進行中の${m.monthLabel}は営業利益が現時点${profitText}（暫定）${actualRateText}です。残り営業日の見込みで確認してください。`,
       detail: m.futureDayCount > 0 ? `残り予定 ${num(m.futureDayCount)}件` : null,
     });
   }
@@ -1295,12 +1254,12 @@ function buildYearlyCheckpoints_(ctx) {
       detail: pct1(drinkCostRate),
     });
   }
-  if (yearlyFixedCostAdjustedProfitRate != null && yearlyFixedCostAdjustedProfitRate < 12) {
+  if (yearlyReviewOperatingProfitRate != null && yearlyReviewOperatingProfitRate < 12) {
     items.push({
       key: "opProfit",
-      title: "固定費控除後利益率が低め",
-      message: "売上のある月でも固定費控除後の利益率が弱い場合は、人件費・仕入れの月別差を確認してください。",
-      detail: pct1(yearlyFixedCostAdjustedProfitRate),
+      title: "営業利益率が低め",
+      message: "売上のある月でも営業利益率が弱い場合は、仕入れ・人件費・経費の月別差を確認してください。",
+      detail: pct1(yearlyReviewOperatingProfitRate),
     });
   }
   if (yearlyOperatingProfitRate != null && yearlyOperatingProfitRate < 12) {
@@ -1328,7 +1287,7 @@ function buildYearlyCheckpoints_(ctx) {
       items.push({
         key: "momLabor",
         title: "前月比で人件費が増加",
-        message: "人件費の増加が利益を圧迫していないか、固定費控除後利益の月別推移を確認してください。",
+        message: "人件費の増加が利益を圧迫していないか、営業利益の月別推移を確認してください。",
         detail: formatSignedDisplayYen(laborDiff, taxMode),
       });
     }
@@ -1356,15 +1315,15 @@ function buildYearlyMonthReviewRows_(monthRows, monthlyYoYRows, currentBusinessD
 function enhanceYearlyMonthRowsForCharts_(monthRows) {
   return (monthRows || []).map((m) => {
     const operatingGrossProfitSum = calcOperatingGrossProfit_(m.totalSalesSum, m.purchaseTotalSum, m.expenseSum);
-    const fixedCostAdjusted = calcFixedCostAdjustedProfitFromGrossSales_(m.totalSalesSum);
+    const operating = resolveOperatingProfit_(m);
     const gap = m.breakEvenAnalysis?.gapFromBreakEven ?? null;
     return {
       ...m,
       operatingGrossProfitSum,
       operatingGrossProfitRate: calcRate(operatingGrossProfitSum, m.totalSalesSum),
-      fixedCostAdjustedProfit: fixedCostAdjusted.profit,
-      fixedCostAdjustedProfitRate: fixedCostAdjusted.rate,
-      fixedCostAdjustedProfitAbs: fixedCostAdjusted.profit != null ? Math.abs(fixedCostAdjusted.profit) : null,
+      reviewOperatingProfitSum: operating.profit,
+      reviewOperatingProfitRate: operating.rate,
+      reviewOperatingProfitAbs: operating.profit != null ? Math.abs(operating.profit) : null,
       breakEvenGapExTax: gap,
       breakEvenGapAbsExTax: gap != null ? Math.abs(gap) : null,
     };
@@ -1412,18 +1371,18 @@ function partitionMonthsByPhase_(months, currentBusinessDate) {
 function isMonthBelowBreakEven_(m) {
   return Boolean(m?.breakEvenAnalysis?.hasActualSales && !m.breakEvenAnalysis.isAboveBreakEven);
 }
-function isMonthNegativeFixedCost_(m) {
-  const fc = calcFixedCostAdjustedProfitFromGrossSales_(m.totalSalesSum);
-  return fc.profit != null && fc.profit < 0;
+function isMonthNegativeOperatingProfit_(m) {
+  const op = resolveOperatingProfit_(m);
+  return op.profit != null && op.profit < 0;
 }
 function buildCurrentMonthBreakEvenNote_(analysis) {
   const be = analysis?.breakEvenAnalysis;
   if (!be?.hasActualSales || be.isAboveBreakEven) return null;
   const gap = be.gapFromBreakEven;
   const gapAbs = gap != null && gap < 0 ? formatExTaxYen_(Math.abs(gap)) : null;
-  let text = "現時点では損益分岐に届いていませんが、月途中のため確定未達ではありません。";
-  if (gapAbs) text += ` 損益分岐まであと${gapAbs}（税抜）です。`;
-  text += "残り営業日の売上見込みを踏まえて確認してください。";
+  let text = "現時点では限界利益が固定費163万円に届いていませんが、月途中のため確定未達ではありません。";
+  if (gapAbs) text += ` 損益分岐まであと${gapAbs}です。`;
+  text += "残り営業日の売上・仕入れ・人件費・経費の見込みを踏まえて確認してください。";
   return text;
 }
 function buildCurrentMonthOperatingProfitNote_(analysis) {
@@ -3546,8 +3505,10 @@ function emptyMonthAggregate_(targetMonth, status, fetchError) {
     purchaseCostRates: { totalPurchaseRate: null, drinkCostRate: null, foodCostRate: null },
     shortfall: 0,
     breakEvenAnalysis: buildBreakEvenAnalysis_(0),
-    fixedCostAdjustedProfit: null,
-    fixedCostAdjustedProfitRate: null,
+    marginalProfitSum: null,
+    marginalProfitRate: null,
+    reviewOperatingProfitSum: null,
+    reviewOperatingProfitRate: null,
   };
 }
 function aggregateMonthFromRecords_(records, targetMonth, currentBusinessDate, monthlySummary) {
@@ -3596,7 +3557,16 @@ function aggregateMonthFromRecords_(records, targetMonth, currentBusinessDate, m
   let status = "未入力";
   if (actualRows.length > 0) status = "集計済み";
   else if (futureRows.length > 0) status = "予定あり";
-  const fixedCostAdjusted = calcFixedCostAdjustedProfitFromGrossSales_(totalSalesSum);
+  const costSnap = {
+    totalSalesSum,
+    drinkPurchaseSum,
+    foodPurchaseSum,
+    expenseSum,
+    laborCostSum,
+    hasMonthlyCostSummary: hasMonthlyCostSummary_(monthlySummary),
+  };
+  const marginal = calcMarginalProfitFromMonth_(costSnap);
+  const reviewOperating = resolveOperatingProfit_(costSnap);
   return {
     targetMonth,
     monthLabel: monthLabelFromTarget_(targetMonth),
@@ -3654,9 +3624,11 @@ function aggregateMonthFromRecords_(records, targetMonth, currentBusinessDate, m
       bandFoodSalesSum
     ),
     shortfall: Math.max(0, targetSalesSum - totalSalesSum),
-    breakEvenAnalysis: buildBreakEvenAnalysis_(totalSalesSum),
-    fixedCostAdjustedProfit: fixedCostAdjusted.profit,
-    fixedCostAdjustedProfitRate: fixedCostAdjusted.rate,
+    breakEvenAnalysis: buildBreakEvenAnalysis_(costSnap),
+    marginalProfitSum: marginal.profit,
+    marginalProfitRate: marginal.rate,
+    reviewOperatingProfitSum: reviewOperating.profit,
+    reviewOperatingProfitRate: reviewOperating.rate,
   };
 }
 async function fetchSalesMonth_(targetMonth) {
@@ -5320,44 +5292,39 @@ function YearlySummaryFiveBlocks({ yearlyAnalysis, narrow, dy, pct, pct1, signed
           <div style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45 }}>{FOOD_DRINK_UNIT_PRICE_NOTE}</div>
         </YearlySummaryBlock>
         <YearlySummaryBlock title="E. 利益" narrow={narrow}>
+          <YearlySummaryMetricLine narrow={narrow} label="年間限界利益" value={dy(a.yearlyMarginalProfit)} strong />
           <YearlySummaryMetricLine
             narrow={narrow}
-            label="年間営業ベース利益"
-            value={dy(a.yearlyOperatingBaseProfit)}
-            strong
-          />
-          <YearlySummaryMetricLine
-            narrow={narrow}
-            label="年間営業ベース利益率"
-            value={a.yearlyOperatingBaseProfitRate != null ? pct1(a.yearlyOperatingBaseProfitRate) : "—"}
+            label="年間限界利益率"
+            value={a.yearlyMarginalProfitRate != null ? pct1(a.yearlyMarginalProfitRate) : "—"}
             emphasize
           />
           <YearlySummaryMetricLine
             narrow={narrow}
-            label="年間固定費控除後利益"
-            value={a.yearlyFixedCostAdjustedProfit != null ? formatFixedCostAdjustedProfit_(a.yearlyFixedCostAdjustedProfit) : "—"}
+            label="年間営業利益"
+            value={a.yearlyReviewOperatingProfit != null ? dy(a.yearlyReviewOperatingProfit) : "—"}
             emphasize
           />
           <YearlySummaryMetricLine
             narrow={narrow}
-            label="年間固定費控除後利益率"
-            value={formatFixedCostAdjustedProfitRate_(a.yearlyFixedCostAdjustedProfitRate)}
+            label="年間営業利益率"
+            value={a.yearlyReviewOperatingProfitRate != null ? pct1(a.yearlyReviewOperatingProfitRate) : "—"}
             emphasize
           />
           <YearlySummaryMetricLine
             narrow={narrow}
-            label="固定費控除後利益がプラスの月数"
-            value={`${num(a.positiveFixedCostAdjustedMonthCount)}ヶ月`}
+            label="営業利益がプラスの月数"
+            value={`${num(a.positiveOperatingProfitMonthCount)}ヶ月`}
           />
           <YearlySummaryMetricLine
             narrow={narrow}
-            label="固定費控除後利益100万円超えの月数"
-            value={`${num(a.strongFixedCostAdjustedMonthCount)}ヶ月`}
+            label="営業利益100万円超えの月数"
+            value={`${num(a.strongOperatingProfitMonthCount)}ヶ月`}
           />
           <div style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".04rem" }}>
-            {OPERATING_BASE_PROFIT_NOTE}
-            <span style={{ display: "block", marginTop: ".12rem" }}>{FIXED_COST_ADJUSTED_PROFIT_NOTE}</span>
-            <span style={{ display: "block", marginTop: ".08rem" }}>{FIXED_COST_ADJUSTED_EX_TAX_NOTE}</span>
+            {MARGINAL_PROFIT_NOTE}
+            <span style={{ display: "block", marginTop: ".08rem" }}>{OPERATING_PROFIT_NOTE}</span>
+            <span style={{ display: "block", marginTop: ".08rem" }}>{MARGINAL_OPERATING_PROFIT_NOTE}</span>
           </div>
         </YearlySummaryBlock>
       </div>
@@ -5616,7 +5583,7 @@ function BreakEvenLineBadge({ breakEvenAnalysis, compact = false, large = false,
     </span>
   );
 }
-function BreakEvenMonthlySummaryBlock({ breakEvenAnalysis, fixedCostAdjustedProfit, fixedCostAdjustedProfitRate, narrow }) {
+function BreakEvenMonthlySummaryBlock({ breakEvenAnalysis, reviewOperatingProfit, reviewOperatingProfitRate, narrow }) {
   const be = breakEvenAnalysis;
   if (!be) return null;
   const tone = be.tierKey ? breakEvenLineBadgeTone_(be.tierKey) : null;
@@ -5655,30 +5622,32 @@ function BreakEvenMonthlySummaryBlock({ breakEvenAnalysis, fixedCostAdjustedProf
           <div style={{ display: "grid", gap: ".22rem", fontSize: narrow ? "0.84rem" : "0.96rem", lineHeight: 1.5 }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: ".5rem", minWidth: 0 }}>
               <span style={{ color: "rgba(240,232,208,0.6)" }}>損益分岐目安</span>
-              <strong style={{ color: "rgba(240,232,208,0.92)", fontSize: narrow ? "1.02rem" : "1.14rem", wordBreak: "break-word", textAlign: "right" }}>税抜 {formatExTaxYen_(be.breakEvenLineExTax)}</strong>
+              <strong style={{ color: "rgba(240,232,208,0.92)", fontSize: narrow ? "1.02rem" : "1.14rem", wordBreak: "break-word", textAlign: "right" }}>
+                限界利益 {formatExTaxYen_(be.breakEvenMarginalTarget)}
+              </strong>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", gap: ".5rem", minWidth: 0 }}>
-              <span style={{ color: "rgba(240,232,208,0.6)" }}>現在</span>
+              <span style={{ color: "rgba(240,232,208,0.6)" }}>限界利益</span>
               <strong style={{ color: "rgba(240,232,208,0.96)", fontSize: narrow ? "1.1rem" : "1.22rem", wordBreak: "break-word", textAlign: "right" }}>
-                税抜 {formatExTaxYen_(be.exTaxSales)}
+                {formatExTaxYen_(be.marginalProfit)}
               </strong>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", gap: ".5rem", minWidth: 0 }}>
               <span style={{ color: "rgba(240,232,208,0.6)" }}>損益分岐まで{gapLabel === "超過" ? "の超過" : ""}</span>
               <strong style={{ color: gapLabel === "超過" ? "#9ec9a8" : "#dca06a", fontSize: narrow ? "1.02rem" : "1.14rem", wordBreak: "break-word", textAlign: "right" }}>{gapValue}</strong>
             </div>
-            {fixedCostAdjustedProfit != null ? (
+            {reviewOperatingProfit != null ? (
               <>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: ".5rem", minWidth: 0, marginTop: ".12rem", paddingTop: ".18rem", borderTop: "1px dashed rgba(201,168,76,0.14)" }}>
-                  <span style={{ color: "rgba(240,232,208,0.6)" }}>固定費控除後利益</span>
-                  <strong style={{ color: fixedCostAdjustedProfit >= 0 ? "#9ec9a8" : "#dca06a", fontSize: narrow ? "1.02rem" : "1.14rem", textAlign: "right" }}>
-                    {formatFixedCostAdjustedProfit_(fixedCostAdjustedProfit)}
+                  <span style={{ color: "rgba(240,232,208,0.6)" }}>営業利益</span>
+                  <strong style={{ color: reviewOperatingProfit >= 0 ? "#9ec9a8" : "#dca06a", fontSize: narrow ? "1.02rem" : "1.14rem", textAlign: "right" }}>
+                    {formatReviewProfitYen_(reviewOperatingProfit)}
                   </strong>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: ".5rem", minWidth: 0 }}>
-                  <span style={{ color: "rgba(240,232,208,0.6)" }}>利益率</span>
+                  <span style={{ color: "rgba(240,232,208,0.6)" }}>営業利益率</span>
                   <strong style={{ color: "rgba(240,232,208,0.92)", fontSize: narrow ? "1rem" : "1.12rem", textAlign: "right" }}>
-                    {formatFixedCostAdjustedProfitRate_(fixedCostAdjustedProfitRate)}
+                    {formatReviewProfitRate_(reviewOperatingProfitRate)}
                   </strong>
                 </div>
               </>
@@ -5692,9 +5661,8 @@ function BreakEvenMonthlySummaryBlock({ breakEvenAnalysis, fixedCostAdjustedProf
       )}
       <div style={analysisNote({ marginTop: ".32rem" }, narrow)}>
         {BREAK_EVEN_LINE_NOTE}
-        {fixedCostAdjustedProfit != null ? (
-          <span style={{ display: "block", marginTop: ".1rem" }}>{FIXED_COST_ADJUSTED_EX_TAX_NOTE}</span>
-        ) : null}
+        <span style={{ display: "block", marginTop: ".1rem" }}>{MARGINAL_PROFIT_NOTE}</span>
+        <span style={{ display: "block", marginTop: ".08rem" }}>{OPERATING_PROFIT_NOTE}</span>
       </div>
     </div>
   );
@@ -5792,8 +5760,8 @@ function MonthlySummaryPanel({ monthlyAnalysis, narrow, dy, pct, pct1, signedDy 
         </SummarySubCard>
         <BreakEvenMonthlySummaryBlock
           breakEvenAnalysis={a.breakEvenAnalysis}
-          fixedCostAdjustedProfit={a.fixedCostAdjustedProfit}
-          fixedCostAdjustedProfitRate={a.fixedCostAdjustedProfitRate}
+          reviewOperatingProfit={a.reviewOperatingProfitSum}
+          reviewOperatingProfitRate={a.reviewOperatingProfitRate}
           narrow={narrow}
         />
       </div>
@@ -5832,8 +5800,9 @@ function MonthlySummaryPanel({ monthlyAnalysis, narrow, dy, pct, pct1, signedDy 
             emphasize
           />
           <div style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".08rem" }}>
-            {MARGINAL_OPERATING_PROFIT_NOTE}
-            <span style={{ display: "block", marginTop: ".08rem" }}>{OPERATING_PROFIT_INPUT_NOTE}</span>
+            {MARGINAL_PROFIT_NOTE}
+            <span style={{ display: "block", marginTop: ".08rem" }}>{OPERATING_PROFIT_NOTE}</span>
+            <span style={{ display: "block", marginTop: ".08rem" }}>{MARGINAL_OPERATING_PROFIT_NOTE}</span>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "repeat(3, minmax(0, 1fr))", gap: ".18rem .45rem", marginTop: ".18rem", fontSize: narrow ? "0.72rem" : "0.76rem", color: "rgba(240,232,208,0.55)" }}>
             <span>実績 {num(a.actualDayCount)}日</span>
@@ -6583,16 +6552,21 @@ export default function SalesModule({ events = [], navigateBack }) {
       },
       (r) => resolveEventNameForAdmin(r, r.resolvedEventNames) || "イベント未登録"
     );
-    const breakEvenAnalysis = buildBreakEvenAnalysis_(totalSalesSum);
-    const fixedCostAdjusted = calcFixedCostAdjustedProfitFromGrossSales_(totalSalesSum);
-    const marginal = calcMarginalProfit_(totalSalesSum, drinkPurchaseSum, foodPurchaseSum);
+    const breakEvenAnalysis = buildBreakEvenAnalysis_({
+      totalSalesSum,
+      drinkPurchaseSum,
+      foodPurchaseSum,
+      expenseSum,
+      laborCostSum,
+      hasMonthlyCostSummary,
+    });
+    const marginal = calcMarginalProfit_(totalSalesSum, drinkPurchaseSum, foodPurchaseSum, expenseSum, laborCostSum);
     const reviewOperating = resolveOperatingProfit_({
       totalSalesSum,
       drinkPurchaseSum,
       foodPurchaseSum,
       expenseSum,
       laborCostSum,
-      operatingProfitSum,
       hasMonthlyCostSummary,
     });
 
@@ -6667,8 +6641,6 @@ export default function SalesModule({ events = [], navigateBack }) {
       drinkRankingTop10,
       foodRankingTop10,
       breakEvenAnalysis,
-      fixedCostAdjustedProfit: fixedCostAdjusted.profit,
-      fixedCostAdjustedProfitRate: fixedCostAdjusted.rate,
     };
   }, [rows, events, targetMonth, currentBusinessDate, monthlySummary]);
   useEffect(() => {
@@ -6928,34 +6900,42 @@ export default function SalesModule({ events = [], navigateBack }) {
     const belowBreakEvenCurrentMonths = currentMonths.filter(isMonthBelowBreakEven_);
     const yearlyOperatingBaseProfit = yearlyOperatingProfit;
     const yearlyOperatingBaseProfitRate = calcRate(yearlyOperatingBaseProfit, yearlyTotalSales);
-    let yearlyFixedCostAdjustedProfit = 0;
-    let yearlyExTaxSalesSum = 0;
+    let yearlyMarginalProfit = 0;
+    let yearlyReviewOperatingProfit = 0;
     for (const m of aggregatedMonths) {
-      const fc = calcFixedCostAdjustedProfitFromGrossSales_(m.totalSalesSum);
-      if (fc.profit != null) yearlyFixedCostAdjustedProfit += fc.profit;
-      if (fc.exTaxSales != null) yearlyExTaxSalesSum += fc.exTaxSales;
+      const marginal = calcMarginalProfitFromMonth_(m);
+      const operating = resolveOperatingProfit_(m);
+      if (marginal.profit != null) yearlyMarginalProfit += marginal.profit;
+      if (operating.profit != null) yearlyReviewOperatingProfit += operating.profit;
     }
-    const yearlyFixedCostAdjustedProfitRate =
-      yearlyExTaxSalesSum > 0 ? (yearlyFixedCostAdjustedProfit / yearlyExTaxSalesSum) * 100 : null;
-    const positiveFixedCostAdjustedMonthCount = endedMonths.filter((m) => {
-      const fc = calcFixedCostAdjustedProfitFromGrossSales_(m.totalSalesSum);
-      return fc.profit != null && fc.profit > 0;
+    const yearlyMarginalProfitRate =
+      yearlyTotalSales > 0 ? (yearlyMarginalProfit / yearlyTotalSales) * 100 : null;
+    const yearlyReviewOperatingProfitRate =
+      yearlyTotalSales > 0 ? (yearlyReviewOperatingProfit / yearlyTotalSales) * 100 : null;
+    const positiveOperatingProfitMonthCount = endedMonths.filter((m) => {
+      const op = resolveOperatingProfit_(m);
+      return op.profit != null && op.profit > 0;
     }).length;
-    const strongFixedCostAdjustedMonthCount = endedMonths.filter((m) => {
-      const fc = calcFixedCostAdjustedProfitFromGrossSales_(m.totalSalesSum);
-      return fc.profit != null && fc.profit > FIXED_COST_STRONG_MONTH_EX_TAX;
+    const strongOperatingProfitMonthCount = endedMonths.filter((m) => {
+      const op = resolveOperatingProfit_(m);
+      return op.profit != null && op.profit > OPERATING_PROFIT_STRONG_THRESHOLD;
     }).length;
-    const negativeFixedCostAdjustedMonthCount = endedMonths.filter(isMonthNegativeFixedCost_).length;
-    const negativeFixedCostCurrentMonths = currentMonths.filter(isMonthNegativeFixedCost_);
-    const positiveOperatingProfitMonthCount = positiveFixedCostAdjustedMonthCount;
-    const negativeOperatingProfitMonthCount = negativeFixedCostAdjustedMonthCount;
+    const negativeOperatingProfitMonthCount = endedMonths.filter(isMonthNegativeOperatingProfit_).length;
+    const negativeOperatingCurrentMonths = currentMonths.filter(isMonthNegativeOperatingProfit_);
     const monthReviewRows = buildYearlyMonthReviewRows_(monthRows, monthlyYoYRows, currentBusinessDate);
     const chartMonthRows = enhanceYearlyMonthRowsForCharts_(monthRows);
     const profitTop3 = topN(
-      aggregatedMonths.filter((m) => m.fixedCostAdjustedProfit != null && m.fixedCostAdjustedProfit > 0),
-      (a, b) => Number(b.fixedCostAdjustedProfit || 0) - Number(a.fixedCostAdjustedProfit || 0),
+      aggregatedMonths.filter((m) => {
+        const op = resolveOperatingProfit_(m);
+        return op.profit != null && op.profit > 0;
+      }),
+      (a, b) => Number(resolveOperatingProfit_(b).profit || 0) - Number(resolveOperatingProfit_(a).profit || 0),
       3
-    );
+    ).map((m) => ({
+      ...m,
+      reviewOperatingProfitSum: resolveOperatingProfit_(m).profit,
+      reviewOperatingProfitRate: resolveOperatingProfit_(m).rate,
+    }));
     const foodDrinkUnitPriceTop3 = topN(
       aggregatedMonths.filter((m) => m.foodDrinkUnitPrice != null),
       (a, b) => Number(b.foodDrinkUnitPrice || 0) - Number(a.foodDrinkUnitPrice || 0),
@@ -6987,9 +6967,10 @@ export default function SalesModule({ events = [], navigateBack }) {
       yearlyOperatingProfitRate: calcRate(yearlyOperatingProfit, yearlyTotalSales),
       yearlyOperatingBaseProfit,
       yearlyOperatingBaseProfitRate,
-      yearlyFixedCostAdjustedProfit: aggregatedMonths.length > 0 ? yearlyFixedCostAdjustedProfit : null,
-      yearlyFixedCostAdjustedProfitRate,
-      yearlyExTaxSalesSum: yearlyExTaxSalesSum > 0 ? yearlyExTaxSalesSum : null,
+      yearlyMarginalProfit: aggregatedMonths.length > 0 ? yearlyMarginalProfit : null,
+      yearlyMarginalProfitRate,
+      yearlyReviewOperatingProfit: aggregatedMonths.length > 0 ? yearlyReviewOperatingProfit : null,
+      yearlyReviewOperatingProfitRate,
       yearlyFoodDrink,
       yearlyDrink,
       yearlyFood,
@@ -7033,10 +7014,8 @@ export default function SalesModule({ events = [], navigateBack }) {
       belowBreakEvenCurrentMonths,
       positiveOperatingProfitMonthCount,
       negativeOperatingProfitMonthCount,
-      positiveFixedCostAdjustedMonthCount,
-      strongFixedCostAdjustedMonthCount,
-      negativeFixedCostAdjustedMonthCount,
-      negativeFixedCostCurrentMonths,
+      strongOperatingProfitMonthCount,
+      negativeOperatingCurrentMonths,
       hasCurrentAggregatedMonth: currentMonths.some((m) => m.status === "集計済み"),
       monthReviewRows,
       chartMonthRows,
@@ -8141,11 +8120,11 @@ export default function SalesModule({ events = [], navigateBack }) {
                 <YearlyMonthBarChart
                   narrow={vp.narrow}
                   tall
-                  title="月別 固定費控除後利益"
+                  title="月別 営業利益"
                   rows={yearlyAnalysis.chartMonthRows}
-                  valueKey="fixedCostAdjustedProfitAbs"
+                  valueKey="reviewOperatingProfitAbs"
                   barTone="linear-gradient(180deg, rgba(126,200,126,0.95), rgba(126,200,126,0.55))"
-                  formatTop={(r) => formatFixedCostAdjustedProfit_(r.fixedCostAdjustedProfit)}
+                  formatTop={(r) => formatReviewProfitYen_(r.reviewOperatingProfitSum)}
                   onMonthClick={navigateToMonthAnalysis}
                 />
                 <YearlyMonthBarChart
@@ -8188,7 +8167,7 @@ export default function SalesModule({ events = [], navigateBack }) {
                 <YearlyRankList narrow={vp.narrow} title="飲食が強い月" variant="rankFoodDrink" items={yearlyAnalysis.foodDrinkTop3} valueLabel="飲食売上" formatValue={(r) => dy(r.foodDrinkSalesIncludingBandSum)} />
                 <YearlyRankList narrow={vp.narrow} title="ドリンクが強い月" variant="rankDrink" items={yearlyAnalysis.drinkTop3} valueLabel="ドリンク売上" formatValue={(r) => dy(r.drinkSalesSum)} />
                 <YearlyRankList narrow={vp.narrow} title="フードが強い月" variant="rankFood" items={yearlyAnalysis.foodTop3} valueLabel="フード売上" formatValue={(r) => dy(r.foodSalesSum)} />
-                <YearlyRankList narrow={vp.narrow} title="固定費控除後利益が強い月" variant="rankSales" items={yearlyAnalysis.profitTop3} valueLabel="固定費控除後利益" formatValue={(r) => formatFixedCostAdjustedProfit_(r.fixedCostAdjustedProfit)} />
+                <YearlyRankList narrow={vp.narrow} title="営業利益が強い月" variant="rankSales" items={yearlyAnalysis.profitTop3} valueLabel="営業利益" formatValue={(r) => dy(r.reviewOperatingProfitSum)} />
                 <YearlyRankList narrow={vp.narrow} title="飲食単価が高い月" variant="rankFoodDrink" items={yearlyAnalysis.foodDrinkUnitPriceTop3} valueLabel="飲食単価" formatValue={(r) => formatUnitYen_(r.foodDrinkUnitPrice)} />
                 <YearlyRankList narrow={vp.narrow} title="集客が多い月" variant="rankDrink" items={yearlyAnalysis.customerCountTop3} valueLabel="集客人数" formatValue={(r) => formatCustomerCountLabel_(r.customerCountSum)} />
                 <YearlyRankList narrow={vp.narrow} title="営業ベース利益率が高い月" variant="rankFood" items={yearlyAnalysis.operatingProfitRateTop3} valueLabel="営業ベース利益率" formatValue={(r) => pct1(r.operatingProfitRate)} />
