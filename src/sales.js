@@ -5306,6 +5306,133 @@ function YearlyMonthReviewTable({ rows, narrow, dy, pct, pct1, formatUnitYen_, o
     </div>
   );
 }
+const DAILY_REVIEW_COL = {
+  date: 72,
+  weekday: 44,
+  event: 132,
+  yen: 84,
+  pct: 68,
+  count: 56,
+  unit: 72,
+};
+function dailyReviewRowStyle_(row, selectedRowKey) {
+  const selected = !!selectedRowKey && selectedRowKey === row.rowKey;
+  return {
+    ...YEARLY_TABLE_ROW,
+    cursor: "pointer",
+    background: selected ? "rgba(201,168,76,0.1)" : undefined,
+    boxShadow: selected ? "inset 2px 0 0 rgba(201,168,76,0.55)" : undefined,
+  };
+}
+function DailyManagementReviewTable({ rows, selectedRowKey, onRowClick, dy, pct, formatUnitYen_, formatCustomerCountLabel_ }) {
+  return (
+    <div style={YEARLY_TABLE_WRAP}>
+      <table style={{ ...YEARLY_TABLE_STYLE, minWidth: 1040 }}>
+        <thead>
+          <tr>
+            <th style={yearlyThStyle_(DAILY_REVIEW_COL.date, "left")}>日付</th>
+            <th style={yearlyThStyle_(DAILY_REVIEW_COL.weekday, "center")}>曜日</th>
+            <th style={yearlyThStyle_(DAILY_REVIEW_COL.event, "left")}>イベント名</th>
+            <th style={yearlyThStyle_(DAILY_REVIEW_COL.yen)}>売上</th>
+            <th style={yearlyThStyle_(DAILY_REVIEW_COL.pct)}>目標達成率</th>
+            <th style={yearlyThStyle_(DAILY_REVIEW_COL.yen)}>飲食売上</th>
+            <th style={yearlyThStyle_(DAILY_REVIEW_COL.pct)}>飲食比率</th>
+            <th style={yearlyThStyle_(DAILY_REVIEW_COL.count)}>集客</th>
+            <th style={yearlyThStyle_(DAILY_REVIEW_COL.unit)}>客単価</th>
+            <th style={yearlyThStyle_(DAILY_REVIEW_COL.unit)}>飲食単価</th>
+            <th style={yearlyThStyle_(DAILY_REVIEW_COL.yen)}>会場費</th>
+            <th style={yearlyThStyle_(DAILY_REVIEW_COL.yen)}>レンタル</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr
+              key={row.rowKey}
+              style={dailyReviewRowStyle_(row, selectedRowKey)}
+              onClick={() => onRowClick(row.rowKey)}
+              title="クリックで営業レポートを表示"
+              {...yearlyRowHoverHandlers_()}
+            >
+              <td style={yearlyMonthTdStyle_(DAILY_REVIEW_COL.date)}>{row.businessDate || "—"}</td>
+              <td style={{ ...yearlyNumTdStyle_(DAILY_REVIEW_COL.weekday, false), textAlign: "center" }}>{row.weekday || "—"}</td>
+              <td
+                style={{
+                  ...yearlyMonthTdStyle_(DAILY_REVIEW_COL.event),
+                  maxWidth: DAILY_REVIEW_COL.event,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+                title={row.eventName || ""}
+              >
+                {row.eventName || "イベント未登録"}
+              </td>
+              <td style={yearlyNumTdStyle_(DAILY_REVIEW_COL.yen, false)}>{dy(row.totalSales)}</td>
+              <td style={yearlyNumTdStyle_(DAILY_REVIEW_COL.pct, row.achievementRate == null)}>{row.achievementRate != null ? pct(row.achievementRate) : "—"}</td>
+              <td style={yearlyNumTdStyle_(DAILY_REVIEW_COL.yen, row.foodDrinkSalesIncludingBand == null)}>{row.foodDrinkSalesIncludingBand != null ? dy(row.foodDrinkSalesIncludingBand) : "—"}</td>
+              <td style={yearlyNumTdStyle_(DAILY_REVIEW_COL.pct, row.foodDrinkSalesIncludingBand == null)}>{pct(calcRate(row.foodDrinkSalesIncludingBand, row.totalSales))}</td>
+              <td style={yearlyNumTdStyle_(DAILY_REVIEW_COL.count, row.customerCount == null)}>{formatCustomerCountLabel_(row.customerCount)}</td>
+              <td style={yearlyNumTdStyle_(DAILY_REVIEW_COL.unit, row.customerUnitPrice == null)}>{formatUnitYen_(row.customerUnitPrice)}</td>
+              <td style={yearlyNumTdStyle_(DAILY_REVIEW_COL.unit, row.foodDrinkUnitPriceIncludingBand == null)}>{formatUnitYen_(row.foodDrinkUnitPriceIncludingBand ?? row.foodDrinkUnitPrice)}</td>
+              <td style={yearlyNumTdStyle_(DAILY_REVIEW_COL.yen, row.venueFee == null)}>{row.venueFee != null ? dy(row.venueFee) : "—"}</td>
+              <td style={yearlyNumTdStyle_(DAILY_REVIEW_COL.yen, row.rentalSales == null)}>{row.rentalSales != null ? dy(row.rentalSales) : "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+function DailyManagementReviewSection({ rows, selectedRowKey, onRowClick, dy, pct, formatUnitYen_, formatCustomerCountLabel_ }) {
+  return (
+    <div style={{ display: "grid", gap: ".45rem" }}>
+      {rows.map((row) => {
+        const selected = !!selectedRowKey && selectedRowKey === row.rowKey;
+        return (
+          <div
+            key={row.rowKey}
+            role="button"
+            tabIndex={0}
+            onClick={() => onRowClick(row.rowKey)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onRowClick(row.rowKey);
+              }
+            }}
+            style={{
+              padding: ".5rem .58rem",
+              borderRadius: 6,
+              border: selected ? "1px solid rgba(201,168,76,0.42)" : "1px solid rgba(201,168,76,0.14)",
+              background: selected ? "rgba(201,168,76,0.08)" : "rgba(0,0,0,0.12)",
+              cursor: "pointer",
+              minWidth: 0,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", gap: ".5rem", marginBottom: ".22rem", flexWrap: "wrap" }}>
+              <strong style={{ fontSize: ".82rem", color: "#f0e8d0" }}>{row.businessDate || "—"}</strong>
+              <span style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.58)" }}>{row.weekday || "—"}</span>
+            </div>
+            <div style={{ fontSize: ".78rem", color: "#f0e8d0", fontWeight: 600, marginBottom: ".28rem", wordBreak: "break-word", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+              {row.eventName || "イベント未登録"}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: ".18rem .45rem", fontSize: ".74rem", color: "rgba(240,232,208,0.82)" }}>
+              <div>売上 <strong>{dy(row.totalSales)}</strong></div>
+              <div>達成率 <strong>{row.achievementRate != null ? pct(row.achievementRate) : "—"}</strong></div>
+              <div>飲食売上 <strong>{row.foodDrinkSalesIncludingBand != null ? dy(row.foodDrinkSalesIncludingBand) : "—"}</strong></div>
+              <div>飲食比率 <strong>{pct(calcRate(row.foodDrinkSalesIncludingBand, row.totalSales))}</strong></div>
+              <div>集客 <strong>{formatCustomerCountLabel_(row.customerCount)}</strong></div>
+              <div>客単価 <strong>{formatUnitYen_(row.customerUnitPrice)}</strong></div>
+              <div>飲食単価 <strong>{formatUnitYen_(row.foodDrinkUnitPriceIncludingBand ?? row.foodDrinkUnitPrice)}</strong></div>
+              <div>会場費 <strong>{row.venueFee != null ? dy(row.venueFee) : "—"}</strong></div>
+              <div>レンタル <strong>{row.rentalSales != null ? dy(row.rentalSales) : "—"}</strong></div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 function YearlyMonthStatusBadge({ m, large = false }) {
   return (
     <span
@@ -6464,8 +6591,8 @@ export default function SalesModule({ events = [], navigateBack }) {
       }
     }
     const exists = monthlyAnalysis.dailyTrendRows.some((r) => r.rowKey === selectedTrendRowKey);
-    if (!exists) {
-      setSelectedTrendRowKey(monthlyAnalysis.dailyTrendRows[0].rowKey);
+    if (!exists && selectedTrendRowKey) {
+      setSelectedTrendRowKey("");
     }
   }, [monthlyAnalysis.dailyTrendRows, selectedTrendRowKey]);
   const selectedTrendRow = useMemo(
@@ -6552,7 +6679,7 @@ export default function SalesModule({ events = [], navigateBack }) {
       { events, pastComparablePool }
     );
   }, [selectedTrendRow, monthlyAnalysis, taxMode, selectedPastSimilarComparison, events, pastComparablePool]);
-  const selectCauseDayForReport_ = (rowKey) => {
+  const selectTrendDayForReport_ = (rowKey) => {
     if (!rowKey) return;
     setSelectedTrendRowKey(rowKey);
     window.setTimeout(() => {
@@ -6568,7 +6695,7 @@ export default function SalesModule({ events = [], navigateBack }) {
       return;
     }
     const resolvedKey = resolveTrendRowKeyForReference_(row, monthlyAnalysis.dailyTrendRows);
-    if (resolvedKey) selectCauseDayForReport_(resolvedKey);
+    if (resolvedKey) selectTrendDayForReport_(resolvedKey);
   };
   const yearlyAnalysis = useMemo(() => {
     if (!yearlyMonthData.length) return null;
@@ -7250,7 +7377,7 @@ export default function SalesModule({ events = [], navigateBack }) {
                         key={r.key}
                         style={{ flex: "0 0 28px", minWidth: 28, textAlign:"center", display:"flex", flexDirection:"column", height:"100%", cursor:"pointer", opacity: selectedTrendRowKey && selectedTrendRowKey !== r.rowKey ? 0.78 : 1 }}
                         title={`${r.businessDate} / ${r.eventName} / 売上 ${dy(r.totalSales)} / 目標 ${dy(r.targetSales)} / 達成率 ${pct(r.achievementRate)} / ${r.trendLabel}`}
-                        onClick={() => setSelectedTrendRowKey(r.rowKey)}
+                        onClick={() => selectTrendDayForReport_(r.rowKey)}
                       >
                         <div style={{ fontSize:".52rem", color:"rgba(240,232,208,0.68)", marginBottom:".18rem", whiteSpace:"nowrap" }}>
                           {compactDy(r.totalSales)}
@@ -7265,13 +7392,16 @@ export default function SalesModule({ events = [], navigateBack }) {
                 </div>
               </div>
             )}
-            {selectedTrendRow && (
-              <div
-                ref={dayReportRef}
-                style={{ marginTop: ".75rem", borderTop: "1px dashed rgba(175,180,190,0.2)", paddingTop: ".7rem", ...DAY_REPORT_BOX }}
-              >
-                <div style={{ ...analysisCardWrap("dayReport", vp.narrow), ...DAY_REPORT_BOX }}>
-                  <div style={{ ...analysisSecTitle("dayReport"), fontSize: ".86rem", fontWeight: 700, letterSpacing: ".06em", textTransform: "none" }}>選択日の営業レポート</div>
+            {!selectedTrendRow && monthlyAnalysis.dailyTrendRows.length > 0 ? (
+              <div style={{ fontSize: ".68rem", color: "rgba(240,232,208,0.48)", marginTop: ".55rem", lineHeight: 1.45 }}>
+                グラフの日付をクリックすると営業レポートを表示します。
+              </div>
+            ) : null}
+          </div>
+
+          {selectedTrendRow ? (
+            <div ref={dayReportRef} style={analysisCardWrap("dayReport", vp.narrow)}>
+              <div style={{ ...analysisSecTitle("dayReport"), fontSize: ".86rem", fontWeight: 700, letterSpacing: ".06em", textTransform: "none" }}>選択日の営業レポート</div>
 
                   <div style={{ marginBottom: ".55rem", ...DAY_REPORT_BOX }}>
                     <div style={{ fontSize: ".66rem", letterSpacing: ".08em", color: "rgba(201,168,76,0.85)", marginBottom: ".25rem" }}>A. 基本情報</div>
@@ -7415,84 +7545,36 @@ export default function SalesModule({ events = [], navigateBack }) {
                     </div>
                     <div style={{ fontSize: ".64rem", color: "rgba(240,232,208,0.55)", marginTop: ".2rem" }}>※経費には含めていません</div>
                   </div>
-                </div>
-              </div>
-            )}
-          </div>
+            </div>
+          ) : null}
 
-          <div style={analysisCardWrap("causeAnalysis", vp.narrow)}>
-            <div style={analysisSecTitle("causeAnalysis", ".5rem", vp.narrow)}>未達日の要因分析</div>
-            {monthlyAnalysis.underTargetCauseAnalysis.length === 0 ? (
-              <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.45)" }}>目標未達日はありません</div>
+          <div style={analysisCardWrap("composition", vp.narrow)}>
+            <div style={analysisSecTitle("composition", ".5rem", vp.narrow)}>日別経営レビュー</div>
+            <div style={{ fontSize: vp.narrow ? "0.78rem" : "0.84rem", color: "rgba(240,232,208,0.58)", marginBottom: ".45rem" }}>
+              行をクリックするとグラフ下に営業レポートを表示します
+            </div>
+            {monthlyAnalysis.dailyTrendRows.length === 0 ? (
+              <div style={{ fontSize: ".74rem", color: "rgba(240,232,208,0.45)" }}>データなし</div>
+            ) : vp.narrow ? (
+              <DailyManagementReviewSection
+                rows={monthlyAnalysis.dailyTrendRows}
+                selectedRowKey={selectedTrendRowKey}
+                onRowClick={selectTrendDayForReport_}
+                dy={dy}
+                pct={pct}
+                formatUnitYen_={formatUnitYen_}
+                formatCustomerCountLabel_={formatCustomerCountLabel_}
+              />
             ) : (
-              <div style={{ display: "grid", gap: ".55rem" }}>
-                {monthlyAnalysis.underTargetCauseAnalysis.map((r) => (
-                  <div
-                    key={r.key}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => selectCauseDayForReport_(r.rowKey)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        selectCauseDayForReport_(r.rowKey);
-                      }
-                    }}
-                    style={{
-                      padding: ".55rem .65rem",
-                      borderRadius: 5,
-                      border: `1px solid ${analysisRowBorder("causeAnalysis")}`,
-                      background: "rgba(0,0,0,0.18)",
-                      cursor: r.rowKey ? "pointer" : "default",
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!r.rowKey) return;
-                      e.currentTarget.style.background = "rgba(201,168,76,0.08)";
-                      e.currentTarget.style.borderColor = "rgba(201,168,76,0.32)";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = "rgba(0,0,0,0.18)";
-                      e.currentTarget.style.borderColor = analysisRowBorder("causeAnalysis");
-                    }}
-                  >
-                    <div style={{ fontSize: ".72rem", color: "rgba(240,232,208,0.58)", marginBottom: ".18rem" }}>
-                      {r.businessDate}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: ".8rem",
-                        color: "#f0e8d0",
-                        fontWeight: 600,
-                        marginBottom: ".28rem",
-                        wordBreak: "break-word",
-                        display: "-webkit-box",
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: "vertical",
-                        overflow: "hidden",
-                      }}
-                    >
-                      {r.eventName}
-                    </div>
-                    <div style={{ fontSize: ".76rem", lineHeight: 1.5, color: "rgba(240,232,208,0.82)", marginBottom: ".22rem" }}>
-                      売上 <strong style={RANK_LIST_AMOUNT}>{dy(r.totalSales)}</strong>
-                      {" / "}
-                      目標 <strong style={RANK_LIST_SUB}>{dy(r.targetSales)}</strong>
-                      {" / "}
-                      不足 <strong style={RANK_LIST_SHORTFALL}>{dy(r.shortfall)}</strong>
-                    </div>
-                    <div style={{ fontSize: ".74rem", color: "rgba(212,168,138,0.92)", fontWeight: 600, marginBottom: ".14rem" }}>
-                      分類：{r.category}
-                    </div>
-                    <UnderTargetCauseEvidence row={r} taxMode={taxMode} narrow={vp.narrow} />
-                    <div style={{ fontSize: ".72rem", lineHeight: 1.45, color: "rgba(240,232,208,0.62)", marginBottom: ".12rem" }}>
-                      コメント：{r.comment}
-                    </div>
-                    {r.rowKey ? (
-                      <div style={{ fontSize: ".66rem", color: "rgba(201,168,76,0.62)" }}>クリックで営業レポートを表示</div>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
+              <DailyManagementReviewTable
+                rows={monthlyAnalysis.dailyTrendRows}
+                selectedRowKey={selectedTrendRowKey}
+                onRowClick={selectTrendDayForReport_}
+                dy={dy}
+                pct={pct}
+                formatUnitYen_={formatUnitYen_}
+                formatCustomerCountLabel_={formatCustomerCountLabel_}
+              />
             )}
           </div>
 
