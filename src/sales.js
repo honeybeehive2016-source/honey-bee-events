@@ -1201,7 +1201,7 @@ function samePeriodNotesForSourceType_(sourceType, isYearInProgress) {
   } else if (sourceType === "monthly") {
     notes.push("※前年同期間は、月別集計データをもとにした比較です。");
   } else if (sourceType === "fixed_sales_only") {
-    notes.push("※前年売上は固定データで補完しています。集客・単価は比較対象外です。");
+    notes.push("※前年売上は2025年固定データで補完しています。集客・単価は比較対象外です。");
   }
   return notes;
 }
@@ -1323,7 +1323,39 @@ function buildYearlySamePeriodComparison_(monthRows, yearlyMonthData, priorYearM
     currentMetrics = { ...sumMonthRowMetrics_(scopeMonths), recordCount: scopeMonths.length };
   }
 
+  const buildFixedSalesOnlyResult_ = () => {
+    if (priorYear !== 2025) return null;
+    const fixedPriorSales = sumPriorYearSalesThroughMonth_(endMonthNum, 1);
+    if (!(fixedPriorSales > 0)) return null;
+    const fixedCurrentMetrics = { ...sumMonthRowMetrics_(scopeMonths), recordCount: scopeMonths.length };
+    return {
+      sourceType: "fixed_sales_only",
+      unavailableMessage: null,
+      notes: samePeriodNotesForSourceType_("fixed_sales_only", isYearInProgress),
+      endMonthNum,
+      maxBusinessDate: null,
+      isYearInProgress,
+      sales: buildSamePeriodMetricPair_(fixedCurrentMetrics.totalSales, fixedPriorSales, true),
+      customer: buildSamePeriodMetricPair_(fixedCurrentMetrics.customerCount, null, false),
+      customerUnitPrice: buildSamePeriodMetricPair_(
+        unitPriceByCustomerCount_(fixedCurrentMetrics.totalSales, fixedCurrentMetrics.customerCount),
+        null,
+        false
+      ),
+      foodDrinkUnitPrice: buildSamePeriodMetricPair_(
+        unitPriceByCustomerCount_(
+          fixedCurrentMetrics.drinkSales + fixedCurrentMetrics.foodSales,
+          fixedCurrentMetrics.customerCount
+        ),
+        null,
+        false
+      ),
+    };
+  };
+
   const buildUnavailableResult_ = (reason, extra = {}) => {
+    const fixedFallback = buildFixedSalesOnlyResult_();
+    if (fixedFallback) return fixedFallback;
     warnSamePeriodUnavailable_(year, priorYear, reason, extra);
     return {
       sourceType: "unavailable",
@@ -1352,6 +1384,8 @@ function buildYearlySamePeriodComparison_(monthRows, yearlyMonthData, priorYearM
       (sourceType === "daily" || sourceType === "monthly") &&
       metricsSuspiciouslyIdentical_(currentMetrics, priorMetrics)
     ) {
+      const fixedFallback = buildFixedSalesOnlyResult_();
+      if (fixedFallback) return fixedFallback;
       return buildUnavailableResult_("metrics_identical_suspected_contamination", {
         sourceTypeAttempted: sourceType,
         currentRecordCount: currentMetrics.recordCount,
@@ -1433,19 +1467,8 @@ function buildYearlySamePeriodComparison_(monthRows, yearlyMonthData, priorYearM
     }
   }
 
-  if (priorYear === 2025) {
-    const fixedPriorSales = isYearInProgress && maxBusinessDate
-      ? sumPriorYearSalesThroughDate_(maxBusinessDate)
-      : sumPriorYearSalesThroughMonth_(endMonthNum, 1);
-    if (fixedPriorSales > 0) {
-      return finalizeResult_(
-        "fixed_sales_only",
-        { totalSales: fixedPriorSales, customerCount: null, drinkSales: null, foodSales: null, recordCount: 0 },
-        true,
-        false
-      );
-    }
-  }
+  const fixedResult = buildFixedSalesOnlyResult_();
+  if (fixedResult) return fixedResult;
 
   return buildUnavailableResult_(priorBundleCheck.reason || "no_prior_data", {
     priorBundleValid: priorBundleCheck.valid,
