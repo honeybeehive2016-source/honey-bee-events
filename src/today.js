@@ -72,6 +72,139 @@ function rentalKeysMatch(eventKey, rentalKeys) {
     return false;
   });
 }
+function isCharterLikeEvent_(ev) {
+  return isRentalEventName(ev?.name) || ev?.genre === "貸切";
+}
+function charterMatchKeyFromEvent_(ev) {
+  if (!isCharterLikeEvent_(ev)) return null;
+  const keys = eventRentalMatchKeys_(ev);
+  return keys[0] || null;
+}
+function eventRentalMatchKeys_(ev) {
+  const keys = [];
+  const add = (s) => {
+    const k = normalizeRentalMatchKey(s);
+    if (k) keys.push(k);
+  };
+  add(extractCustomerNameFromEvent(ev?.name));
+  add(ev?.name);
+  if (ev?.perf) {
+    add(extractCustomerNameFromEvent(ev.perf));
+    add(ev.perf);
+  }
+  return keys;
+}
+function findMatchingRentalForEvent_(ev, dayRentals) {
+  if (!isCharterLikeEvent_(ev) || !dayRentals?.length) return null;
+  const eventKeys = eventRentalMatchKeys_(ev);
+  return (
+    dayRentals.find((r) => {
+      const rKeys = rentalMatchKeys(r);
+      return eventKeys.some((ek) => rentalKeysMatch(ek, rKeys));
+    }) || null
+  );
+}
+function eventPreferenceScore_(ev) {
+  let s = 0;
+  if (ev?.poster) s += 20;
+  if (ev?.open || ev?.start) s += 10;
+  if (ev?.price) s += 8;
+  if (Array.isArray(ev?.images) && ev.images.length) s += 5;
+  if (/様貸切/.test(ev?.name || "")) s += 4;
+  if (isRentalEventName(ev?.name)) s += 2;
+  return s;
+}
+function displayRentalTitleLocal_(r) {
+  const t = String(r?.rentalTitle || "").trim();
+  if (t) return t;
+  const parts = [r?.customerCompany, r?.contactName].filter((x) => String(x || "").trim());
+  if (parts.length) return parts.join(" / ");
+  return "（無題）";
+}
+const RENTAL_STATUS_LABELS_TODAY_ = {
+  new: "未対応",
+  replied: "返信済み",
+  checking: "条件確認中",
+  quoted: "見積提出済み",
+  hold: "仮押さえ",
+  won: "成約",
+  lost: "失注",
+  done: "完了",
+};
+function rentalQuoteTotalLocal_(r) {
+  const items = r?.quoteItems || [];
+  const sub = items.reduce((s, i) => s + Number(i.qty || 0) * Number(i.price || 0), 0);
+  if (sub > 0) return sub + Math.round(sub * 0.1);
+  const budgetDigits = String(r?.budget || "").replace(/[^\d]/g, "");
+  const budget = Number(budgetDigits);
+  return Number.isFinite(budget) && budget > 0 ? budget : null;
+}
+function parseRentalMinutes_(r) {
+  const m = String(r?.desiredTime || "").match(/(\d{1,2}):(\d{2})/);
+  if (!m) return Number.MAX_SAFE_INTEGER;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+function parseEventMinutes_(ev) {
+  const raw = ev?.open || ev?.start || ev?.time || ev?.startTime || "";
+  const m = String(raw).match(/(\d{1,2}):(\d{2})/);
+  if (!m) return Number.MAX_SAFE_INTEGER;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+function buildTodayOperationDisplayItems_(dayEvents, dayRentals) {
+  const charterGroups = new Map();
+  const normalEvents = [];
+
+  for (const ev of dayEvents) {
+    if (!isCharterLikeEvent_(ev)) {
+      normalEvents.push(ev);
+      continue;
+    }
+    const key = charterMatchKeyFromEvent_(ev) || `__charter_${ev._id || ev.name}`;
+    if (!charterGroups.has(key)) charterGroups.set(key, []);
+    charterGroups.get(key).push(ev);
+  }
+
+  const matchedRentalIds = new Set();
+  const items = [];
+
+  for (const ev of normalEvents) {
+    items.push({ kind: "event", event: ev, rental: null, key: `ev_${ev._id || ev.name}` });
+  }
+
+  for (const group of charterGroups.values()) {
+    const ev = [...group].sort((a, b) => eventPreferenceScore_(b) - eventPreferenceScore_(a))[0];
+    const rental = findMatchingRentalForEvent_(ev, dayRentals);
+    if (rental?._id) matchedRentalIds.add(rental._id);
+    items.push({ kind: "event", event: ev, rental, key: `ev_${ev._id || ev.name}` });
+  }
+
+  for (const r of dayRentals) {
+    if (matchedRentalIds.has(r._id)) continue;
+    items.push({ kind: "rental_only", event: null, rental: r, key: `rental_${r._id}` });
+  }
+
+  return items.sort((a, b) => {
+    const ma = a.event ? parseEventMinutes_(a.event) : parseRentalMinutes_(a.rental);
+    const mb = b.event ? parseEventMinutes_(b.event) : parseRentalMinutes_(b.rental);
+    if (ma !== mb) return ma - mb;
+    const na = a.event?.name || displayRentalTitleLocal_(a.rental);
+    const nb = b.event?.name || displayRentalTitleLocal_(b.rental);
+    return String(na).localeCompare(String(nb), "ja");
+  });
+}
+function TodayRentalSupplementLines({ rental }) {
+  if (!rental) return null;
+  const statusLabel = RENTAL_STATUS_LABELS_TODAY_[rental.status] || rental.status || null;
+  const quoteTotal = rentalQuoteTotalLocal_(rental);
+  const staff = String(rental.staff || "").trim();
+  return (
+    <div style={{ fontSize: ".72rem", color: "rgba(126,200,227,0.85)", lineHeight: 1.65, marginTop: ".35rem", paddingTop: ".3rem", borderTop: "1px dashed rgba(126,200,227,0.22)" }}>
+      {statusLabel ? <div>📋 成約ステータス {statusLabel}</div> : null}
+      {staff ? <div>👤 担当 {staff}</div> : null}
+      {quoteTotal != null ? <div>💴 見積合計 ¥{quoteTotal.toLocaleString("ja-JP")}</div> : null}
+    </div>
+  );
+}
 const MAX_HANDOVER_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 function sanitizeHandoverFileName(name) {
@@ -913,12 +1046,7 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], sh
   const isToday = selectedDate === today;
 
   // 当日のイベント
-  const parseEventMinutes = (ev) => {
-    const raw = ev?.open || ev?.start || ev?.time || ev?.startTime || "";
-    const m = String(raw).match(/(\d{1,2}):(\d{2})/);
-    if (!m) return Number.MAX_SAFE_INTEGER;
-    return Number(m[1]) * 60 + Number(m[2]);
-  };
+  const parseEventMinutes = parseEventMinutes_;
   const todayEvents = events
     .filter(e => e.date === selectedDate)
     .slice()
@@ -927,18 +1055,17 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], sh
       if (diff !== 0) return diff;
       return String(a.name || "").localeCompare(String(b.name || ""), "ja");
     });
-  const isMultiEventDay = todayEvents.length >= 2;
+  const todayRentals = rentals.filter(r =>
+    r.desiredDate === selectedDate && ["hold","won","done"].includes(r.status)
+  );
+  const todayDisplayItems = buildTodayOperationDisplayItems_(todayEvents, todayRentals);
+  const isMultiEventDay = todayDisplayItems.length >= 2;
   const checklistModeKey = isMultiEventDay ? "multi" : "normal";
   const checklistTemplate = isMultiEventDay ? MULTI_CHECKLIST_TEMPLATE : NORMAL_CHECKLIST_TEMPLATE;
   const checklistByKey = checklistTemplate.reduce((acc, cat) => {
     acc[cat.key] = cat;
     return acc;
   }, {});
-
-  // 当日の貸切（仮押さえ・成約・完了のみ）
-  const todayRentals = rentals.filter(r =>
-    r.desiredDate === selectedDate && ["hold","won","done"].includes(r.status)
-  );
 
   const rentalsForEventLink = rentals.filter(
     (r) => r.desiredDate === selectedDate && !r._deleted && r.status !== "lost"
@@ -1002,7 +1129,7 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], sh
       return selectedDate === prev;
     })();
     if (!isViewingToday && !isViewingYesterdayInEarlyMorning) return [];
-    if (todayEvents.length === 0 && todayRentals.length === 0) return []; // 店休日
+    if (todayDisplayItems.length === 0) return []; // 店休日
     const alerts = [];
     const nowMin = now.getHours() * 60 + now.getMinutes();
     const parseMin = (hhmm) => {
@@ -1308,16 +1435,41 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], sh
 
       {/* 当日のイベント */}
       <div style={S.secTitle}>🎵 本日のイベント</div>
-      {todayEvents.length === 0 ? (
+      {todayDisplayItems.length === 0 ? (
         <div style={{textAlign:"center",padding:"1.5rem",color:"rgba(240,232,208,0.3)",fontSize:".85rem",background:"#0d0d0d",borderRadius:5,marginBottom:"1rem"}}>
           イベントの予定はありません
         </div>
       ) : (
-        todayEvents.map((ev, i) => {
-          const rentalDetailId = findRentalIdForEvent(ev);
+        todayDisplayItems.map((item) => {
+          if (item.kind === "rental_only") {
+            const r = item.rental;
+            const title = displayRentalTitleLocal_(r);
+            const timeM = String(r?.desiredTime || "").match(/(\d{1,2}:\d{2})/);
+            return (
+              <div key={item.key} style={{...S.card,padding:"1rem 1.1rem",borderLeft:"3px solid #7ec8e3"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:".5rem",flexWrap:"wrap"}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontFamily:"Georgia,serif",fontSize:"1rem",color:"#7ec8e3",marginBottom:".25rem"}}>🍽 {title}</div>
+                    <div style={{fontSize:".75rem",color:"rgba(240,232,208,0.6)",lineHeight:1.7}}>
+                      {timeM ? <div>🕐 {timeM[1]}{r?.desiredTime && r.desiredTime !== timeM[1] ? ` ${r.desiredTime}` : ""}</div> : null}
+                      {r?.purpose ? <div>📋 {r.purpose}</div> : null}
+                    </div>
+                    <TodayRentalSupplementLines rental={r} />
+                  </div>
+                  {onViewRental ? (
+                    <button type="button" style={{...S.btn("sm"),borderColor:"rgba(126,200,227,0.35)",color:"#7ec8e3"}} onClick={() => onViewRental(r._id)}>📋 詳細</button>
+                  ) : null}
+                </div>
+              </div>
+            );
+          }
+
+          const ev = item.event;
+          const linkedRental = item.rental;
+          const rentalDetailId = linkedRental?._id || findRentalIdForEvent(ev);
           const showRentalDetailBtn = Boolean(rentalDetailId && onViewRental);
           return (
-          <div key={i} style={{...S.card,padding:"1rem 1.1rem"}}>
+          <div key={item.key} style={{...S.card,padding:"1rem 1.1rem"}}>
             {/* ポスター（上部に大きく表示） */}
             {ev.poster && (
               <a href={ev.poster} target="_blank" rel="noreferrer" style={{display:"block",marginBottom:".75rem",textAlign:"center",background:"#0a0a0a",borderRadius:5,overflow:"hidden",border:"1px solid rgba(201,168,76,0.15)"}}>
@@ -1339,6 +1491,7 @@ export default function TodayModule({ events = [], rentals = [], shifts = [], sh
                   {ev.cap && <div>👥 定員 {ev.cap}名</div>}
                   {ev.perf && <div style={{marginTop:".3rem"}}>✨ {ev.perf}</div>}
                 </div>
+                <TodayRentalSupplementLines rental={linkedRental} />
                 {/* 撮影・喫煙の可否バッジ */}
                 {(ev.photoOk && ev.photoOk !== "unset") || (ev.smokeOk && ev.smokeOk !== "unset") ? (
                   <div style={{display:"flex",gap:".4rem",marginTop:".5rem",flexWrap:"wrap"}}>
