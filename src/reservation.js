@@ -351,6 +351,260 @@ function getStaffBookingStatusNotice(ev) {
   }
   return null;
 }
+function parseEventOpenMinutes_(ev) {
+  const raw = ev?.open || ev?.start || "";
+  const m = String(raw).match(/(\d{1,2}):(\d{2})/);
+  if (!m) return Number.MAX_SAFE_INTEGER;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+function getEventSlotPrefix_(ev) {
+  const name = String(ev?.name || "");
+  const m = name.match(/^[\s　]*[\[（(]?(昼|夜|深夜|朝|午前|午後)[\]）)]?[\s　]*/);
+  if (m) return `【${m[1]}】`;
+  const min = parseEventOpenMinutes_(ev);
+  if (min === Number.MAX_SAFE_INTEGER) return "";
+  const h = Math.floor(min / 60);
+  if (h >= 17 || h < 5) return "【夜】";
+  if (h >= 10 && h < 17) return "【昼】";
+  return "";
+}
+function isReservationAcceptingEvent_(ev) {
+  if (!ev || ev.noBooking) return false;
+  return effectiveBookingStatus(ev) === "open";
+}
+function isReservationUnavailableEvent_(ev) {
+  if (!ev) return false;
+  if (ev.noBooking) return true;
+  return effectiveBookingStatus(ev) === "closed";
+}
+function reservationEventSortTier_(ev) {
+  if (!ev) return 3;
+  if (isReservationAcceptingEvent_(ev)) return 0;
+  if (isReservationUnavailableEvent_(ev)) return 1;
+  return 2;
+}
+function sortDayEventsForReservationView_(dayEvents) {
+  return [...dayEvents].sort((a, b) => {
+    const ta = reservationEventSortTier_(a);
+    const tb = reservationEventSortTier_(b);
+    if (ta !== tb) return ta - tb;
+    const ma = parseEventOpenMinutes_(a);
+    const mb = parseEventOpenMinutes_(b);
+    if (ma !== mb) return ma - mb;
+    return String(a.name || "").localeCompare(String(b.name || ""), "ja");
+  });
+}
+function buildDayReservationGroups_(dayEvents, dayReservations) {
+  const sortedEvents = sortDayEventsForReservationView_(dayEvents);
+  const groups = [];
+  if (sortedEvents.length <= 1) {
+    const ev = sortedEvents[0] || null;
+    const displayMode = ev
+      ? (isReservationAcceptingEvent_(ev) ? "primary" : isReservationUnavailableEvent_(ev) ? "compact" : "secondary")
+      : "primary";
+    groups.push({
+      eventName: ev?.name || "",
+      event: ev,
+      reservations: dayReservations,
+      displayMode,
+    });
+    return groups;
+  }
+  sortedEvents.forEach((ev) => {
+    let displayMode = "secondary";
+    if (isReservationAcceptingEvent_(ev)) displayMode = "primary";
+    else if (isReservationUnavailableEvent_(ev)) displayMode = "compact";
+    groups.push({
+      eventName: ev.name,
+      event: ev,
+      reservations: dayReservations.filter((r) => r.eventName === ev.name),
+      displayMode,
+    });
+  });
+  const eventNames = sortedEvents.map((e) => e.name);
+  const orphans = dayReservations.filter((r) => !eventNames.includes(r.eventName));
+  if (orphans.length > 0) {
+    groups.push({
+      eventName: "（イベント未指定）",
+      event: null,
+      reservations: orphans,
+      displayMode: "primary",
+    });
+  }
+  return groups;
+}
+function reservationSectionTitle_(g, dayEvents) {
+  const ev = g.event;
+  const prefix = ev ? getEventSlotPrefix_(ev) : "";
+  const name = g.eventName || "";
+  if (dayEvents.length > 1 && name) return `${prefix}${name} の予約`;
+  if (dayEvents.length === 1 && ev && name) return `${prefix}${name} の予約`;
+  return "予約リスト";
+}
+const RESERVATION_BADGE_STYLES_ = {
+  open: { label: "受付中", color: "#7ec87e", border: "rgba(126,200,127,0.45)", bg: "rgba(126,200,127,0.12)" },
+  soldOut: { label: "SOLD OUT", color: "#e24b4a", border: "rgba(226,75,74,0.5)", bg: "rgba(226,75,74,0.12)" },
+  noBooking: { label: "予約受付不可", color: "#ff8a89", border: "rgba(226,75,74,0.35)", bg: "rgba(226,75,74,0.08)" },
+  seatable: { label: "席指定不可", color: "#f4a261", border: "rgba(244,162,97,0.45)", bg: "rgba(244,162,97,0.1)" },
+};
+function ReservationEventBadges({ ev, compact = false }) {
+  if (!ev) return null;
+  const badges = [];
+  if (isReservationAcceptingEvent_(ev)) {
+    badges.push(RESERVATION_BADGE_STYLES_.open);
+  }
+  if (isReservationUnavailableEvent_(ev)) {
+    if (ev.noBooking) badges.push(RESERVATION_BADGE_STYLES_.soldOut);
+    badges.push(RESERVATION_BADGE_STYLES_.noBooking);
+  }
+  if (ev.seatable === false) badges.push(RESERVATION_BADGE_STYLES_.seatable);
+  if (badges.length === 0) return null;
+  const fontSize = compact ? ".58rem" : ".62rem";
+  const pad = compact ? ".1rem .38rem" : ".12rem .45rem";
+  return (
+    <span style={{ display: "inline-flex", flexWrap: "wrap", gap: ".28rem", alignItems: "center" }}>
+      {badges.map((b) => (
+        <span
+          key={b.label}
+          style={{
+            display: "inline-block",
+            padding: pad,
+            borderRadius: 3,
+            border: `1px solid ${b.border}`,
+            background: b.bg,
+            color: b.color,
+            fontSize,
+            fontWeight: 600,
+            letterSpacing: ".04em",
+            lineHeight: 1.35,
+          }}
+        >
+          {b.label}
+        </span>
+      ))}
+    </span>
+  );
+}
+function CompactUnavailableEventCard({ ev }) {
+  if (!ev) return null;
+  const prefix = getEventSlotPrefix_(ev);
+  return (
+    <details style={{ marginBottom: ".45rem" }}>
+      <summary
+        style={{
+          cursor: "pointer",
+          padding: ".5rem .65rem",
+          background: "#0a0a0a",
+          border: "1px solid rgba(255,255,255,0.06)",
+          borderLeft: "2px solid rgba(226,75,74,0.45)",
+          borderRadius: 4,
+          listStyle: "none",
+          userSelect: "none",
+        }}
+      >
+        <div style={{ display: "flex", flexWrap: "wrap", gap: ".35rem", alignItems: "center", marginBottom: ".2rem" }}>
+          <span style={{ fontSize: ".78rem", color: "rgba(240,232,208,0.78)", lineHeight: 1.4 }}>
+            {prefix}{ev.name}
+          </span>
+          <ReservationEventBadges ev={ev} compact />
+        </div>
+        {(ev.open || ev.start) && (
+          <div style={{ fontSize: ".65rem", color: "rgba(240,232,208,0.45)" }}>
+            🕒 {ev.open && `開店 ${ev.open}`}{ev.open && ev.start && " / "}{ev.start && `開演 ${ev.start}`}
+          </div>
+        )}
+        {ev.seatable === false && (
+          <div style={{ fontSize: ".6rem", color: "rgba(244,162,97,0.75)", marginTop: ".2rem" }}>
+            ※お客様はお席を選べません
+          </div>
+        )}
+      </summary>
+      {ev.notes && (
+        <div
+          style={{
+            marginTop: ".35rem",
+            padding: ".45rem .6rem",
+            background: "rgba(244,162,97,0.06)",
+            border: "1px solid rgba(244,162,97,0.22)",
+            borderRadius: 4,
+            fontSize: ".68rem",
+            color: "#f4a261",
+            whiteSpace: "pre-wrap",
+            lineHeight: 1.55,
+          }}
+        >
+          ⚠️ {ev.notes}
+        </div>
+      )}
+    </details>
+  );
+}
+function PrimaryEventInfoStrip({ ev }) {
+  if (!ev) return null;
+  const prefix = getEventSlotPrefix_(ev);
+  return (
+    <div
+      style={{
+        marginBottom: ".5rem",
+        padding: ".55rem .7rem",
+        background: "#0a0a0a",
+        border: "1px solid rgba(201,168,76,0.22)",
+        borderLeft: "3px solid #c9a84c",
+        borderRadius: 4,
+      }}
+    >
+      <div style={{ display: "flex", flexWrap: "wrap", gap: ".4rem", alignItems: "center", marginBottom: ".2rem" }}>
+        <span style={{ fontSize: ".82rem", color: "#c9a84c", fontWeight: 600, lineHeight: 1.4 }}>
+          🎵 {prefix}{ev.name}
+        </span>
+        <ReservationEventBadges ev={ev} />
+      </div>
+      {(ev.open || ev.start) && (
+        <div style={{ fontSize: ".68rem", color: "rgba(240,232,208,0.6)", marginBottom: ev.notes ? ".25rem" : 0 }}>
+          🕒 {ev.open && `開店 ${ev.open}`}{ev.open && ev.start && " / "}{ev.start && `開演 ${ev.start}`}
+        </div>
+      )}
+      {ev.notes && (
+        <div style={{ fontSize: ".68rem", color: "#f4a261", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+          ⚠️ {ev.notes}
+        </div>
+      )}
+    </div>
+  );
+}
+function CompactUnavailableEventBar({ ev }) {
+  if (!ev) return null;
+  const prefix = getEventSlotPrefix_(ev);
+  return (
+    <div
+      style={{
+        marginBottom: ".45rem",
+        padding: ".45rem .65rem",
+        background: "#0a0a0a",
+        border: "1px solid rgba(255,255,255,0.06)",
+        borderLeft: "2px solid rgba(226,75,74,0.4)",
+        borderRadius: 4,
+      }}
+    >
+      <div style={{ display: "flex", flexWrap: "wrap", gap: ".35rem", alignItems: "center", marginBottom: ".15rem" }}>
+        <span style={{ fontSize: ".76rem", color: "rgba(240,232,208,0.75)", lineHeight: 1.4 }}>
+          {prefix}{ev.name}
+        </span>
+        <ReservationEventBadges ev={ev} compact />
+      </div>
+      {(ev.open || ev.start) && (
+        <div style={{ fontSize: ".64rem", color: "rgba(240,232,208,0.45)" }}>
+          🕒 {ev.open && `開店 ${ev.open}`}{ev.open && ev.start && " / "}{ev.start && `開演 ${ev.start}`}
+        </div>
+      )}
+      {ev.seatable === false && (
+        <div style={{ fontSize: ".6rem", color: "rgba(244,162,97,0.75)", marginTop: ".15rem" }}>
+          ※お客様はお席を選べません
+        </div>
+      )}
+    </div>
+  );
+}
 function summarizeTargetArtistPeople(list) {
   const m = {};
   (list || []).filter(r => !r.cancelled).forEach(r => {
@@ -1804,7 +2058,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
         reservations: dayReservations,
       });
     } else {
-      dayEvents.forEach(ev => {
+      sortDayEventsForReservationView_(dayEvents).forEach(ev => {
         groups.push({
           title: ev.name,
           event: ev,
@@ -1985,94 +2239,6 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                 </div>
               </div>
 
-              {/* イベントごとの詳細カード（複数あれば縦に並ぶ） */}
-              {dayEvents.length > 0 && (
-                <div style={{display:"flex",flexDirection:"column",gap:".5rem",marginBottom:".75rem"}}>
-                  {dayEvents.map((ev, idx) => {
-                    const evBookingNotice = getStaffBookingStatusNotice(ev);
-                    return (
-                    <div key={ev._id || idx} style={{
-                      padding:".7rem .9rem",
-                      background: ev.noBooking
-                        ? "repeating-linear-gradient(45deg,rgba(226,75,74,0.18),rgba(226,75,74,0.18) 10px,rgba(226,75,74,0.08) 10px,rgba(226,75,74,0.08) 20px)"
-                        : "#0a0a0a",
-                      border: `${ev.noBooking ? "2px" : "1px"} solid ${ev.noBooking ? "#e24b4a" : "rgba(201,168,76,0.2)"}`,
-                      borderRadius: 5,
-                      position: "relative",
-                    }}>
-                      {ev.noBooking && (
-                        <div style={{
-                          padding:".5rem .75rem",
-                          marginBottom:".6rem",
-                          background:"#e24b4a",
-                          color:"#fff",
-                          borderRadius:4,
-                          fontSize:".82rem",
-                          fontWeight:700,
-                          letterSpacing:".08em",
-                          textAlign:"center",
-                          boxShadow:"0 2px 8px rgba(226,75,74,0.4)",
-                        }}>
-                          🚫 このイベントは予約受付不可です
-                        </div>
-                      )}
-                      <div style={{display:"flex",alignItems:"center",gap:".5rem",flexWrap:"wrap",marginBottom:".25rem"}}>
-                        <span style={{
-                          fontSize:".88rem",
-                          color: ev.noBooking ? "rgba(255,138,137,0.95)" : "#c9a84c",
-                          fontWeight:600,
-                        }}>🎵 {ev.name}</span>
-                      </div>
-                      {evBookingNotice && (
-                        <div style={{ marginBottom:".35rem", padding:".45rem .6rem", background:"rgba(244,162,97,0.1)", border:"1px solid rgba(244,162,97,0.35)", borderRadius:4, fontSize:".7rem", color:"#f4a261", lineHeight:1.5 }}>
-                          {evBookingNotice}
-                        </div>
-                      )}
-                      {/* 時間情報 */}
-                      {(ev.open || ev.start) && (
-                        <div style={{fontSize:".72rem",color:"rgba(240,232,208,0.7)",marginBottom:".15rem"}}>
-                          🕒 {ev.open && `開店 ${ev.open}`}{ev.open && ev.start && " / "}{ev.start && `開演 ${ev.start}`}
-                        </div>
-                      )}
-                      {/* 席指定不可バッジ */}
-                      {ev.seatable === false && (
-                        <div style={{
-                          display:"inline-block",
-                          marginTop:".35rem",
-                          marginBottom:".15rem",
-                          padding:".28rem .65rem",
-                          background:"rgba(244,162,97,0.12)",
-                          border:"1px solid rgba(244,162,97,0.5)",
-                          borderRadius:4,
-                          fontSize:".7rem",
-                          color:"#f4a261",
-                          fontWeight:600,
-                        }}>
-                          🪑 席指定不可（お客様はお席を選べません）
-                        </div>
-                      )}
-                      {/* スタッフ向け注意事項 */}
-                      {ev.notes && (
-                        <div style={{
-                          marginTop:".5rem",
-                          padding:".5rem .65rem",
-                          background:"rgba(244,162,97,0.1)",
-                          border:"1px solid rgba(244,162,97,0.35)",
-                          borderRadius:4,
-                          fontSize:".72rem",
-                          color:"#f4a261",
-                          whiteSpace:"pre-wrap",
-                          lineHeight:1.55,
-                        }}>
-                          ⚠️ <span style={{color:"rgba(244,162,97,0.85)",fontWeight:600,letterSpacing:".05em"}}>スタッフへの注意事項</span><br/>
-                          <span style={{color:"#f0e8d0"}}>{ev.notes}</span>
-                        </div>
-                      )}
-                    </div>
-                  );})}
-                </div>
-              )}
-
               {/* 席レイアウト：イベントが0個 or 1個のときは1つだけ表示
                   複数イベントの場合は各グループ内に表示するのでここでは出さない */}
               {dayEvents.length <= 1 && (
@@ -2096,50 +2262,38 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                 </details>
               )}
 
-              {/* 予約リスト：イベントごとにセクション分け */}
+              {/* 予約リスト：イベントごとにセクション分け（受付中を主役・受付不可はコンパクト） */}
               {(() => {
-                // イベントが0個 or 1個の場合：従来通り1セクション
-                // イベントが2個以上の場合：イベントごとに分けて、未割り当てを最後に
-                const groups = [];
-                if (dayEvents.length <= 1) {
-                  groups.push({
-                    eventName: dayEvents[0]?.name || "",
-                    event: dayEvents[0] || null,
-                    reservations: dayReservations,
-                  });
-                } else {
-                  // イベントごとに分ける
-                  dayEvents.forEach(ev => {
-                    groups.push({
-                      eventName: ev.name,
-                      event: ev,
-                      reservations: dayReservations.filter(r => r.eventName === ev.name),
-                    });
-                  });
-                  // どのイベントにも紐づかない予約
-                  const eventNames = dayEvents.map(e => e.name);
-                  const orphans = dayReservations.filter(r => !eventNames.includes(r.eventName));
-                  if (orphans.length > 0) {
-                    groups.push({
-                      eventName: "（イベント未指定）",
-                      event: null,
-                      reservations: orphans,
-                    });
-                  }
-                }
+                const groups = buildDayReservationGroups_(dayEvents, dayReservations);
 
                 return groups.map((g, gi) => {
+                  if (g.displayMode === "compact" && g.reservations.length === 0) {
+                    return (
+                      <div key={`compact_${g.eventName}_${gi}`} style={{ marginBottom: gi < groups.length - 1 ? ".65rem" : 0 }}>
+                        <CompactUnavailableEventCard ev={g.event} />
+                      </div>
+                    );
+                  }
+
                   const activeInGroup = g.reservations.filter(isActiveReservation);
                   const totalP = activeInGroup.reduce((s,r)=>s+Number(r.people||0),0);
                   const arrivedC = activeInGroup.reduce((s,r)=>s+getArrivedCount(r),0);
                   const artistSummary = summarizeTargetArtistPeople(activeInGroup);
-                  const groupBookingNotice = getStaffBookingStatusNotice(g.event);
-                  // 複数イベント時は、イベント名をキーに付けて席レイアウトを分ける
+                  const groupBookingNotice = g.displayMode !== "compact" ? getStaffBookingStatusNotice(g.event) : null;
                   const eventScopedKey = (dayEvents.length > 1 && g.eventName)
                     ? `${calSelectedDate}::${g.eventName}`
                     : calSelectedDate;
+                  const sectionTitle = reservationSectionTitle_(g, dayEvents);
+                  const showPrimaryStrip = g.event && (g.displayMode === "primary" || (dayEvents.length === 1 && g.displayMode !== "compact"));
+
                   return (
-                    <div key={gi} style={{marginBottom: gi<groups.length-1 ? "1.25rem" : 0}}>
+                    <div key={`group_${g.eventName}_${gi}`} style={{marginBottom: gi<groups.length-1 ? "1.25rem" : 0}}>
+                      {g.displayMode === "compact" && g.event && (
+                        <CompactUnavailableEventBar ev={g.event} />
+                      )}
+                      {showPrimaryStrip && (
+                        <PrimaryEventInfoStrip ev={g.event} />
+                      )}
                       <div style={{
                         display:"flex",
                         alignItems:"center",
@@ -2152,7 +2306,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                         borderLeft: dayEvents.length > 1 ? "3px solid #c9a84c" : "none",
                       }}>
                         <span style={{fontSize:".72rem",color:"#c9a84c",letterSpacing:".1em",fontWeight:600}}>
-                          📞 {dayEvents.length > 1 && g.eventName ? `${g.eventName} の予約` : "予約リスト"}
+                          📞 {sectionTitle}
                         </span>
                         <span style={{fontSize:".68rem",color:"rgba(201,168,76,0.65)"}}>
                           （{activeInGroup.length}組 / 計{totalP}名 / 来店 {arrivedC}/{totalP}名）
@@ -2164,7 +2318,7 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                         </span>
                       </div>
                       {groupBookingNotice && (
-                        <div style={{ marginBottom:".45rem", padding:".45rem .65rem", background:"rgba(244,162,97,0.1)", border:"1px solid rgba(244,162,97,0.35)", borderRadius:4, fontSize:".7rem", color:"#f4a261", lineHeight:1.5 }}>
+                        <div style={{ marginBottom:".45rem", padding:".45rem .65rem", background:"rgba(244,162,97,0.08)", border:"1px solid rgba(244,162,97,0.28)", borderRadius:4, fontSize:".68rem", color:"#f4a261", lineHeight:1.5 }}>
                           {groupBookingNotice}
                         </div>
                       )}
@@ -2175,10 +2329,9 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                           {artistSummary.map(([name, ppl]) => `${name} ${ppl}名`).join(" / ")}
                         </div>
                       )}
-                      {/* 複数イベント時のみ、各イベントに席レイアウト（折りたたみ式） */}
                       {dayEvents.length > 1 && g.event && (
                         <details style={{marginBottom:".75rem"}}>
-                          <summary style={{cursor:"pointer",padding:".4rem .7rem",background:"#0a0a0a",border:"1px solid rgba(201,168,76,0.18)",borderRadius:4,fontSize:".7rem",color:"rgba(201,168,76,0.8)",letterSpacing:".08em",userSelect:"none"}}>
+                          <summary style={{cursor:"pointer",padding:".4rem .7rem",background:"#0a0a0a",border:"1px solid rgba(201,168,76,0.18)",borderRadius:4,fontSize:".7rem",color:"rgba(201,168,76,0.8)",letterSpacing:".08em",userSelect:"none",listStyle:"none"}}>
                             🪑 「{g.eventName}」の席レイアウト
                           </summary>
                           <div style={{marginTop:".5rem"}}>
@@ -2197,9 +2350,11 @@ export default function ReservationModule({ events = [], shifts = [], navigateBa
                         </details>
                       )}
                       {g.reservations.length === 0 ? (
-                        <div style={{textAlign:"center",padding:"1rem",color:"rgba(240,232,208,0.4)",fontSize:".78rem",background:"#111",borderRadius:5}}>
-                          {dayEvents.length > 1 ? "このイベントの予約はまだありません" : "この日の予約はありません"}
-                        </div>
+                        g.displayMode !== "compact" ? (
+                          <div style={{textAlign:"center",padding:"1rem",color:"rgba(240,232,208,0.4)",fontSize:".78rem",background:"#111",borderRadius:5}}>
+                            {dayEvents.length > 1 ? "このイベントの予約はまだありません" : "この日の予約はありません"}
+                          </div>
+                        ) : null
                       ) : g.reservations.map((r) => renderHbReservationCard(r, {
                         groupEvent: g.event,
                         showStaff: false,
