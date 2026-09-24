@@ -856,43 +856,307 @@ function countBreakEvenMonths_(months) {
     strongLineCount: countTier("strong"),
   };
 }
-function buildBreakEvenMonthlyComment_(ctx) {
-  const { analysis: a, tier, phase } = ctx;
-  const be = a.breakEvenAnalysis;
-  if (!be?.hasActualSales) return null;
-  const fixedMan = Math.round(MONTHLY_FIXED_COST_EX_TAX / 10000);
-  const provisional = phase.currentMonth ? "月途中のため暫定評価ですが、" : "";
+function monthlyCommentSection_(title, body) {
+  if (!body) return null;
+  return `【${title}】${body}`;
+}
+function formatApproxRemainingYen_(value, taxMode) {
+  const n = displayMoneyValue(value, taxMode);
+  if (n == null || !Number.isFinite(Number(n)) || n <= 0) return null;
+  const man = Math.round(Number(n) / 10000);
+  if (man >= 10) return `約${man.toLocaleString("ja-JP")}万円`;
+  return formatDisplayYen(value, taxMode);
+}
+function buildMonthlyOverallComment_(ctx) {
+  const { analysis: a, taxMode, phase, tier } = ctx;
+  const dy = (v) => formatDisplayYen(v, taxMode);
+  const signedDy = (v) => formatSignedDisplayYen(v, taxMode);
+  const monthLabel = ctx.monthLabel || "";
+  const sales = Number(a.totalSalesSum || 0);
+  const target = Number(a.fullMonthTargetSalesSum || 0);
+  const remaining = Math.max(0, target - sales);
+  const yoyRate = a.priorYearMonth?.prevMonthRate;
+  const yoyDiff = a.priorYearMonth?.prevMonthDiff;
 
   if (phase.currentMonth) {
-    if (!be.isAboveBreakEven) return null;
-    if (be.tierKey === "strong") {
-      return `現時点で営業利益が${formatExTaxYen_(be.operatingProfit)}と強いペースです。${provisional}仕入れ・人件費・経費が崩れていないかを確認してください。`;
+    const actualRate = a.actualAchievementRate;
+    const progressRate = a.monthlyProgressRate;
+    if (actualRate != null && actualRate >= 100) {
+      return `営業済み日ベースでは目標を上回っており、現時点の営業効率は良好です。月間進捗率は${progressRate != null ? pct1(progressRate) : "—"}で、まだ月中のため最終着地は残り営業日次第です。`;
     }
-    if (be.tierKey === "good") {
-      return `現時点で営業利益が${formatExTaxYen_(be.operatingProfit)}と好調です。${provisional}仕入れ・人件費・経費が崩れていないかを確認してください。`;
+    if (actualRate != null && actualRate < 90) {
+      return `営業済み日ベースでも目標ペースを下回っており、着地管理が必要な局面です。月間進捗率は${progressRate != null ? pct1(progressRate) : "—"}で、残り営業日での挽回が求められます。`;
     }
-    if (be.tierKey === "stable") {
-      return `現時点で限界利益が固定費${fixedMan}万円を超え、営業利益も確保できています。${provisional}仕入れ・経費の入力状況も確認してください。`;
-    }
-    if (tier !== "achieved" && be.isAboveBreakEven) {
-      return `月間目標には届いていませんが、限界利益は損益分岐（固定費${fixedMan}万円）を超えています。残り営業日は利益の上積みを狙う局面です。`;
-    }
-    return null;
+    return `月間進捗率は${progressRate != null ? pct1(progressRate) : "—"}で、月中の着地管理フェーズです。確定評価は月末以降に行い、現時点では残り営業日の積み上げ状況を見ていきます。`;
   }
 
-  if (be.tierKey === "strong" || be.tierKey === "good") {
-    return `営業利益 ${formatExTaxYen_(be.operatingProfit)} と好調な月です。仕入れ・人件費・経費が崩れていないかを確認してください。`;
+  if (phase.endedMonth) {
+    let text = `${monthLabel}は売上${dy(sales)}`;
+    if (tier === "achieved") {
+      text += `で、月間目標${dy(target)}を達成しました。`;
+    } else if (remaining > 0) {
+      text += `で、月間目標に対して${dy(remaining)}不足しました。`;
+    } else {
+      text += `で着地しました。`;
+    }
+    if (yoyRate != null && yoyDiff != null) {
+      if (yoyRate >= 110) {
+        text += `一方で前年同月比は${pct1(yoyRate)}、前年差は${signedDy(yoyDiff)}と大きく伸長しており、前年対比では売上規模が明確に上がっています。`;
+      } else if (yoyRate >= 100) {
+        text += `前年同月比は${pct1(yoyRate)}で、前年を上回る着地です。`;
+      } else if (yoyRate >= 90) {
+        text += `前年同月比は${pct1(yoyRate)}で、前年並みの水準です。`;
+      } else {
+        text += `前年同月比は${pct1(yoyRate)}で、前年同月を下回る着地です。`;
+      }
+    }
+    if (tier !== "achieved" && yoyRate != null && yoyRate >= 100) {
+      text += "目標未達ではあるものの、売上の基礎体力は改善している月です。";
+    } else if (tier === "achieved" && yoyRate != null && yoyRate >= 110) {
+      text += "目標達成と前年大幅超えが揃った好調な月です。";
+    } else if (tier === "achieved") {
+      text += "経営目標としては達成できた月です。";
+    } else if (yoyRate != null && yoyRate < 90) {
+      text += "売上・前年比の両面で課題が残る月です。";
+    } else if (tier !== "achieved") {
+      text += "目標達成には届かなかった月です。";
+    }
+    return text;
   }
-  if (!be.isAboveBreakEven) {
-    const tail = "次月は限界利益が固定費163万円を超えるよう、売上と仕入れ・人件費・経費を確認してください。";
-    return `限界利益が固定費${fixedMan}万円に届いていません。${tail}`;
+
+  return null;
+}
+function buildMonthlySalesComment_(ctx) {
+  const { analysis: a, taxMode, phase, tier } = ctx;
+  const dy = (v) => formatDisplayYen(v, taxMode);
+  const signedDy = (v) => formatSignedDisplayYen(v, taxMode);
+  const sales = Number(a.totalSalesSum || 0);
+  const target = Number(a.fullMonthTargetSalesSum || 0);
+  const remainingTarget = Math.max(0, target - sales);
+  const yoyRate = a.priorYearMonth?.prevMonthRate;
+  const yoyDiff = a.priorYearMonth?.prevMonthDiff;
+  const priorFinal = a.priorYearMonth?.prevMonthSales;
+  const progressRate = a.monthlyProgressRate;
+  const actualRate = a.actualAchievementRate;
+
+  if (phase.currentMonth) {
+    const parts = [];
+    const targetRem = formatApproxRemainingYen_(remainingTarget, taxMode);
+    if (targetRem) parts.push(`月間目標まで残り${targetRem}`);
+    const remainingPrior = priorFinal != null ? Math.max(0, priorFinal - sales) : null;
+    const priorRem = remainingPrior != null ? formatApproxRemainingYen_(remainingPrior, taxMode) : null;
+    if (priorRem) parts.push(`前年同月最終実績までは残り${priorRem}`);
+    let text = parts.length ? `${parts.join("、")}です。` : "";
+    const futureDays = Number(a.futureDayCount || 0);
+    if (futureDays > 0 && remainingTarget > 0) {
+      const perDay = Math.ceil(remainingTarget / futureDays);
+      text += `残り予定${futureDays}件で1営業あたり${dy(perDay)}程度が必要なペースです。`;
+    }
+    text += "まだ月中のため前年比の良否は確定判断せず、残り予定の予約状況・実来店数・客単価で着地を見ていく段階です。";
+    return text;
   }
-  if (tier !== "achieved" && be.isAboveBreakEven) {
-    return `月間目標には届いていませんが、限界利益は損益分岐（固定費${fixedMan}万円）を超えています。`;
+
+  if (phase.endedMonth) {
+    let text = "";
+    if (tier === "achieved") {
+      text += `月間進捗率${progressRate != null ? pct1(progressRate) : "—"}で目標達成です。`;
+    } else {
+      text += `月間進捗率${progressRate != null ? pct1(progressRate) : "—"}で、目標${dy(target)}に対して${dy(remainingTarget)}不足しました。`;
+    }
+    if (actualRate != null) {
+      text += `営業済み日ベースの達成率は${pct1(actualRate)}でした。`;
+    }
+    if (yoyRate != null && yoyDiff != null) {
+      if (tier !== "achieved" && yoyRate >= 100) {
+        text += `目標には届きませんでしたが、前年同月比${pct1(yoyRate)}（${signedDy(yoyDiff)}）と前年超えの伸びは評価できます。`;
+      } else if (tier === "achieved" && yoyRate >= 110) {
+        text += `前年同月比${pct1(yoyRate)}（${signedDy(yoyDiff)}）と、目標・前年の両方で力強い月でした。`;
+      } else if (yoyRate < 90) {
+        text += `前年同月比${pct1(yoyRate)}（${signedDy(yoyDiff)}）と、前年からの後退が目立ちます。`;
+      } else {
+        text += `前年同月比${pct1(yoyRate)}（${signedDy(yoyDiff)}）です。`;
+      }
+    }
+    const venueSum = Number(a.venueFeeSum || 0);
+    const total = sales;
+    const foodUnit = a.foodDrinkUnitPrice;
+    const customerUnit = a.customerUnitPrice;
+    const normalUnit = a.normalCustomerUnitPriceExVenue ?? a.normalCustomerUnitPrice;
+    if (venueSum > 0 && total > 0 && venueSum / total >= 0.06) {
+      text += `客単価${formatUnitYen_(customerUnit)}のうち会場費・イベント料金の影響が大きく、飲食単価${formatUnitYen_(foodUnit)}と分けて見る必要があります。`;
+    } else if (foodUnit != null && normalUnit != null && Number(normalUnit) > Number(foodUnit) * 1.05) {
+      text += `総客単価${formatUnitYen_(customerUnit)}に対し、飲食単価${formatUnitYen_(foodUnit)}は低めで、イベント料金・会場費・チャージ要素が客単価を押し上げています。`;
+    } else if (foodUnit != null) {
+      text += `飲食単価${formatUnitYen_(foodUnit)}・客単価${formatUnitYen_(customerUnit)}で、来店後の売上化水準を読み取れます。`;
+    }
+    const drinkRate = a.salesComposition?.drinkRate;
+    const foodRate = a.salesComposition?.foodRate;
+    if (drinkRate != null && foodRate != null) {
+      text += `ドリンク比率${pct1(drinkRate)}・フード比率${pct1(foodRate)}も利益の残り方を左右する指標です。`;
+    }
+    return text;
   }
-  if (be.tierKey === "stable") {
-    return `限界利益が固定費${fixedMan}万円を大きく超え、営業利益も確保できています。仕入れ・経費の月別差も確認してください。`;
+
+  return null;
+}
+function buildMonthlyProfitComment_(ctx) {
+  const { analysis: a, phase } = ctx;
+  const marginal = Number(a.marginalProfitSum ?? NaN);
+  const marginalRate = a.marginalProfitRate;
+  const operating = Number(a.reviewOperatingProfitSum ?? NaN);
+  const operatingRate = a.reviewOperatingProfitRate;
+  const fixedLine = formatExTaxYen_(MONTHLY_FIXED_COST_EX_TAX);
+  const be = a.breakEvenAnalysis;
+  const hasProfitData = Number(a.totalSalesSum || 0) > 0 && marginal != null && !Number.isNaN(marginal);
+
+  if (!hasProfitData) return null;
+
+  if (phase.currentMonth) {
+    let text = "";
+    if (operatingRate != null && operatingRate >= 12) {
+      text += `営業利益率は${pct1(operatingRate)}と高く表示されていますが、`;
+    } else if (operating != null && !Number.isNaN(operating) && operating >= 0) {
+      text += `固定費回収後は${formatExTaxYen_(operating)}の黒字圏に見えますが、`;
+    } else if (be?.hasActualSales && !be.isAboveBreakEven) {
+      const gapAbs = be.gapFromBreakEven != null && be.gapFromBreakEven < 0 ? formatExTaxYen_(Math.abs(be.gapFromBreakEven)) : null;
+      text += `現時点では限界利益が固定費${fixedLine}に届いていません${gapAbs ? `（あと${gapAbs}）` : ""}。月途中のため確定未達ではありませんが、`;
+    } else {
+      text += "利益は";
+    }
+    text += "仕入れ・経費の反映状況によって変動するため、現時点では暫定利益として扱ってください。";
+    if (marginalRate != null) {
+      text += `限界利益率は${pct1(marginalRate)}です。`;
+    }
+    text += "借入返済・消費税・カード支払いを考慮すると、会計上の利益と手元資金は分けて見る必要があります。";
+    return appendMonthlyLaborCostProfitNote_(a, text, ctx);
   }
+
+  if (phase.endedMonth) {
+    let text = `限界利益は${formatExTaxYen_(marginal)}`;
+    if (marginalRate != null) text += `、限界利益率は${pct1(marginalRate)}`;
+    text += "で、粗利水準";
+    if (marginalRate != null && marginalRate >= 48) {
+      text += "は一定確保できています。";
+    } else if (marginalRate != null && marginalRate >= 42) {
+      text += "はおおむね維持できています。";
+    } else {
+      text += "に改善余地があります。";
+    }
+    if (operating != null && !Number.isNaN(operating)) {
+      text += `固定費ライン${fixedLine}を差し引いた営業利益は${formatExTaxYen_(operating)}`;
+      if (operatingRate != null) text += `、営業利益率は${pct1(operatingRate)}`;
+      text += "です。";
+      const yoyRate = a.priorYearMonth?.prevMonthRate;
+      if (yoyRate != null && yoyRate >= 105 && operatingRate != null && operatingRate < 16) {
+        text += "売上成長に対して最終利益の残り方はまだ厚くありません。";
+      } else if (operatingRate != null && operatingRate >= 18) {
+        text += "売上に対して利益の残り方は良好です。";
+      } else if (operating <= 0) {
+        text += "固定費回収後は赤字着地で、仕入れ・人件費・経費の構造見直しが必要です。";
+      } else if (operatingRate != null && operatingRate < 12) {
+        text += "売上があっても手元に残りにくい構造です。";
+      }
+    }
+    text += "営業利益は借入返済・消費税・カード支払いを含むキャッシュアウトとは別物である点も経営判断では切り分けてください。";
+    return appendMonthlyLaborCostProfitNote_(a, text, ctx);
+  }
+
+  return null;
+}
+function buildMonthlyManagementIssueComment_(ctx) {
+  const { analysis: a, phase, tier } = ctx;
+  const sales = Number(a.totalSalesSum || 0);
+  const yoyRate = a.priorYearMonth?.prevMonthRate;
+  const operatingRate = a.reviewOperatingProfitRate;
+  const grossRate = a.operatingGrossProfitRate;
+  const venueSum = Number(a.venueFeeSum || 0);
+  const issues = [];
+
+  if (venueSum > 0 && sales > 0 && venueSum / sales >= 0.06) {
+    issues.push(
+      "イベント売上や会場費で客単価が上がっていても、飲食売上が伸びていなければ利益は残りにくくなります。客単価の見かけの良さと飲食単価は別指標として追う必要があります。"
+    );
+  }
+  if (yoyRate != null && yoyRate >= 100 && tier !== "achieved") {
+    issues.push("売上目標未達と前年超えが同時に起きており、規模拡大と目標設定のギャップを切り分けて読む必要があります。");
+  }
+  if (yoyRate != null && yoyRate >= 105 && operatingRate != null && operatingRate < 16) {
+    issues.push("売上は前年を上回っている一方、営業利益率が低く、売上拡大の利益転換が追いついていません。ドリンク・フード比率と仕入れ構造が論点です。");
+  }
+  if (grossRate != null && grossRate < 60) {
+    issues.push(`営業粗利率${pct1(grossRate)}は低く、売上があっても仕入れ・経費負担が重い状態です。`);
+  }
+  const topCat = dominantUnderTargetCategory_(a.underTargetCauseAnalysis);
+  if (topCat === "単価不足型") {
+    issues.push("未達日は集客より来店後の注文導線（ドリンク追加・フード提案）がボトルネックになっています。");
+  } else if (topCat === "集客不足型") {
+    issues.push("未達日は来店後単価よりイベント前の集客設計がボトルネックになっています。");
+  } else if (topCat === "集客・単価不足型") {
+    issues.push("未達日は集客と来店後単価の両方が弱く、告知設計とフロア運用の両面が論点です。");
+  }
+
+  if (phase.currentMonth) {
+    if (issues.length === 0) {
+      return "月中は確定評価ではなく、予約数・実来店数・飲食単価・暫定利益の4点を週次で追うことが経営上の要点です。会計利益と手元資金は別物として見てください。";
+    }
+    return issues.join(" ");
+  }
+
+  if (phase.endedMonth) {
+    if (issues.length === 0) {
+      if (tier === "achieved" && operatingRate != null && operatingRate >= 15) {
+        return "目標達成と利益確保が両立した月です。成功要因を飲食単価・ドリンク比率・イベント構成に分解して次月に引き継ぐことが要点です。";
+      }
+      return "数字の読み取りとして、売上総額だけでなく飲食単価・ドリンク比率・固定費回収後利益をセットで見ることが経営判断の要点です。";
+    }
+    return issues.join(" ");
+  }
+
+  return null;
+}
+function buildMonthlyNextActionComment_(ctx) {
+  const { analysis: a, phase, tier, comparison } = ctx;
+  const topCat = dominantUnderTargetCategory_(a.underTargetCauseAnalysis);
+  const weakSide = pickProgressWeakSide_(a.underTargetCauseAnalysis);
+  const yoyRate = a.priorYearMonth?.prevMonthRate;
+  const operatingRate = a.reviewOperatingProfitRate;
+  const futureDays = Number(a.futureDayCount || 0);
+
+  if (phase.currentMonth) {
+    if (futureDays > 0 && tier !== "achieved") {
+      if (weakSide === "customer" || topCat === "集客不足型" || topCat === "集客・単価不足型") {
+        return `残り${futureDays}件は、開催1週間前時点で予約数が弱いイベントを優先し、出演者へ不足人数と告知用短文を共有してください。営業済み日の達成パターンを「売上TOP5」で基準にすると着地管理しやすくなります。`;
+      }
+      if (weakSide === "unit" || topCat === "単価不足型") {
+        return `残り${futureDays}件は、ドリンク・フードの追加注文導線を強化し、1営業あたりの必要売上ペースを意識してください。売上が伸びる日ほど追加注文を取れる運用に寄せることが重要です。`;
+      }
+      return `残り${futureDays}件は、月間目標と前年同月最終実績の両方を意識し、予約状況・実来店数・客単価で着地を管理してください。`;
+    }
+    if (tier === "achieved") {
+      return "目標達成済みのため、残り営業日は利益の上積みと飲食単価の維持に注力してください。人件費は翌月反映のため、暫定利益は人件費反映後に再評価します。";
+    }
+    return "残り営業日は、予約数・実来店数・飲食単価の3点で着地を管理し、確定評価は月末以降に行ってください。";
+  }
+
+  if (phase.endedMonth) {
+    if (yoyRate != null && yoyRate >= 100 && operatingRate != null && operatingRate < 16) {
+      return "次月以降は、売上総額だけでなく、飲食単価・ドリンク比率・フード追加率を重点指標にしてください。売上が伸びる日ほど、ドリンク・フードの追加注文を取れる運用に寄せることが重要です。";
+    }
+    if (topCat === "集客不足型" || weakSide === "customer") {
+      return "次月はイベント登録時点で出演者ごとの見込み人数を入れ、開催1週間前に予約数が弱いイベントだけ再告知対象にしてください。店側投稿はスケジュール告知ではなく来店理由を書くことが効果的です。";
+    }
+    if (topCat === "単価不足型" || weakSide === "unit") {
+      return "次月はドリンク追加、フード提案、セットメニューなど来店後の注文導線を見直してください。イベント売上や会場費で客単価が上がっていても、飲食売上が伸びなければ利益は残りにくくなります。";
+    }
+    if (tier === "achieved") {
+      return "次月は今月の成功要因（集客・客単価・飲食構成）を「売上TOP5」「飲食売上TOP10」で分解し、再現可能な運用に落とし込んでください。";
+    }
+    if (comparison?.achievedDays && comparison?.underTargetDays) {
+      return "次月のイベント設計では、月内の達成日のイベント構成を「売上TOP5」で基準にしてください。未達日との差分から、集客設計と来店後導線のどちらを優先するか決めてください。";
+    }
+    return "次月は未達日の分類結果を起点に、集客設計と来店後の注文導線のどちらを優先するか決め、売上目標と利益目標をセットで設計してください。";
+  }
+
   return null;
 }
 function formatPtDiff(value) {
@@ -1505,6 +1769,259 @@ function buildMomComparison_(monthRows) {
     purchaseRatePtDiff,
   };
 }
+function isLaborCostPendingReflection_(targetMonth, currentBusinessDate, laborCostSum) {
+  const tm = normalizeMonth(targetMonth);
+  const current = String(currentBusinessDate || "").slice(0, 7);
+  if (!tm || !current) return false;
+  if (tm >= current) return true;
+  const prevMonth = shiftTargetMonth_(current, -1);
+  if (tm === prevMonth) {
+    const labor = Number(laborCostSum ?? 0);
+    return !(labor > 0);
+  }
+  return false;
+}
+function resolveLaborCostRowState_(m, currentBusinessDate) {
+  if (!m || m.status !== "集計済み") {
+    return { key: "inactive", label: "—", analyzable: false, pending: false, reflected: false, laborCostRate: null, laborCostLevel: null };
+  }
+  const labor = Number(m.laborCostSum || 0);
+  const sales = Number(m.totalSalesSum || 0);
+  const pending = isLaborCostPendingReflection_(m.targetMonth, currentBusinessDate, labor);
+  const hasLabor = labor > 0 && sales > 0;
+  if (pending) {
+    const rate = hasLabor ? (labor / sales) * 100 : null;
+    return {
+      key: "pending",
+      label: "翌月反映",
+      analyzable: false,
+      pending: true,
+      reflected: false,
+      laborCostRate: rate,
+      laborCostLevel: { key: "pending", label: "翌月反映" },
+      rateDisplay: rate != null ? `${pct1(rate)}（参考）` : "未確定",
+    };
+  }
+  if (!hasLabor) {
+    return {
+      key: "noData",
+      label: "—",
+      analyzable: false,
+      pending: false,
+      reflected: false,
+      laborCostRate: null,
+      laborCostLevel: { key: "noData", label: "—" },
+      rateDisplay: "—",
+    };
+  }
+  const rate = (labor / sales) * 100;
+  const level = classifyLaborCostRateLevel_(rate);
+  return {
+    key: "reflected",
+    label: level.label,
+    analyzable: true,
+    pending: false,
+    reflected: true,
+    laborCostRate: rate,
+    laborCostLevel: level,
+    rateDisplay: pct1(rate),
+  };
+}
+function calcLaborCostRate_(laborCost, totalSales) {
+  const sales = Number(totalSales || 0);
+  const labor = Number(laborCost || 0);
+  if (!(sales > 0) || labor <= 0) return null;
+  return (labor / sales) * 100;
+}
+function classifyLaborCostRateLevel_(rate) {
+  if (rate == null || !Number.isFinite(Number(rate))) return { key: "unknown", label: "—" };
+  if (rate < 25) return { key: "good", label: "良好" };
+  if (rate < 30) return { key: "standard", label: "標準〜注意" };
+  return { key: "heavy", label: "重い" };
+}
+function laborCostLevelColor_(levelKey) {
+  switch (levelKey) {
+    case "good":
+      return "#9ec9a8";
+    case "standard":
+      return "rgba(230,210,160,0.92)";
+    case "heavy":
+      return "#dca06a";
+    case "pending":
+      return "rgba(180,190,210,0.85)";
+    default:
+      return "rgba(240,232,208,0.72)";
+  }
+}
+function formatLaborCostRateDisplay_(state) {
+  if (!state) return "—";
+  if (state.pending) return state.rateDisplay || "未確定";
+  if (!state.reflected) return state.rateDisplay || "—";
+  return state.rateDisplay || "—";
+}
+function formatLaborCostRatePtDiff_(currentRate, prevRate) {
+  if (currentRate == null || prevRate == null) return null;
+  return currentRate - prevRate;
+}
+function buildLaborCostMonthTrendComment_(current, prev) {
+  if (current.pending) {
+    return "人件費は翌月反映のため、確定評価は翌月以降です。直近月の営業利益は、人件費反映後に改めて評価してください。";
+  }
+  if (!current.reflected || current.laborCostRate == null) {
+    return "反映済みの人件費データがないため、人件費率は算出しません。";
+  }
+  const rate = current.laborCostRate;
+  const level = current.laborCostLevel;
+  let text = `反映済み月ベースで、人件費率は${pct1(rate)}`;
+  if (level?.key === "good") {
+    text += "と良好です。";
+  } else if (level?.key === "standard") {
+    text += "で標準範囲です。";
+  } else if (level?.key === "heavy") {
+    text += "と重い水準です。人員配置・営業日別の売上効率を見る必要があります。";
+  } else {
+    text += "です。";
+  }
+  if (prev?.reflected && prev.laborCostRate != null) {
+    const salesUp = Number(current.totalSalesSum || 0) > Number(prev.totalSalesSum || 0);
+    const salesDown = Number(current.totalSalesSum || 0) < Number(prev.totalSalesSum || 0) * 0.97;
+    const rateUp = rate > prev.laborCostRate + 0.5;
+    const rateDown = rate < prev.laborCostRate - 0.5;
+    if (salesUp && rateDown) {
+      text += " 反映済み月ベースで運営効率が改善しています。";
+    } else if (salesUp && rateUp) {
+      text += " 反映済み月ベースで人件費率が上昇しており、売上増が利益に残りにくい構造です。";
+    } else if (salesDown && rateUp) {
+      text += " 反映済み月ベースで人件費率が上昇しており、人員配置・営業日別の売上効率を見る必要があります。";
+    }
+  }
+  return text;
+}
+function buildYearlyLaborCostRows_(monthRows, currentBusinessDate) {
+  const built = (monthRows || []).map((m) => {
+    const state = resolveLaborCostRowState_(m, currentBusinessDate);
+    return { ...m, laborState: state };
+  });
+  return built.map((m, idx) => {
+    const state = m.laborState;
+    const prev = idx > 0 ? built[idx - 1] : null;
+    const prevState = prev?.laborState;
+    const prevRate = prevState?.reflected ? prevState.laborCostRate : null;
+    const laborCostRatePtDiff =
+      state.reflected && state.laborCostRate != null && prevRate != null
+        ? formatLaborCostRatePtDiff_(state.laborCostRate, prevRate)
+        : null;
+    const currentCtx = { ...m, ...state, laborCostRate: state.laborCostRate };
+    const prevCtx = prev ? { ...prev, ...prevState, laborCostRate: prevRate } : null;
+    return {
+      ...m,
+      isLaborPending: state.pending,
+      isLaborReflected: state.reflected,
+      laborCostRate: state.laborCostRate,
+      laborCostLevel: state.laborCostLevel,
+      laborCostRatePtDiff,
+      laborRateDisplay: formatLaborCostRateDisplay_(state),
+      laborComment: buildLaborCostMonthTrendComment_(currentCtx, prevCtx),
+    };
+  });
+}
+function buildYearlyLaborCostComment_(validRows, heavyMonths, goodUnder30Months, pendingMonthLabels) {
+  let text =
+    "人件費は翌月反映のため、直近月の人件費率は確定評価に使用しません。";
+  if (validRows.length === 0) {
+    text += " 反映済み月が揃うと、人件費率の推移を分析できます。";
+    if (pendingMonthLabels.length > 0) {
+      text += ` 直近月（${pendingMonthLabels.join("・")}）の営業利益は、人件費反映後に改めて評価する必要があります。`;
+    }
+    return text;
+  }
+  const goodLabels = goodUnder30Months.map((r) => String(r.monthLabel || "").replace(/月$/, ""));
+  const heavyLabels = heavyMonths.map((r) => String(r.monthLabel || "").replace(/月$/, ""));
+  text += " 反映済み月ベースで見ると、";
+  if (goodLabels.length >= 2) {
+    text += `${goodLabels.slice(0, 4).join("・")}月は売上規模に対して人件費率が30%未満に収まっており、運営効率は一定範囲にあります。`;
+  } else if (goodLabels.length === 1) {
+    text += `${goodLabels[0]}月は人件費率が30%未満に収まっており、運営効率は一定範囲にありました。`;
+  } else if (validRows.length > 0) {
+    const avg = validRows.reduce((s, r) => s + r.laborCostRate, 0) / validRows.length;
+    text += `平均人件費率は${pct1(avg)}で推移しています。`;
+  }
+  if (heavyLabels.length > 0) {
+    text += ` 一方で、${heavyLabels.join("・")}月は人件費率が30%を超えており、反映済み月ベースで人員配置・営業日別の売上効率を見る必要があります。`;
+  }
+  text += " 売上だけでなく、人件費率と営業利益率をセットで見る必要があります。";
+  if (pendingMonthLabels.length > 0) {
+    text += ` 直近月（${pendingMonthLabels.join("・")}）の営業利益は、人件費反映後に改めて評価する必要があります。`;
+  }
+  return text.trim();
+}
+function buildYearlyLaborCostAnalysis_(monthRows, currentBusinessDate) {
+  const rows = buildYearlyLaborCostRows_(monthRows, currentBusinessDate);
+  const validRows = rows.filter((r) => r.isLaborReflected && r.laborCostRate != null);
+  const pendingMonthLabels = rows.filter((r) => r.isLaborPending).map((r) => r.monthLabel);
+  const avgRate =
+    validRows.length > 0 ? validRows.reduce((s, r) => s + r.laborCostRate, 0) / validRows.length : null;
+  const heaviestMonth =
+    validRows.length > 0
+      ? validRows.reduce((best, r) => (r.laborCostRate > best.laborCostRate ? r : best))
+      : null;
+  let improvingMonth = null;
+  let bestImprovement = 0;
+  for (let i = 1; i < rows.length; i++) {
+    const cur = rows[i];
+    const prev = rows[i - 1];
+    if (!cur.isLaborReflected || !prev.isLaborReflected) continue;
+    if (cur.laborCostRate == null || prev.laborCostRate == null) continue;
+    const improvement = prev.laborCostRate - cur.laborCostRate;
+    if (improvement > bestImprovement) {
+      bestImprovement = improvement;
+      improvingMonth = cur;
+    }
+  }
+  const heavyMonths = validRows.filter((r) => r.laborCostRate >= 30);
+  const goodUnder30Months = validRows.filter((r) => r.laborCostRate < 30 && Number(r.totalSalesSum || 0) > 0);
+  const yearlyComment = buildYearlyLaborCostComment_(validRows, heavyMonths, goodUnder30Months, pendingMonthLabels);
+  return {
+    rows,
+    avgRate,
+    heaviestMonth,
+    improvingMonth,
+    pendingMonthCount: pendingMonthLabels.length,
+    validMonthCount: validRows.length,
+    heavyMonthCount: heavyMonths.length,
+    yearlyComment,
+  };
+}
+function appendMonthlyLaborCostProfitNote_(a, text, ctx) {
+  const targetMonth = ctx?.targetMonth;
+  const currentBusinessDate = ctx?.currentBusinessDate || a.currentBusinessDate;
+  const phase = ctx?.phase;
+  const pending =
+    phase?.currentMonth ||
+    isLaborCostPendingReflection_(targetMonth, currentBusinessDate, a.laborCostSum);
+  const laborOpsNote =
+    " 人件費は翌月反映のため、売上・仕入れ・経費・利益は暫定評価です。人件費反映後に最終評価します。";
+  if (pending) {
+    return text + laborOpsNote;
+  }
+  const state = resolveLaborCostRowState_(a, currentBusinessDate);
+  if (!state.reflected || state.laborCostRate == null) {
+    return text + laborOpsNote;
+  }
+  const rate = state.laborCostRate;
+  const level = state.laborCostLevel;
+  let note = ` 反映済み月として、人件費率は${pct1(rate)}で`;
+  if (level?.key === "good") {
+    note += "良好です。";
+  } else if (level?.key === "standard") {
+    note += "標準範囲です。";
+  } else if (level?.key === "heavy") {
+    note += "重い水準です。反映済み月ベースで人員配置・営業日別の売上効率を見る必要があります。";
+  } else {
+    note += "推移しています。";
+  }
+  return text + note;
+}
 function buildYearlyMonthReviewRows_(monthRows, monthlyYoYRows, currentBusinessDate) {
   const yoyMap = Object.fromEntries((monthlyYoYRows || []).map((r) => [r.targetMonth, r]));
   return (monthRows || []).map((m) => {
@@ -1586,42 +2103,6 @@ function isMonthNegativeOperatingProfit_(m) {
   const op = resolveOperatingProfit_(m);
   return op.profit != null && op.profit < 0;
 }
-function buildCurrentMonthBreakEvenNote_(analysis) {
-  const be = analysis?.breakEvenAnalysis;
-  if (!be?.hasActualSales || be.isAboveBreakEven) return null;
-  const gap = be.gapFromBreakEven;
-  const gapAbs = gap != null && gap < 0 ? formatExTaxYen_(Math.abs(gap)) : null;
-  let text = "現時点では限界利益が固定費163万円に届いていませんが、月途中のため確定未達ではありません。";
-  if (gapAbs) text += ` 損益分岐まであと${gapAbs}です。`;
-  text += "残り営業日の売上・仕入れ・人件費・経費の見込みを踏まえて確認してください。";
-  return text;
-}
-function buildCurrentMonthOperatingProfitNote_(analysis) {
-  const resolved = resolveOperatingProfit_(analysis);
-  const profit = resolved.profit;
-  if (profit == null) return null;
-  if (profit >= 0) {
-    return "営業利益は現時点でプラスですが、当月は人件費・月末仕入れ・売掛の反映前のため暫定値です。";
-  }
-  return "営業利益は現時点でマイナスですが、当月は人件費・月末仕入れ・売掛の反映前のため暫定値です。残り営業日の予約数と目標を見て、売上と仕入れ・経費の見込みを確認してください。";
-}
-function buildOperatingProfitMonthlyComment_(ctx) {
-  const a = ctx.analysis;
-  const resolved = resolveOperatingProfit_(a);
-  const profit = resolved.profit;
-  const rate = resolved.rate;
-  if (profit == null || !(Number(a.totalSalesSum || 0) > 0)) return null;
-  if (ctx.phase?.currentMonth) {
-    return buildCurrentMonthOperatingProfitNote_(a);
-  }
-  if (profit <= 0) {
-    return "営業利益はマイナスで着地しました。ドリンク仕入れ・フード仕入れ・人件費・経費の内訳を確認してください。";
-  }
-  if (rate != null && rate < 12) {
-    return `営業利益率 ${pct1(rate)} は低めです。売上だけでなくドリンク仕入れ・フード仕入れ・人件費・経費を確認してください。`;
-  }
-  return "営業利益はプラスで着地しました。仕入れ・人件費・経費が月平均を大きく上回っていないか確認してください。";
-}
 function resolveProgressTier_(rate) {
   if (rate == null || !Number.isFinite(Number(rate))) return "unknown";
   if (rate >= 100) return "achieved";
@@ -1633,7 +2114,8 @@ function buildAdviceContext_(analysis, taxMode, targetMonth, currentBusinessDate
   const phase = resolveMonthPhase_(targetMonth, currentBusinessDate);
   const tier = resolveProgressTier_(a.monthlyProgressRate);
   const comparison = buildComparisonContext_(a, yearlyMonthData, targetMonth, currentBusinessDate);
-  return { analysis: a, taxMode, phase, tier, comparison };
+  const monthLabel = monthLabelFromTarget_(targetMonth);
+  return { analysis: a, taxMode, phase, tier, comparison, targetMonth, monthLabel };
 }
 function shiftTargetMonth_(targetMonth, deltaMonths) {
   const m = normalizeMonth(targetMonth);
@@ -1708,383 +2190,23 @@ function dominantUnderTargetCategory_(causeAnalysis) {
   const shouldShow = topCount >= 2 || topCount >= Math.ceil(rows.length / 2);
   return shouldShow || rows.length <= 2 ? topCat : null;
 }
-function buildMonthlyConclusionComment_(ctx) {
-  const { analysis: a, taxMode, phase, tier } = ctx;
-  const rate = a.monthlyProgressRate;
-  const remaining = Math.max(0, Number(a.fullMonthTargetSalesSum || 0) - Number(a.totalSalesSum || 0));
-  const yoyRate = a.priorYearMonth?.prevMonthRate;
-  const yoyTail =
-    yoyRate != null && yoyRate >= 110
-      ? "前年同月比も好調で、売上基調は強めです。"
-      : yoyRate != null && yoyRate >= 90
-        ? "前年同月比はおおむね維持できています。"
-        : yoyRate != null
-          ? "前年同月比では弱さが見えます。"
-          : "";
-
-  if (tier === "achieved") {
-    const driverHint =
-      a.customerUnitPrice != null &&
-      a.normalCustomerUnitPrice != null &&
-      Number(a.customerUnitPrice) > Number(a.normalCustomerUnitPrice) * 1.03
-        ? "客単価・飲食売上の寄与が相対的に大きい可能性があります。"
-        : "集客人数・客単価・飲食売上のどれが効いたかを切り分ける必要があります。";
-    if (phase.currentMonth) {
-      return `月間目標は達成済みです。${yoyTail}${driverHint} 成功要因は「売上TOP5」と「飲食売上TOP10」で、集客数と客単価が高い日を比較してください。`;
-    }
-    return `月間目標は達成済みで着地しました。${yoyTail}${driverHint} 再現のため「売上TOP5」と「飲食売上TOP10」で成功パターンを確認してください。`;
-  }
-
-  if (phase.currentMonth) {
-    const actualRate = a.actualAchievementRate;
-    const futureDayCount = Number(a.futureDayCount || 0);
-    const futureNote = futureDayCount > 0 ? `残り予定${futureDayCount}件で` : "残り営業日で";
-    const progressText = rate != null ? `月間進捗率は${pct1(rate)}` : "この月は進行中";
-    const actualText = actualRate != null ? `実績日達成率は${pct1(actualRate)}` : null;
-
-    if (actualRate != null && actualRate >= 100) {
-      return `${progressText}ですが、${actualText}で、営業済みの日は目標を上回っています。${yoyTail}月途中のため確定未達ではありません。${futureNote}月間目標と損益分岐までの差額を確認してください。`;
-    }
-    if (actualRate != null && actualRate < 100) {
-      return `${progressText}で、${actualText}と、営業済みの日も目標ペースを下回っています。${yoyTail}${futureNote}挽回するには、集客不足日か飲食単価不足日のどちらを埋めるかを絞ってください。`;
-    }
-    return `${progressText}です。${yoyTail}月途中のため、月間進捗率のみ参考にしてください。${futureNote}月間目標までの見込みを確認してください。`;
-  }
-
-  if (tier === "almost") {
-    if (phase.endedMonth) {
-      return `売上は目標に対して ${formatDisplayYen(remaining, taxMode)} 不足し、月間進捗率は ${pct(rate)} でした。${yoyTail} 大きく崩れてはいませんが、あと一歩届かなかった要因を未達日の分類と達成日の差から確認してください。`;
-    }
-  }
-
-  if (tier === "atRisk") {
-    if (phase.endedMonth) {
-      return `月間進捗率 ${pct(rate)} で、目標未達で着地しました。${yoyTail} 月全体の課題は未達日の傾向と達成日との差から特定できます。`;
-    }
-  }
-
-  return null;
-}
-function buildMonthlyComparisonComment_(ctx) {
-  const { analysis: a, phase, tier, comparison } = ctx;
-  const { priorMonth, achievedMonth, achievedDays, underTargetDays } = comparison || {};
-
-  if (priorMonth) {
-    const salesUp = Number(a.totalSalesSum || 0) > Number(priorMonth.totalSalesSum || 0);
-    const customerUp = Number(a.customerCountSum || 0) > Number(priorMonth.customerCountSum || 0);
-    const unitUp =
-      a.customerUnitPrice != null &&
-      priorMonth.customerUnitPrice != null &&
-      Number(a.customerUnitPrice) > Number(priorMonth.customerUnitPrice);
-    const unitFlat =
-      a.customerUnitPrice != null &&
-      priorMonth.customerUnitPrice != null &&
-      Math.abs(Number(a.customerUnitPrice) - Number(priorMonth.customerUnitPrice)) <=
-        Number(priorMonth.customerUnitPrice) * 0.03;
-
-    if (salesUp && unitUp && !customerUp) {
-      return "前月より売上は伸びていますが、集客人数の伸びより客単価の上昇が効いています。高単価イベントの構成を確認し、同じ客層・メニュー提案を次月にも展開してください。";
-    }
-    if (!salesUp && unitFlat) {
-      return "前月より売上は落ちていますが、客単価は維持されています。課題は単価より集客数なので、イベント告知・予約導線・出演者との集客共有を優先してください。";
-    }
-    if (salesUp && customerUp && unitUp) {
-      return "前月比で売上・集客・客単価が揃って伸びています。好調要因が大型イベント依存か通常営業の底上げかを分けて確認すると、再現しやすくなります。";
-    }
-    const yoyRate = a.priorYearMonth?.prevMonthRate;
-    if (yoyRate != null && yoyRate >= 100 && !salesUp) {
-      return "売上は前年同月を上回っていますが、前月比では鈍化しています。大型イベントによる一時的な上振れではなく、通常イベントの底上げができているか確認してください。";
-    }
-    if (salesUp) {
-      return "前月比では売上は改善しています。伸びの主因が集客人数か客単価か飲食比率かを分けると、次月の重点施策が明確になります。";
-    }
-    if (!salesUp) {
-      return "前月比では売上が弱くなっています。集客人数・客単価・飲食比率のどれが前月から落ちたかを確認してください。";
-    }
-  }
-
-  const yoyRate = a.priorYearMonth?.prevMonthRate;
-  if (yoyRate != null) {
-    if (tier === "achieved" && yoyRate >= 110) {
-      return "前年同月比も好調です。大型イベントによる一時的な上振れなのか、通常営業の底上げなのかを分けて見ると、再現しやすい成功パターンが見つかります。";
-    }
-    if (yoyRate >= 110) {
-      return `前年同月比 ${pct1(yoyRate)} と好調です。伸びの主因が集客増か客単価上昇かを分けて確認してください。`;
-    }
-    if (yoyRate >= 90) {
-      if (phase.endedMonth) {
-        return `前年同月比 ${pct1(yoyRate)} で、前年並みを維持しました。ただし大きな上振れではないため、次月は集客人数・客単価・飲食比率のどれを伸ばすかを明確にしてください。`;
-      }
-      return `前年同月比 ${pct1(yoyRate)} でほぼ横ばいです。大きな上振れを作るには、集客人数・客単価・飲食比率のどれかを伸ばす必要があります。`;
-    }
-    return phase.endedMonth
-      ? "前年同月を下回りました。前年より集客が落ちていたのか、客単価が落ちていたのかを確認し、次月は弱い方に施策を寄せてください。"
-      : "前年同月を下回っています。前年より集客が落ちているのか、客単価が落ちているのかを優先して確認してください。";
-  }
-
-  if (tier !== "achieved" && achievedMonth) {
-    const countGap =
-      a.avgDailyCustomerCount != null &&
-      achievedMonth.avgDailyCustomerCount != null &&
-      Number(a.avgDailyCustomerCount) < Number(achievedMonth.avgDailyCustomerCount) * 0.9;
-    const unitGap =
-      a.customerUnitPrice != null &&
-      achievedMonth.customerUnitPrice != null &&
-      Number(a.customerUnitPrice) < Number(achievedMonth.customerUnitPrice) * 0.95;
-    if (countGap && !unitGap) {
-      return `直近の達成月（${achievedMonth.monthLabel}）と比べると、客単価より集客人数の差が大きく出ています。目標達成には単価施策よりも、イベントごとの予約数と出演者側の集客共有を優先した方が効果的です。`;
-    }
-    if (!countGap && unitGap) {
-      return `直近の達成月（${achievedMonth.monthLabel}）と比べると、集客人数は大きく落ちていませんが、客単価と飲食比率が弱くなっています。来店後の追加注文導線、フード提案、ドリンク2杯目の声かけを強化してください。`;
-    }
-    if (countGap && unitGap) {
-      return `直近の達成月（${achievedMonth.monthLabel}）と比べると、集客人数・客単価の両面で差があります。達成月のイベント構成と告知設計を「売上TOP5」で確認してください。`;
-    }
-  }
-
-  if (achievedDays && underTargetDays) {
-    const countGap = underTargetDays.avgDailyCustomerCount < achievedDays.avgDailyCustomerCount * 0.9;
-    const unitGap =
-      underTargetDays.customerUnitPrice != null &&
-      achievedDays.customerUnitPrice != null &&
-      underTargetDays.customerUnitPrice < achievedDays.customerUnitPrice * 0.95;
-    if (countGap && !unitGap) {
-      return "月内で達成日と未達日を比べると、未達日は集客人数の差が目立ちます。客単価は大きく崩れていないため、イベント前の集客設計が課題です。";
-    }
-    if (!countGap && unitGap) {
-      return "月内で達成日と未達日を比べると、集客数は維持できている一方で客単価・飲食比率が弱い日が目立ちます。来店後の注文導線が課題です。";
-    }
-    if (countGap && unitGap) {
-      return "月内で達成日と未達日を比べると、集客人数・客単価の両面で差が出ています。達成日のイベント内容と未達日の差を「売上TOP5」で確認してください。";
-    }
-  }
-
-  return null;
-}
-function isCustomerFocusedUnderTargetCause_(topCat, weakSide) {
-  if (topCat === "集客不足型" || topCat === "集客・単価不足型") return true;
-  if (!topCat && weakSide === "customer") return true;
-  return false;
-}
-function hasRegularSeriesEventInCauseAnalysis_(causeAnalysis) {
-  const pattern = /DISCO|アニソン|Jam|MONDAY|定例/i;
-  return (causeAnalysis || []).some((r) => pattern.test(String(r?.eventName || "")));
-}
-function buildOrderUnitPriceAddonForCustomerAction_(orderPhase) {
-  if (orderPhase === "before_tablet") {
-    return " 集客対策に加え、卓上メニューやおすすめ表示でドリンク・フードが目に入る状態を作ってください。";
-  }
-  if (orderPhase === "tablet_test") {
-    return " 集客対策に加え、タブレット/QR注文（テスト運用）のおすすめ枠にドリンク2品・提供が早いフード2品を出してください。";
-  }
-  return " 集客対策に加え、注文画面のおすすめ枠にドリンク2品・提供が早いフード2品を出してください。";
-}
-function buildCustomerAcquisitionActionComment_(ctx, used) {
-  const { analysis: a, phase, tier } = ctx;
-  if (tier === "achieved" || phase.futureMonth) return null;
-
-  const topCat = dominantUnderTargetCategory_(a.underTargetCauseAnalysis);
-  const weakSide = pickProgressWeakSide_(a.underTargetCauseAnalysis);
-
-  if (topCat === "目標過大の可能性" || topCat === "単価不足型") return null;
-  if (!isCustomerFocusedUnderTargetCause_(topCat, weakSide)) return null;
-
-  const isDualCause = topCat === "集客・単価不足型";
-  const orderPhase = resolveOrderOperationPhase_(a.currentBusinessDate);
-  const hasRegularSeries = hasRegularSeriesEventInCauseAnalysis_(a.underTargetCauseAnalysis);
-  const futureDayCount = Number(a.futureDayCount || 0);
-  const diagnosis =
-    topCat === "集客・単価不足型"
-      ? "未達日は集客不足に加え、来店後の単価も月平均を下回る日が目立ちます。"
-      : "未達日の多くは集客不足型です。";
-
-  used.customer = true;
-  used.customerAction = true;
-  if (isDualCause) used.unit = true;
-
-  if (phase.currentMonth) {
-    const futureLead =
-      futureDayCount > 0
-        ? `本日以降の予定が${futureDayCount}件あるため、全件を同じ密度で告知するより、`
-        : "残り予定が少なくても、直近7日以内の開催日は";
-    const regularHint = hasRegularSeries
-      ? " DISCO/アニソン/Jam/MONDAYなど定例系は固定客へ次回日程をLINE・店頭で案内し、"
-      : "";
-    let text = `${diagnosis}${futureLead}開催1週間前時点で予約数が目標の7割未満のイベントを優先してください。${regularHint}今月中の集客対応：①残りイベントの予約数確認 ②7割未満の日を抽出 ③出演者へ「現在○名・目標○名・あと○名」と告知用短文を共有 ④店側は開催3〜5日前に出演者名・見どころ・残席感・初来店歓迎を入れて再投稿（予約URLは投稿上部へ）。`;
-    if (isDualCause) text += buildOrderUnitPriceAddonForCustomerAction_(orderPhase);
-    return text;
-  }
-
-  if (phase.endedMonth) {
-    let text = `${diagnosis}この月は集客不足で着地しました。次月はイベント登録時点で出演者ごとの見込み人数を入れ、開催1週間前に予約数が弱いイベントだけ再告知対象にしてください。出演者には「現在予約数・目標・不足人数」とそのまま使える告知文を渡し、店側投稿はスケジュール告知ではなく来店理由（誰が出るか・雰囲気・初めてでも入りやすいか）を書いてください。`;
-    if (hasRegularSeries) {
-      text += " 定例系イベントは前回参加者へ次回日程と「前回との違い」を伝えてください。";
-    }
-    if (isDualCause) text += buildOrderUnitPriceAddonForCustomerAction_(orderPhase);
-    return text;
-  }
-
-  return null;
-}
-function buildCauseOrSuccessComment_(ctx, used) {
-  const { analysis: a, tier } = ctx;
-  const topCat = dominantUnderTargetCategory_(a.underTargetCauseAnalysis);
-  const causeRows = (a.underTargetCauseAnalysis || []).filter((r) => r?.category && r.category !== "判定不可");
-  const targetHighCount = (causeRows || []).filter((r) => r.category === "目標過大の可能性").length;
-
-  if (tier === "achieved") {
-    if (!topCat || causeRows.length === 0) {
-      const topDay = a.salesRankingTop5?.[0];
-      if (topDay) {
-        return `売上TOP日（${(topDay.businessDate || "").slice(5).replace("-", "/")} ${topDay.eventName}）の集客・客単価・飲食構成が、今月の成功パターンの中心と考えられます。「売上TOP5」と「飲食売上TOP10」で再現要素を確認してください。`;
-      }
-      return null;
-    }
-    used.customer = used.customer || String(topCat).includes("集客");
-    used.unit = used.unit || String(topCat).includes("単価");
-    return `月間では達成していますが、一部未達日では${topCat}が見られます。全体達成を妨げた要因ではないため参考程度に、「未達日の要因分析」で傾向だけ確認してください。`;
-  }
-
-  if (!topCat && targetHighCount >= 2) {
-    used.targetHigh = true;
-    return "未達の中には目標過大の可能性がある日が複数あります。売上自体は月平均に近いため、目標設定がイベント規模に対して高すぎた可能性があります。詳細は「未達日の要因分析」で確認してください。";
-  }
-
-  if (!topCat) return null;
-
-  used.customer = used.customer || String(topCat).includes("集客");
-  used.unit = used.unit || String(topCat).includes("単価");
-
-  const detailed = {
-    集客不足型:
-      "未達日の多くは集客不足型です。客単価は月平均を大きく下崩れていないため、来店後よりイベント前の集客が課題です。",
-    単価不足型:
-      "未達日は単価不足型が目立ちます。集客数は大きく崩れていないため、課題は来店後の注文導線です。フード提案、追加ドリンク、セットメニューを優先してください。詳細は「未達日の要因分析」で、単価不足型の日を確認してください。",
-    "集客・単価不足型":
-      "未達日は集客不足に加え、来店後の単価も月平均を下回る日が目立ちます。予約確認・出演者共有と、来店後の注文導線の両方が必要です。",
-    目標過大の可能性:
-      "目標過大の可能性がある日が複数あります。売上自体は月平均に近いため、集客施策より過去同系イベントの平均売上を基準にした目標見直しを優先してください。",
-  };
-
-  if (topCat === "目標過大の可能性") {
-    used.targetHigh = true;
-  }
-
-  return detailed[topCat] || null;
-}
-function buildMonthlyActionComment_(ctx, used) {
-  const { analysis: a, phase, tier, comparison } = ctx;
-  const weakSide = pickProgressWeakSide_(a.underTargetCauseAnalysis);
-  const barRate = a.barTimeCustomerRate;
-  const grossRate = a.operatingGrossProfitRate;
-
-  if (barRate != null && barRate >= 10 && !used.bar) {
-    used.bar = true;
-    return "バータイム比率が高い日は、終演後の滞在導線がうまく機能している可能性があります。イベント内容・終演時間・出演者との交流の流れを「選択日の営業レポート」で確認し、他イベントにも横展開してください。";
-  }
-
-  if (barRate != null && barRate < 5 && !used.bar) {
-    used.bar = true;
-    if (tier === "achieved") {
-      return "売上は達成していますが、バータイム比率は低めです。現状でも売上は作れていますが、終演後に残る導線を作れれば追加売上の伸びしろになります。バータイム人数が多い日は「選択日の営業レポート」で確認してください。";
-    }
-    if (tier === "atRisk" || tier === "almost") {
-      const tail = phase.endedMonth
-        ? "次月は終演後の一杯、出演者との交流、軽いフード提案をイベント設計に組み込んでください。"
-        : "集客だけでなく、終演後に残る理由を作ることで追加売上を積める可能性があります。";
-      const statusText = phase.currentMonth
-        ? "売上ペースが低め"
-        : `売上${tier === "atRisk" ? "未達" : "未達に近い"}`;
-      return `${statusText}状態で、バータイム比率も低めです。${tail} 詳細は「選択日の営業レポート」でバータイム人数が多い日を探してください。`;
-    }
-  }
-
-  if (barRate != null && barRate >= 5 && barRate < 10 && !used.bar) {
-    used.bar = true;
-    return phase.endedMonth
-      ? "バータイム比率は中間的でした。残留率が高い日と低い日を「選択日の営業レポート」で比較し、次月の終演後導線を見直してください。"
-      : "バータイム比率は中間的です。残留率が高い日と低い日を「選択日の営業レポート」で比較し、終演後の導線を見直してください。";
-  }
-
-  if (grossRate != null && grossRate < 60) {
-    const next = phase.endedMonth ? "次月は" : "";
-    return `営業粗利率 ${pct1(grossRate)} は低めです。${next}売上があっても手元に残りにくい状態のため、仕入れ・経費・値付け・ロスの確認を優先してください。`;
-  }
-
-  if (tier === "achieved") {
-    return "好調要因の再現のため、「売上TOP5」「飲食売上TOP10」「選択日の営業レポート」をセットで見比べ、集客・客単価・飲食のどれが効いたかを整理してください。";
-  }
-
-  if (used.customer && !used.unit && !used.customerAction) {
-    return phase.endedMonth
-      ? "次月はイベント登録時点で出演者ごとの見込み人数を入れ、開催1週間前に予約数が弱いイベントだけ再告知対象にしてください。"
-      : "残り営業日は、開催1週間前時点で予約数が目標の7割未満のイベントを優先し、出演者へ不足人数と告知用短文を共有してください。";
-  }
-
-  if (used.unit && !used.customer) {
-    return phase.endedMonth
-      ? "次月はドリンク追加、フード提案、セットメニューなど、来店後の注文導線を見直してください。"
-      : "残り営業日はフード提案と追加注文導線を優先してください。詳細は「未達日の要因分析」を参照してください。";
-  }
-
-  if (weakSide === "customer" && !used.customerAction) {
-    return phase.endedMonth
-      ? "次月は開催1週間前に予約数を確認し、目標の7割未満の日だけ出演者へ再告知用短文を渡してください。"
-      : "残り営業日は、予約数が弱いイベントを優先し、出演者名・見どころ・残席感を入れた店側再投稿を開催3〜5日前に行ってください。";
-  }
-
-  if (weakSide === "unit") {
-    return phase.endedMonth
-      ? "次月は来店後の追加注文導線とフード提案を優先してください。"
-      : "残り営業日はドリンク追加とフード提案で客単価を上げることを優先してください。";
-  }
-
-  if (comparison?.achievedDays && comparison?.underTargetDays) {
-    return phase.endedMonth
-      ? "次月のイベント設計では、月内の達成日のイベント構成を「売上TOP5」で基準にしてください。"
-      : "残り営業日は月内の達成日と同じ集客・単価パターンを意識してください。「売上TOP5」で達成日を確認してください。";
-  }
-
-  return phase.endedMonth
-    ? "次月は未達日の分類結果を起点に、集客設計と来店後の注文導線のどちらを優先するか決めてください。"
-    : "残り営業日は未達日の分類結果を起点に、集客設計と来店後の注文導線のどちらを優先するか決めてください。";
-}
-function buildVenueUnitPriceMonthlyComment_(ctx) {
-  const a = ctx.analysis;
-  const venueSum = Number(a.venueFeeSum || 0);
-  const total = Number(a.totalSalesSum || 0);
-  if (venueSum <= 0 || total <= 0 || venueSum / total < 0.06) return null;
-
-  const customerUnit = a.customerUnitPrice;
-  const foodUnit = a.foodDrinkUnitPrice;
-
-  if (customerUnit != null && foodUnit != null && customerUnit > foodUnit * 1.05) {
-    return "客単価は高く見えますが、会場費の影響があります。飲食単価とドリンク・フード売上を確認してください。";
-  }
-  if (foodUnit != null) {
-    return "飲食単価が維持できているため、来店後の売上化は大きく崩れていません。";
-  }
-  return null;
-}
 function buildMonthlyImprovementComments_(analysis, taxMode, targetMonth, currentBusinessDate, yearlyMonthData) {
   const ctx = buildAdviceContext_(analysis, taxMode, targetMonth, currentBusinessDate, yearlyMonthData);
   if (ctx.phase.futureMonth) {
     return ["この月はまだ実績が少ないため、月次分析コメントは実績反映後に表示します。"];
   }
+  if (!(Number(ctx.analysis?.totalSalesSum || 0) > 0) && Number(ctx.analysis?.actualDayCount || 0) === 0) {
+    return ["この月はまだ実績が少ないため、月次分析コメントは実績反映後に表示します。"];
+  }
 
-  const used = { customer: false, unit: false, bar: false, targetHigh: false, customerAction: false };
-  const conclusion = buildMonthlyConclusionComment_(ctx);
-  const comparison = buildMonthlyComparisonComment_(ctx);
-  const causeOrSuccess = buildCauseOrSuccessComment_(ctx, used);
-  const customerAction = buildCustomerAcquisitionActionComment_(ctx, used);
-  const action = customerAction || buildMonthlyActionComment_(ctx, used);
-  const breakEvenComment = ctx.phase.currentMonth
-    ? buildCurrentMonthBreakEvenNote_(analysis) || buildBreakEvenMonthlyComment_(ctx)
-    : buildBreakEvenMonthlyComment_(ctx);
-  const operatingProfitComment = buildOperatingProfitMonthlyComment_(ctx);
-  const venueUnitComment = buildVenueUnitPriceMonthlyComment_(ctx);
-
-  return [conclusion, breakEvenComment, operatingProfitComment, venueUnitComment, comparison, causeOrSuccess, action].filter(Boolean).slice(0, 4);
+  const nextActionTitle = ctx.phase.currentMonth ? "着地管理の打ち手" : "次月への打ち手";
+  return [
+    monthlyCommentSection_("総合評価", buildMonthlyOverallComment_(ctx)),
+    monthlyCommentSection_("売上評価", buildMonthlySalesComment_(ctx)),
+    monthlyCommentSection_("利益評価", buildMonthlyProfitComment_(ctx)),
+    monthlyCommentSection_("経営上の論点", buildMonthlyManagementIssueComment_(ctx)),
+    monthlyCommentSection_(nextActionTitle, buildMonthlyNextActionComment_(ctx)),
+  ].filter(Boolean);
 }
 function classifyUnderTargetDay_(ctx) {
   const customerCount = ctx.customerCount != null ? Number(ctx.customerCount) : null;
@@ -3842,20 +3964,84 @@ function aggregateMonthFromRecords_(records, targetMonth, currentBusinessDate, m
     reviewOperatingProfitRate: reviewOperating.rate,
   };
 }
-async function fetchSalesMonth_(targetMonth) {
-  const res = await fetch(buildSalesFetchUrl_(targetMonth), { cache: "no-store" });
-  const text = await res.text();
-  let json;
+const SALES_MONTH_FETCH_CONCURRENCY_ = 3;
+const salesMonthCache_ = new Map();
+const salesMonthInflight_ = new Map();
+
+function toSalesMonthBundle_(month, json) {
+  return {
+    month,
+    ok: true,
+    records: json?.records || [],
+    monthlySummary: json?.monthlySummary || null,
+    error: null,
+  };
+}
+
+async function mapPool_(items, limit, mapper) {
+  const list = Array.isArray(items) ? items : [];
+  const results = new Array(list.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < list.length) {
+      const idx = next;
+      next += 1;
+      results[idx] = await mapper(list[idx], idx);
+    }
+  };
+  const n = Math.max(1, Math.min(limit || 1, list.length || 1));
+  await Promise.all(Array.from({ length: list.length ? n : 0 }, () => worker()));
+  return results;
+}
+
+async function fetchSalesMonth_(targetMonth, options = {}) {
+  const month = normalizeMonth(targetMonth);
+  const force = !!options.force;
+  if (!month) throw new Error("対象月が不正です");
+  if (!force) {
+    const cached = salesMonthCache_.get(month);
+    if (cached) return cached;
+    const inflight = salesMonthInflight_.get(month);
+    if (inflight) return inflight;
+  }
+  const req = (async () => {
+    const res = await fetch(buildSalesFetchUrl_(month), { cache: "no-store" });
+    const text = await res.text();
+    let json;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      throw new Error(`売上APIの応答がJSONではありません（HTTP ${res.status}）`);
+    }
+    if (!res.ok) {
+      throw new Error(json?.error || `HTTP ${res.status}`);
+    }
+    if (!json || !Array.isArray(json.records)) throw new Error("JSON形式が不正です");
+    salesMonthCache_.set(month, json);
+    return json;
+  })();
+  salesMonthInflight_.set(month, req);
   try {
-    json = JSON.parse(text);
-  } catch {
-    throw new Error(`売上APIの応答がJSONではありません（HTTP ${res.status}）`);
+    return await req;
+  } finally {
+    if (salesMonthInflight_.get(month) === req) salesMonthInflight_.delete(month);
   }
-  if (!res.ok) {
-    throw new Error(json?.error || `HTTP ${res.status}`);
-  }
-  if (!json || !Array.isArray(json.records)) throw new Error("JSON形式が不正です");
-  return json;
+}
+
+async function fetchSalesMonthBundle_(monthList, options = {}) {
+  return mapPool_(monthList, SALES_MONTH_FETCH_CONCURRENCY_, async (month) => {
+    try {
+      const json = await fetchSalesMonth_(month, options);
+      return toSalesMonthBundle_(month, json);
+    } catch (e) {
+      return { month, ok: false, records: [], monthlySummary: null, error: e?.message || "取得失敗" };
+    }
+  });
+}
+
+function yearFromMonth_(month, fallbackYear) {
+  const y = Number(String(month || "").slice(0, 4));
+  return Number.isFinite(y) && y > 0 ? y : fallbackYear;
 }
 function YearlyMonthBarChart({ title, rows, valueKey, barTone, formatTop, taxMode, onMonthClick, tall = false, narrow = false }) {
   const chartRows = rows.length ? rows : [];
@@ -5306,6 +5492,14 @@ const YEARLY_PURCHASE_COL = {
   rate: 90,
   rateWide: 100,
 };
+const YEARLY_LABOR_COL = {
+  month: 48,
+  yen: 100,
+  rate: 84,
+  diff: 72,
+  level: 88,
+  comment: 280,
+};
 const YEARLY_YOY_COL = {
   month: 44,
   yen: 108,
@@ -5363,6 +5557,239 @@ function yearlyTablePctCell_(m, rate) {
 function YearlyTableNumberCell({ m, value, kind = "yen", width, taxMode }) {
   const cell = kind === "pct" ? yearlyTablePctCell_(m, value) : yearlyTableYenCell_(m, value, taxMode);
   return <td style={yearlyNumTdStyle_(width, cell.muted)}>{cell.text}</td>;
+}
+function yearlyTableLaborCell_(m, value, taxMode) {
+  if (m.status === "取得失敗") return { text: "—", muted: true };
+  if (m.isLaborPending) {
+    const labor = Number(m.laborCostSum || 0);
+    if (labor > 0) return { text: `${formatDisplayYen(labor, taxMode)}（参考）`, muted: true };
+    return { text: "翌月反映", muted: true };
+  }
+  if (!m.isLaborReflected && m.status === "集計済み") return { text: "—", muted: true };
+  return yearlyTableYenCell_(m, value, taxMode);
+}
+function YearlyTableLaborCell({ m, value, width, taxMode }) {
+  const cell = yearlyTableLaborCell_(m, value, taxMode);
+  return <td style={yearlyNumTdStyle_(width, cell.muted)}>{cell.text}</td>;
+}
+function YearlyLaborCostLevelBadge({ level, compact = false }) {
+  if (!level?.label || level.key === "unknown" || level.key === "noData") {
+    return <span style={{ color: "rgba(240,232,208,0.5)" }}>—</span>;
+  }
+  const color = laborCostLevelColor_(level.key);
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        fontSize: compact ? ".62rem" : ".68rem",
+        fontWeight: 600,
+        lineHeight: 1.25,
+        padding: compact ? ".04rem .26rem" : ".05rem .32rem",
+        borderRadius: 999,
+        border: `1px solid ${color}55`,
+        background: `${color}22`,
+        color,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {level.label}
+    </span>
+  );
+}
+function YearlyLaborCostTrendCards({ rows, narrow, dy, pct1, taxMode, onMonthClick }) {
+  return (
+    <div style={{ display: "grid", gap: ".55rem" }}>
+      {rows.map((row) => (
+        <div
+          key={`labor_card_${row.targetMonth}`}
+          role="button"
+          tabIndex={0}
+          onClick={() => onMonthClick(row.targetMonth)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onMonthClick(row.targetMonth);
+            }
+          }}
+          style={{
+            border: "1px solid rgba(201,168,76,0.18)",
+            borderRadius: 8,
+            padding: ".65rem .72rem",
+            background: "rgba(0,0,0,0.18)",
+            cursor: "pointer",
+            opacity: yearlyTableRowOpacity_(row),
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: ".5rem", marginBottom: ".35rem" }}>
+            <strong style={{ color: "#e8dcc0", fontSize: "1rem" }}>{row.monthLabel}</strong>
+            <YearlyLaborCostLevelBadge level={row.laborCostLevel} />
+          </div>
+          <div style={{ display: "grid", gap: ".18rem", fontSize: narrow ? ".78rem" : ".82rem", color: "rgba(240,232,208,0.82)" }}>
+            <div>売上 <strong>{row.status === "集計済み" ? dy(row.totalSalesSum) : "—"}</strong></div>
+            <div>
+              人件費{" "}
+              <strong>
+                {row.isLaborPending
+                  ? Number(row.laborCostSum || 0) > 0
+                    ? `${dy(row.laborCostSum)}（参考）`
+                    : "翌月反映"
+                  : row.status === "集計済み"
+                    ? dy(row.laborCostSum)
+                    : "—"}
+              </strong>
+            </div>
+            <div>
+              人件費率 <strong>{row.laborRateDisplay || "—"}</strong>
+              {row.laborCostRatePtDiff != null ? (
+                <span style={{ marginLeft: ".35rem", color: row.laborCostRatePtDiff <= 0 ? "#9ec9a8" : "#dca06a" }}>
+                  前月差 {formatPtDiffSimple_(row.laborCostRatePtDiff)}
+                </span>
+              ) : null}
+            </div>
+          </div>
+          {row.laborComment ? (
+            <div style={{ marginTop: ".42rem", fontSize: narrow ? ".74rem" : ".78rem", lineHeight: 1.55, color: "rgba(240,232,208,0.68)" }}>
+              {row.laborComment}
+            </div>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+function formatPtDiffSimple_(value) {
+  if (value == null || !Number.isFinite(Number(value))) return "—";
+  const n = Number(value);
+  const sign = n > 0 ? "+" : n < 0 ? "" : "";
+  return `${sign}${n.toFixed(1)}pt`;
+}
+function YearlyLaborCostTrendTable({ rows, dy, pct1, taxMode, onMonthClick }) {
+  return (
+    <div style={YEARLY_TABLE_WRAP}>
+      <table style={{ ...YEARLY_TABLE_STYLE, minWidth: 980 }}>
+        <thead>
+          <tr>
+            <th style={yearlyThStyle_(YEARLY_LABOR_COL.month, "left")}>月</th>
+            <th style={yearlyThStyle_(YEARLY_LABOR_COL.yen)}>売上</th>
+            <th style={yearlyThStyle_(YEARLY_LABOR_COL.yen)}>人件費</th>
+            <th style={yearlyThStyle_(YEARLY_LABOR_COL.rate)}>人件費率</th>
+            <th style={yearlyThStyle_(YEARLY_LABOR_COL.diff)}>前月差</th>
+            <th style={yearlyThStyle_(YEARLY_LABOR_COL.level, "center")}>判定</th>
+            <th style={yearlyThStyle_(YEARLY_LABOR_COL.comment, "left")}>コメント</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr
+              key={`labor_tbl_${row.targetMonth}`}
+              style={{ ...YEARLY_TABLE_ROW, opacity: yearlyTableRowOpacity_(row), cursor: "pointer" }}
+              onClick={() => onMonthClick(row.targetMonth)}
+              title="クリックで月次分析へ"
+              {...yearlyRowHoverHandlers_()}
+            >
+              <td style={yearlyMonthTdStyle_(YEARLY_LABOR_COL.month)}>{row.monthLabel}</td>
+              <YearlyTableNumberCell m={row} value={row.totalSalesSum} width={YEARLY_LABOR_COL.yen} taxMode={taxMode} />
+              <YearlyTableLaborCell m={row} value={row.laborCostSum} width={YEARLY_LABOR_COL.yen} taxMode={taxMode} />
+              <td style={yearlyNumTdStyle_(YEARLY_LABOR_COL.rate, row.isLaborPending || !row.isLaborReflected)}>
+                {row.laborRateDisplay || "—"}
+              </td>
+              <td
+                style={{
+                  ...yearlyNumTdStyle_(YEARLY_LABOR_COL.diff, row.laborCostRatePtDiff == null),
+                  color: row.laborCostRatePtDiff != null ? (row.laborCostRatePtDiff <= 0 ? "#9ec9a8" : "#dca06a") : undefined,
+                }}
+              >
+                {row.laborCostRatePtDiff != null ? formatPtDiffSimple_(row.laborCostRatePtDiff) : "—"}
+              </td>
+              <td style={{ ...yearlyNumTdStyle_(YEARLY_LABOR_COL.level, false), textAlign: "center" }}>
+                <YearlyLaborCostLevelBadge level={row.laborCostLevel} compact />
+              </td>
+              <td
+                style={{
+                  ...yearlyMonthTdStyle_(YEARLY_LABOR_COL.comment),
+                  fontSize: ".78rem",
+                  lineHeight: 1.5,
+                  color: "rgba(240,232,208,0.72)",
+                  fontWeight: 400,
+                  whiteSpace: "normal",
+                }}
+              >
+                {row.laborComment || "—"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+function YearlyLaborCostTrendSection({ laborAnalysis, narrow, dy, pct1, taxMode, onMonthClick }) {
+  const la = laborAnalysis || {};
+  return (
+    <>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: narrow ? "1fr" : "repeat(3, minmax(0, 1fr))",
+          gap: ".45rem",
+          marginBottom: ".55rem",
+        }}
+      >
+        <YearlySummaryMetricLine
+          narrow={narrow}
+          label="平均人件費率"
+          value={la.avgRate != null ? pct1(la.avgRate) : "—"}
+          emphasize
+        />
+        <YearlySummaryMetricLine
+          narrow={narrow}
+          label="最も重い月"
+          value={
+            la.heaviestMonth
+              ? `${la.heaviestMonth.monthLabel} ${pct1(la.heaviestMonth.laborCostRate)}`
+              : "—"
+          }
+          strong
+        />
+        <YearlySummaryMetricLine
+          narrow={narrow}
+          label="改善が見られた月"
+          value={
+            la.improvingMonth
+              ? `${la.improvingMonth.monthLabel}（前月比 ${formatPtDiffSimple_(la.improvingMonth.laborCostRatePtDiff)}）`
+              : "—"
+          }
+        />
+      </div>
+      {la.yearlyComment ? (
+        <div
+          style={{
+            fontSize: narrow ? ".78rem" : ".84rem",
+            lineHeight: 1.62,
+            color: "rgba(240,232,208,0.82)",
+            marginBottom: ".55rem",
+            padding: ".55rem .65rem",
+            borderRadius: 8,
+            border: "1px solid rgba(201,168,76,0.16)",
+            background: "rgba(0,0,0,0.14)",
+          }}
+        >
+          {la.yearlyComment}
+        </div>
+      ) : null}
+      <div style={{ fontSize: narrow ? "0.76rem" : "0.8rem", color: "rgba(240,232,208,0.55)", marginBottom: ".4rem" }}>
+        判定目安：25%未満＝良好 / 25〜30%＝標準〜注意 / 30%以上＝重い / 直近月・当月＝翌月反映（未確定）
+      </div>
+      {narrow ? (
+        <YearlyLaborCostTrendCards rows={la.rows || []} narrow={narrow} dy={dy} pct1={pct1} taxMode={taxMode} onMonthClick={onMonthClick} />
+      ) : (
+        <YearlyLaborCostTrendTable rows={la.rows || []} dy={dy} pct1={pct1} taxMode={taxMode} onMonthClick={onMonthClick} />
+      )}
+      <div style={{ ...analysisNote({}, narrow), marginTop: ".38rem" }}>
+        ※人件費は翌月反映のため、直近月の人件費率は確定評価に使用しません。反映済み月ベースで人件費率の推移を分析してください。
+      </div>
+    </>
+  );
 }
 const PURCHASE_BREAKDOWN_NOTE =
   "※ドリンク仕入れ・フード仕入れは仕入れ合計の内訳です。月合計欄の値を優先しています。";
@@ -5909,6 +6336,51 @@ function YearlySummarySixBlocks({ yearlyAnalysis, narrow, dy, pct, pct1, signedD
           <YearlySummaryMetricLine narrow={narrow} label="年間フード売上" value={dy(a.yearlyFood)} />
           <div style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45 }}>{FOOD_DRINK_UNIT_PRICE_NOTE}</div>
         </YearlySummaryBlock>
+        {a.laborCostAnalysis?.validMonthCount > 0 || (a.laborCostAnalysis?.pendingMonthCount ?? 0) > 0 ? (
+          <YearlySummaryBlock title="G. 人件費" narrow={narrow}>
+            <YearlySummaryMetricLine
+              narrow={narrow}
+              label="平均人件費率"
+              value={a.laborCostAnalysis.avgRate != null ? pct1(a.laborCostAnalysis.avgRate) : "—"}
+              emphasize
+            />
+            <YearlySummaryMetricLine
+              narrow={narrow}
+              label="最も重い月"
+              value={
+                a.laborCostAnalysis.heaviestMonth
+                  ? `${a.laborCostAnalysis.heaviestMonth.monthLabel} ${pct1(a.laborCostAnalysis.heaviestMonth.laborCostRate)}`
+                  : "—"
+              }
+              strong
+              valueStyle={{ color: a.laborCostAnalysis.heaviestMonth ? "#dca06a" : undefined }}
+            />
+            <YearlySummaryMetricLine
+              narrow={narrow}
+              label="改善が見られた月"
+              value={
+                a.laborCostAnalysis.improvingMonth
+                  ? `${a.laborCostAnalysis.improvingMonth.monthLabel}（前月比 ${formatPtDiffSimple_(a.laborCostAnalysis.improvingMonth.laborCostRatePtDiff)}）`
+                  : "—"
+              }
+              valueStyle={{
+                color:
+                  a.laborCostAnalysis.improvingMonth?.laborCostRatePtDiff != null &&
+                  a.laborCostAnalysis.improvingMonth.laborCostRatePtDiff < 0
+                    ? "#9ec9a8"
+                    : undefined,
+              }}
+            />
+            {a.laborCostAnalysis.yearlyComment ? (
+              <div style={{ fontSize: narrow ? "0.72rem" : "0.76rem", color: "rgba(240,232,208,0.72)", lineHeight: 1.58, marginTop: ".12rem" }}>
+                {a.laborCostAnalysis.yearlyComment}
+              </div>
+            ) : null}
+            <div style={{ fontSize: narrow ? "0.68rem" : "0.72rem", color: "rgba(240,232,208,0.5)", lineHeight: 1.45, marginTop: ".06rem" }}>
+              ※25%未満＝良好 / 25〜30%＝標準〜注意 / 30%以上＝重い。人件費は翌月反映のため、直近月は未確定です。
+            </div>
+          </YearlySummaryBlock>
+        ) : null}
       </div>
     </div>
   );
@@ -6785,32 +7257,35 @@ export default function SalesModule({ events = [], navigateBack }) {
   const [selectedTrendRowKey, setSelectedTrendRowKey] = useState("");
   const dayReportRef = useRef(null);
   const pendingReportReferenceRef = useRef(null);
+  const loadedYearRef = useRef(null);
+  const loadedPriorYearRef = useRef(null);
   const [updatedAt, setUpdatedAt] = useState("");
   const currentBusinessDate = getCurrentBusinessDateForSales();
   const vp = useSalesViewport();
 
-  const loadSales = async (monthArg) => {
+  const applyMonthJson_ = (month, json) => {
+    setRecords(json.records);
+    setMonthlySummary(json?.monthlySummary || null);
+    setUpdatedAt(json?.meta?.generatedAt || "");
+    setYearlyMonthData((prev) => {
+      if (!Array.isArray(prev) || prev.length === 0) return prev;
+      const idx = prev.findIndex((item) => item?.month === month);
+      if (idx < 0) return prev;
+      const next = prev.slice();
+      next[idx] = toSalesMonthBundle_(month, json);
+      return next;
+    });
+  };
+
+  const loadSales = async (monthArg, options = {}) => {
     const month = normalizeMonth(monthArg || targetMonth);
+    const force = !!options.force;
     setLoading(true);
     setError("");
     try {
-      const url = buildSalesFetchUrl_(month);
-      const res = await fetch(url, { cache: "no-store" });
-      const text = await res.text();
-      let json;
-      try {
-        json = JSON.parse(text);
-      } catch {
-        throw new Error(`売上APIの応答がJSONではありません（HTTP ${res.status}）`);
-      }
-      if (!res.ok) {
-        const msg = json?.error || `HTTP ${res.status}`;
-        throw new Error(`売上API取得失敗: ${msg}`);
-      }
-      if (!json || !Array.isArray(json.records)) throw new Error("JSON形式が不正です");
-      setRecords(json.records);
-      setMonthlySummary(json?.monthlySummary || null);
-      setUpdatedAt(json?.meta?.generatedAt || "");
+      if (force) salesMonthCache_.delete(month);
+      const json = await fetchSalesMonth_(month, { force });
+      applyMonthJson_(month, json);
     } catch (e) {
       setRecords([]);
       setMonthlySummary(null);
@@ -6847,52 +7322,45 @@ export default function SalesModule({ events = [], navigateBack }) {
       }
     } catch {}
   }, [adminTab]);
+  const salesBundleYear = yearFromMonth_(targetMonth, targetYear);
   useEffect(() => {
     if (roleMode !== "admin") return undefined;
     if (adminTab !== "yearly" && adminTab !== "analysis") return undefined;
     let cancelled = false;
-    const year =
-      adminTab === "yearly"
-        ? targetYear
-        : Number(String(targetMonth).slice(0, 4)) || targetYear;
-    const months = buildYearMonths_(year);
+    const year = adminTab === "yearly" ? targetYear : salesBundleYear;
     const priorYear = year - 1;
-    const priorMonths = buildYearMonths_(priorYear);
-    setYearlyLoading(true);
-    setYearlyMonthData([]);
-    setPriorYearMonthData([]);
-    const fetchMonthBundle = (monthList) =>
-      Promise.all(
-        monthList.map(async (month) => {
-          try {
-            const json = await fetchSalesMonth_(month);
-            return {
-              month,
-              ok: true,
-              records: json.records || [],
-              monthlySummary: json?.monthlySummary || null,
-              error: null,
-            };
-          } catch (e) {
-            return { month, ok: false, records: [], monthlySummary: null, error: e?.message || "取得失敗" };
-          }
-        })
-      );
+    const needYear = loadedYearRef.current !== year;
+    const needPrior = adminTab === "yearly" && loadedPriorYearRef.current !== priorYear;
+    if (!needYear && !needPrior) return undefined;
+    if (needYear) {
+      setYearlyLoading(true);
+      if (loadedYearRef.current != null && loadedYearRef.current !== year) {
+        setYearlyMonthData([]);
+      }
+    }
     (async () => {
-      const [results, priorResults] = await Promise.all([
-        fetchMonthBundle(months),
-        adminTab === "yearly" ? fetchMonthBundle(priorMonths) : Promise.resolve([]),
-      ]);
-      if (!cancelled) {
-        setYearlyMonthData(results);
-        setPriorYearMonthData(priorResults);
-        setYearlyLoading(false);
+      try {
+        const [results, priorResults] = await Promise.all([
+          needYear ? fetchSalesMonthBundle_(buildYearMonths_(year)) : Promise.resolve(null),
+          needPrior ? fetchSalesMonthBundle_(buildYearMonths_(priorYear)) : Promise.resolve(null),
+        ]);
+        if (cancelled) return;
+        if (results) {
+          setYearlyMonthData(results);
+          loadedYearRef.current = year;
+        }
+        if (priorResults) {
+          setPriorYearMonthData(priorResults);
+          loadedPriorYearRef.current = priorYear;
+        }
+      } finally {
+        if (!cancelled) setYearlyLoading(false);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [roleMode, adminTab, targetYear, targetMonth]);
+  }, [roleMode, adminTab, targetYear, salesBundleYear]);
   useEffect(() => {
     try {
       localStorage.setItem(SALES_TARGET_MONTH_KEY, normalizeMonth(targetMonth));
@@ -7371,6 +7839,7 @@ export default function SalesModule({ events = [], navigateBack }) {
     );
   }, [yearlyMonthData, targetMonth]);
   const pastComparablePool = useMemo(() => {
+    if (roleMode !== "admin" || adminTab !== "analysis") return [];
     const pool = [];
     const seen = new Set();
     const pushComparable = (record, idx) => {
@@ -7395,7 +7864,7 @@ export default function SalesModule({ events = [], navigateBack }) {
       });
     }
     return pool;
-  }, [monthlyAnalysis.actualRows, yearlyMonthData, events, targetMonth]);
+  }, [roleMode, adminTab, monthlyAnalysis.actualRows, yearlyMonthData, events, targetMonth]);
   const selectedPastSimilarComparison = useMemo(() => {
     if (!selectedTrendRow) return null;
     const selectedRecord = (monthlyAnalysis.actualRows || []).find(
@@ -7466,6 +7935,7 @@ export default function SalesModule({ events = [], navigateBack }) {
     if (resolvedKey) selectTrendDayForReport_(resolvedKey);
   };
   const yearlyAnalysis = useMemo(() => {
+    if (adminTab !== "yearly") return null;
     if (!yearlyMonthData.length) return null;
     const monthRows = yearlyMonthData.map((item) => {
       if (!item.ok) {
@@ -7627,6 +8097,7 @@ export default function SalesModule({ events = [], navigateBack }) {
     const negativeOperatingCurrentMonths = currentMonths.filter(isMonthNegativeOperatingProfit_);
     const monthReviewRows = buildYearlyMonthReviewRows_(monthRows, monthlyYoYRows, currentBusinessDate);
     const chartMonthRows = enhanceYearlyMonthRowsForCharts_(monthRows);
+    const laborCostAnalysis = buildYearlyLaborCostAnalysis_(monthRows, currentBusinessDate);
     const profitTop3 = topN(
       aggregatedMonths.filter((m) => {
         const op = resolveOperatingProfit_(m);
@@ -7723,12 +8194,13 @@ export default function SalesModule({ events = [], navigateBack }) {
       hasCurrentAggregatedMonth: currentMonths.some((m) => m.status === "集計済み"),
       monthReviewRows,
       chartMonthRows,
+      laborCostAnalysis,
       profitTop3,
       foodDrinkUnitPriceTop3,
       customerCountTop3,
       operatingProfitRateTop3,
     };
-  }, [yearlyMonthData, priorYearMonthData, targetYear, currentBusinessDate]);
+  }, [adminTab, yearlyMonthData, priorYearMonthData, targetYear, currentBusinessDate]);
   const staffTodayRows = useMemo(
     () => rows.filter((r) => r.businessDate === currentBusinessDate),
     [rows, currentBusinessDate]
@@ -7750,9 +8222,11 @@ export default function SalesModule({ events = [], navigateBack }) {
   const compactDy = (v) => formatDisplayCompactYen(v, taxMode);
   const signedDy = (v) => formatSignedDisplayYen(v, taxMode);
   const monthlyImprovementComments = useMemo(
-    () =>
-      buildMonthlyImprovementComments_(monthlyAnalysis, taxMode, targetMonth, currentBusinessDate, yearlyMonthData),
-    [monthlyAnalysis, taxMode, targetMonth, currentBusinessDate, yearlyMonthData]
+    () => {
+      if (roleMode !== "admin" || adminTab !== "analysis") return [];
+      return buildMonthlyImprovementComments_(monthlyAnalysis, taxMode, targetMonth, currentBusinessDate, yearlyMonthData);
+    },
+    [roleMode, adminTab, monthlyAnalysis, taxMode, targetMonth, currentBusinessDate, yearlyMonthData]
   );
 
   const switchToStaffMode = () => {
@@ -7819,7 +8293,7 @@ export default function SalesModule({ events = [], navigateBack }) {
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
-          <button type="button" style={{ ...S.btn("sm"), ...touchBtnExtra(vp.narrow), ...(vp.narrow ? { flex: "1 1 auto" } : {}) }} onClick={() => loadSales(targetMonth)} disabled={loading}>{loading ? "読込中..." : "🔄 再読込"}</button>
+          <button type="button" style={{ ...S.btn("sm"), ...touchBtnExtra(vp.narrow), ...(vp.narrow ? { flex: "1 1 auto" } : {}) }} onClick={() => loadSales(targetMonth, { force: true })} disabled={loading}>{loading ? "読込中..." : "🔄 再読込"}</button>
           {navigateBack && <button type="button" style={{ ...S.btn("sm"), ...touchBtnExtra(vp.narrow), ...(vp.narrow ? { flex: "1 1 auto" } : {}) }} onClick={navigateBack}>← 戻る</button>}
         </div>
       </div>
@@ -8625,6 +9099,18 @@ export default function SalesModule({ events = [], navigateBack }) {
                 <div style={{ ...analysisNote({}, vp.narrow), marginTop: ".32rem" }}>
                   ※総仕入率はバンド飲食代を含む飲食売上で計算しています。ドリンク/フード原価率は、バンド飲食代の内訳がある月のみ個別反映します。
                 </div>
+              </div>
+
+              <div style={analysisCardWrap("costProfit", vp.narrow)}>
+                <div style={analysisSecTitle("costProfit", ".5rem", vp.narrow)}>人件費推移</div>
+                <YearlyLaborCostTrendSection
+                  laborAnalysis={yearlyAnalysis.laborCostAnalysis}
+                  narrow={vp.narrow}
+                  dy={dy}
+                  pct1={pct1}
+                  taxMode={taxMode}
+                  onMonthClick={navigateToMonthAnalysis}
+                />
               </div>
 
               <div style={analysisCardWrap("composition", vp.narrow)}>
