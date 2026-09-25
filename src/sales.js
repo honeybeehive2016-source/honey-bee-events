@@ -683,7 +683,7 @@ function SalesCompositionBreakdown({ items, narrow }) {
   );
 }
 function yearlyTableRowOpacity_(m) {
-  if (m.status === "取得失敗") return 0.55;
+  if (isYearlyMonthFetchGap_(m.status)) return 0.55;
   if (m.status === "未入力" || m.status === "予定あり") return 0.6;
   return 1;
 }
@@ -1312,7 +1312,7 @@ function buildMonthlyYoYRows_(monthRows) {
   });
 }
 function buildYearlyTargetMetrics_(monthRows) {
-  const okMonths = (monthRows || []).filter((m) => m.status !== "取得失敗");
+  const okMonths = (monthRows || []).filter((m) => !isYearlyMonthFetchGap_(m.status));
   const monthsWithTarget = okMonths.filter((m) => Number(m.targetSalesSum || 0) > 0);
   const enteredTargetSum = monthsWithTarget.reduce((s, m) => s + Number(m.targetSalesSum || 0), 0);
   const enteredTargetMonthCount = monthsWithTarget.length;
@@ -3965,33 +3965,160 @@ function aggregateMonthFromRecords_(records, targetMonth, currentBusinessDate, m
   };
 }
 const SALES_MONTH_FETCH_CONCURRENCY_ = 3;
+const SALES_MONTH_FETCH_RETRIES_ = 2;
+const SALES_MONTH_FETCH_TIMEOUT_MS_ = 30000;
 const salesMonthCache_ = new Map();
 const salesMonthInflight_ = new Map();
+let salesFetchActive_ = 0;
+const salesFetchWaiters_ = [];
 
 function toSalesMonthBundle_(month, json) {
   return {
     month,
     ok: true,
+    pending: false,
     records: json?.records || [],
     monthlySummary: json?.monthlySummary || null,
     error: null,
   };
 }
 
+function failedSalesMonthBundle_(month, error) {
+  return {
+    month,
+    ok: false,
+    pending: false,
+    records: [],
+    monthlySummary: null,
+    error: error || "取得失敗",
+  };
+}
+
+function pendingSalesMonthBundle_(month) {
+  return {
+    month,
+    ok: false,
+    pending: true,
+    records: [],
+    monthlySummary: null,
+    error: null,
+  };
+}
+
+function isYearlyMonthFetchGap_(status) {
+  return status === "取得失敗" || status === "再取得中";
+}
+
+function isUsableSalesMonthJson_(month, json) {
+  if (!json || !Array.isArray(json.records)) return false;
+  const metaMonth = json?.meta?.targetMonth;
+  if (metaMonth && String(metaMonth) !== month) return false;
+  const mismatched = json.records.some((r) => {
+    const d = String(r?.businessDate || "");
+    return d && !d.startsWith(month);
+  });
+  if (mismatched) return false;
+  return true;
+}
+
+function mergeYearMonthBundles_(prev, incoming, year) {
+  const months = buildYearMonths_(year);
+  const byMonth = new Map();
+  for (const item of prev || []) {
+    if (item?.month) byMonth.set(item.month, item);
+  }
+  for (const item of incoming || []) {
+    if (!item?.month) continue;
+    const existing = byMonth.get(item.month);
+    if (item.ok) {
+      byMonth.set(item.month, item);
+    } else if (existing?.ok) {
+      // keep successful month
+    } else {
+      byMonth.set(item.month, item);
+    }
+  }
+  return months.map((month) => byMonth.get(month) || pendingSalesMonthBundle_(month));
+}
+
+function cachedYearMonthBundles_(year) {
+  return buildYearMonths_(year).map((month) => {
+    const cached = salesMonthCache_.get(month);
+    if (isUsableSalesMonthJson_(month, cached)) return toSalesMonthBundle_(month, cached);
+    return pendingSalesMonthBundle_(month);
+  });
+}
+
+function missingSalesMonths_(year) {
+  return buildYearMonths_(year).filter((month) => !isUsableSalesMonthJson_(month, salesMonthCache_.get(month)));
+}
+
+async function withSalesFetchSlot_(fn) {
+  if (salesFetchActive_ >= SALES_MONTH_FETCH_CONCURRENCY_) {
+    await new Promise((resolve) => {
+      salesFetchWaiters_.push(resolve);
+    });
+  }
+  salesFetchActive_ += 1;
+  try {
+    return await fn();
+  } finally {
+    salesFetchActive_ -= 1;
+    const next = salesFetchWaiters_.shift();
+    if (next) next();
+  }
+}
+
 async function mapPool_(items, limit, mapper) {
   const list = Array.isArray(items) ? items : [];
-  const results = new Array(list.length);
+  const results = list.map(() => null);
   let next = 0;
   const worker = async () => {
     while (next < list.length) {
       const idx = next;
       next += 1;
-      results[idx] = await mapper(list[idx], idx);
+      try {
+        results[idx] = await mapper(list[idx], idx);
+      } catch (e) {
+        results[idx] = failedSalesMonthBundle_(list[idx], e?.message || "取得失敗");
+      }
     }
   };
   const n = Math.max(1, Math.min(limit || 1, list.length || 1));
   await Promise.all(Array.from({ length: list.length ? n : 0 }, () => worker()));
-  return results;
+  return list.map((month, i) => (
+    results[i] && results[i].month === month
+      ? results[i]
+      : failedSalesMonthBundle_(month, "未完了")
+  ));
+}
+
+async function fetchJsonWithTimeout_(url, timeoutMs) {
+  const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = setTimeout(() => {
+    try { ctrl?.abort(); } catch {}
+  }, timeoutMs);
+  try {
+    const res = await fetch(url, { cache: "no-store", signal: ctrl?.signal });
+    const text = await res.text();
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new Error(`売上APIの応答がJSONではありません（HTTP ${res.status}）`);
+    }
+    if (!res.ok) {
+      throw new Error(parsed?.error || `HTTP ${res.status}`);
+    }
+    return parsed;
+  } catch (e) {
+    if (e?.name === "AbortError") {
+      throw new Error(`売上APIがタイムアウトしました（${Math.round(timeoutMs / 1000)}秒）`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function fetchSalesMonth_(targetMonth, options = {}) {
@@ -4000,41 +4127,56 @@ async function fetchSalesMonth_(targetMonth, options = {}) {
   if (!month) throw new Error("対象月が不正です");
   if (!force) {
     const cached = salesMonthCache_.get(month);
-    if (cached) return cached;
+    if (isUsableSalesMonthJson_(month, cached)) return cached;
     const inflight = salesMonthInflight_.get(month);
     if (inflight) return inflight;
+  } else {
+    salesMonthCache_.delete(month);
   }
   const req = (async () => {
-    const res = await fetch(buildSalesFetchUrl_(month), { cache: "no-store" });
-    const text = await res.text();
-    let json;
-    try {
-      json = JSON.parse(text);
-    } catch {
-      throw new Error(`売上APIの応答がJSONではありません（HTTP ${res.status}）`);
+    const json = await withSalesFetchSlot_(() =>
+      fetchJsonWithTimeout_(buildSalesFetchUrl_(month), SALES_MONTH_FETCH_TIMEOUT_MS_)
+    );
+    if (!isUsableSalesMonthJson_(month, json)) {
+      throw new Error("売上APIの月データが一致しません");
     }
-    if (!res.ok) {
-      throw new Error(json?.error || `HTTP ${res.status}`);
-    }
-    if (!json || !Array.isArray(json.records)) throw new Error("JSON形式が不正です");
     salesMonthCache_.set(month, json);
     return json;
   })();
   salesMonthInflight_.set(month, req);
   try {
     return await req;
+  } catch (e) {
+    if (salesMonthCache_.get(month) && !isUsableSalesMonthJson_(month, salesMonthCache_.get(month))) {
+      salesMonthCache_.delete(month);
+    }
+    throw e;
   } finally {
     if (salesMonthInflight_.get(month) === req) salesMonthInflight_.delete(month);
   }
 }
 
-async function fetchSalesMonthBundle_(monthList, options = {}) {
-  return mapPool_(monthList, SALES_MONTH_FETCH_CONCURRENCY_, async (month) => {
+async function fetchSalesMonthsProgressive_(monthList, options = {}) {
+  const uniqueMonths = [];
+  const seen = new Set();
+  for (const month of monthList || []) {
+    const key = normalizeMonth(month);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    uniqueMonths.push(key);
+  }
+  if (!uniqueMonths.length) return [];
+  const onEach = typeof options.onEach === "function" ? options.onEach : null;
+  return mapPool_(uniqueMonths, SALES_MONTH_FETCH_CONCURRENCY_, async (month) => {
     try {
       const json = await fetchSalesMonth_(month, options);
-      return toSalesMonthBundle_(month, json);
+      const item = toSalesMonthBundle_(month, json);
+      onEach?.(item);
+      return item;
     } catch (e) {
-      return { month, ok: false, records: [], monthlySummary: null, error: e?.message || "取得失敗" };
+      const item = failedSalesMonthBundle_(month, e?.message || "取得失敗");
+      onEach?.(item);
+      return item;
     }
   });
 }
@@ -4046,7 +4188,7 @@ function yearFromMonth_(month, fallbackYear) {
 function YearlyMonthBarChart({ title, rows, valueKey, barTone, formatTop, taxMode, onMonthClick, tall = false, narrow = false }) {
   const chartRows = rows.length ? rows : [];
   const maxVal = chartRows.reduce((m, r) => {
-    if (r.status === "取得失敗") return m;
+    if (isYearlyMonthFetchGap_(r.status)) return m;
     const raw = r[valueKey];
     const v = raw == null ? 0 : Number(raw);
     return Math.max(m, Number.isFinite(v) ? v : 0);
@@ -4068,7 +4210,7 @@ function YearlyMonthBarChart({ title, rows, valueKey, barTone, formatTop, taxMod
             {chartRows.map((r) => {
               const raw = r[valueKey];
               const v = raw == null ? 0 : Number(raw);
-              const hasValue = r.status !== "取得失敗" && raw != null && Number.isFinite(v) && v > 0;
+              const hasValue = !isYearlyMonthFetchGap_(r.status) && raw != null && Number.isFinite(v) && v > 0;
               const h = hasValue ? Math.max(2, Math.round((v / scaleMax) * 100)) : 2;
               const topLabel = formatTop ? formatTop(r) : hasValue ? formatDisplayCompactYen(v, taxMode) : "—";
               const monthShort = r.monthLabel || monthLabelFromTarget_(r.targetMonth);
@@ -5543,14 +5685,14 @@ function yearlyNumTdStyle_(widthPx, muted) {
   return { ...base, width: widthPx, minWidth: widthPx, maxWidth: widthPx };
 }
 function yearlyTableYenCell_(m, value, taxMode) {
-  if (m.status === "取得失敗") return { text: "—", muted: true };
+  if (isYearlyMonthFetchGap_(m.status)) return { text: "—", muted: true };
   const n = value != null ? Number(value) : null;
   if (n == null || Number.isNaN(n)) return { text: "—", muted: true };
   const muted = m.status === "未入力" || m.status === "予定あり" || n === 0;
   return { text: formatDisplayYen(n, taxMode), muted };
 }
 function yearlyTablePctCell_(m, rate) {
-  if (m.status === "取得失敗") return { text: "—", muted: true };
+  if (isYearlyMonthFetchGap_(m.status)) return { text: "—", muted: true };
   const muted = m.status === "未入力" || m.status === "予定あり" || rate == null;
   return { text: pct1(rate), muted };
 }
@@ -5559,7 +5701,7 @@ function YearlyTableNumberCell({ m, value, kind = "yen", width, taxMode }) {
   return <td style={yearlyNumTdStyle_(width, cell.muted)}>{cell.text}</td>;
 }
 function yearlyTableLaborCell_(m, value, taxMode) {
-  if (m.status === "取得失敗") return { text: "—", muted: true };
+  if (isYearlyMonthFetchGap_(m.status)) return { text: "—", muted: true };
   if (m.isLaborPending) {
     const labor = Number(m.laborCostSum || 0);
     if (labor > 0) return { text: `${formatDisplayYen(labor, taxMode)}（参考）`, muted: true };
@@ -6499,12 +6641,12 @@ function YearlyMonthReviewTable({ rows, narrow, dy, pct, pct1, formatUnitYen_, o
               <YearlyTableNumberCell m={row} value={row.marginalProfitSum} width={100} taxMode={taxMode} />
               <YearlyTableNumberCell m={row} value={row.marginalProfitRate} kind="pct" width={84} />
               <td style={{ ...yearlyNumTdStyle_(100, row.reviewOperatingProfitSum == null), color: operatingColor }}>
-                {row.status === "取得失敗" || row.reviewOperatingProfitSum == null
+                {isYearlyMonthFetchGap_(row.status) || row.reviewOperatingProfitSum == null
                   ? "—"
                   : dy(row.reviewOperatingProfitSum)}
               </td>
               <td style={{ ...yearlyNumTdStyle_(84, row.reviewOperatingProfitRate == null), color: operatingColor }}>
-                {row.status === "取得失敗" || row.reviewOperatingProfitRate == null
+                {isYearlyMonthFetchGap_(row.status) || row.reviewOperatingProfitRate == null
                   ? "—"
                   : pct1(row.reviewOperatingProfitRate)}
               </td>
@@ -6679,6 +6821,8 @@ function YearlyMonthStatusBadge({ m, large = false }) {
         border:
           m.status === "取得失敗"
             ? "1px solid rgba(200,90,90,0.28)"
+            : m.status === "再取得中"
+            ? "1px solid rgba(201,168,76,0.32)"
             : m.status === "集計済み"
             ? "1px solid rgba(126,200,126,0.24)"
             : m.status === "予定あり"
@@ -6687,6 +6831,8 @@ function YearlyMonthStatusBadge({ m, large = false }) {
         color:
           m.status === "取得失敗"
             ? "rgba(232,160,160,0.75)"
+            : m.status === "再取得中"
+            ? "rgba(201,168,76,0.88)"
             : m.status === "集計済み"
             ? "rgba(158,201,168,0.88)"
             : m.status === "予定あり"
@@ -7191,6 +7337,8 @@ function YearlyTableStatusCell({ m, width }) {
           border:
             m.status === "取得失敗"
               ? "1px solid rgba(200,90,90,0.28)"
+              : m.status === "再取得中"
+              ? "1px solid rgba(201,168,76,0.32)"
               : m.status === "集計済み"
               ? "1px solid rgba(126,200,126,0.24)"
               : m.status === "予定あり"
@@ -7199,6 +7347,8 @@ function YearlyTableStatusCell({ m, width }) {
           color:
             m.status === "取得失敗"
               ? "rgba(232,160,160,0.75)"
+              : m.status === "再取得中"
+              ? "rgba(201,168,76,0.88)"
               : m.status === "集計済み"
               ? "rgba(158,201,168,0.88)"
               : m.status === "予定あり"
@@ -7267,13 +7417,10 @@ export default function SalesModule({ events = [], navigateBack }) {
     setRecords(json.records);
     setMonthlySummary(json?.monthlySummary || null);
     setUpdatedAt(json?.meta?.generatedAt || "");
+    const year = yearFromMonth_(month, targetYear);
     setYearlyMonthData((prev) => {
       if (!Array.isArray(prev) || prev.length === 0) return prev;
-      const idx = prev.findIndex((item) => item?.month === month);
-      if (idx < 0) return prev;
-      const next = prev.slice();
-      next[idx] = toSalesMonthBundle_(month, json);
-      return next;
+      return mergeYearMonthBundles_(prev, [toSalesMonthBundle_(month, json)], year);
     });
   };
 
@@ -7329,33 +7476,66 @@ export default function SalesModule({ events = [], navigateBack }) {
     let cancelled = false;
     const year = adminTab === "yearly" ? targetYear : salesBundleYear;
     const priorYear = year - 1;
-    const needYear = loadedYearRef.current !== year;
-    const needPrior = adminTab === "yearly" && loadedPriorYearRef.current !== priorYear;
-    if (!needYear && !needPrior) return undefined;
-    if (needYear) {
-      setYearlyLoading(true);
-      if (loadedYearRef.current != null && loadedYearRef.current !== year) {
-        setYearlyMonthData([]);
+    const applyYearItems = (y, items) => {
+      if (cancelled || !items?.length) return;
+      const setter = y === year ? setYearlyMonthData : setPriorYearMonthData;
+      setter((prev) => mergeYearMonthBundles_(prev, items, y));
+    };
+    const applyYearItem = (y, item) => applyYearItems(y, item ? [item] : []);
+
+    const fetchYearMonths_ = async (y, monthsToFetch, onFirstPassDone) => {
+      if (!monthsToFetch.length) {
+        onFirstPassDone?.();
+        return;
       }
-    }
-    (async () => {
-      try {
-        const [results, priorResults] = await Promise.all([
-          needYear ? fetchSalesMonthBundle_(buildYearMonths_(year)) : Promise.resolve(null),
-          needPrior ? fetchSalesMonthBundle_(buildYearMonths_(priorYear)) : Promise.resolve(null),
-        ]);
+      applyYearItems(y, monthsToFetch.map((month) => pendingSalesMonthBundle_(month)));
+      await fetchSalesMonthsProgressive_(monthsToFetch, {
+        onEach: (item) => applyYearItem(y, item),
+      });
+      onFirstPassDone?.();
+      for (let attempt = 1; attempt <= SALES_MONTH_FETCH_RETRIES_; attempt += 1) {
         if (cancelled) return;
-        if (results) {
-          setYearlyMonthData(results);
-          loadedYearRef.current = year;
-        }
-        if (priorResults) {
-          setPriorYearMonthData(priorResults);
-          loadedPriorYearRef.current = priorYear;
-        }
-      } finally {
-        if (!cancelled) setYearlyLoading(false);
+        const remaining = monthsToFetch.filter((month) => !isUsableSalesMonthJson_(month, salesMonthCache_.get(month)));
+        if (!remaining.length) return;
+        applyYearItems(y, remaining.map((month) => pendingSalesMonthBundle_(month)));
+        await fetchSalesMonthsProgressive_(remaining, {
+          onEach: (item) => applyYearItem(y, item),
+        });
       }
+      if (cancelled) return;
+      const stillMissing = monthsToFetch.filter((month) => !isUsableSalesMonthJson_(month, salesMonthCache_.get(month)));
+      if (stillMissing.length) {
+        applyYearItems(y, stillMissing.map((month) => failedSalesMonthBundle_(month, "取得失敗")));
+      }
+    };
+
+    (async () => {
+      setYearlyMonthData((prev) => mergeYearMonthBundles_(prev, cachedYearMonthBundles_(year), year));
+      const missing = missingSalesMonths_(year);
+      setYearlyLoading(missing.length > 0);
+      let priorStarted = false;
+      const startPriorIfNeeded = () => {
+        if (priorStarted || cancelled || adminTab !== "yearly") return;
+        priorStarted = true;
+        setPriorYearMonthData((prev) => mergeYearMonthBundles_(prev, cachedYearMonthBundles_(priorYear), priorYear));
+        const priorMissing = missingSalesMonths_(priorYear);
+        if (!priorMissing.length) {
+          if (!cancelled) loadedPriorYearRef.current = priorYear;
+          return;
+        }
+        fetchYearMonths_(priorYear, priorMissing).then(() => {
+          if (!cancelled) loadedPriorYearRef.current = priorYear;
+        });
+      };
+      await fetchYearMonths_(year, missing, () => {
+        if (!cancelled) setYearlyLoading(false);
+        startPriorIfNeeded();
+      });
+      if (!cancelled) {
+        setYearlyLoading(false);
+        loadedYearRef.current = year;
+      }
+      startPriorIfNeeded();
     })();
     return () => {
       cancelled = true;
@@ -7938,12 +8118,15 @@ export default function SalesModule({ events = [], navigateBack }) {
     if (adminTab !== "yearly") return null;
     if (!yearlyMonthData.length) return null;
     const monthRows = yearlyMonthData.map((item) => {
-      if (!item.ok) {
-        return emptyMonthAggregate_(item.month, "取得失敗", item.error);
+      if (item?.pending) {
+        return emptyMonthAggregate_(item?.month, "再取得中", item?.error);
+      }
+      if (!item?.ok) {
+        return emptyMonthAggregate_(item?.month, "取得失敗", item?.error);
       }
       return aggregateMonthFromRecords_(item.records, item.month, currentBusinessDate, item.monthlySummary);
     });
-    const okMonths = monthRows.filter((m) => m.status !== "取得失敗");
+    const okMonths = monthRows.filter((m) => !isYearlyMonthFetchGap_(m.status));
     const aggregatedMonths = monthRows.filter((m) => m.status === "集計済み");
     const yearlyTotalSales = aggregatedMonths.reduce((s, m) => s + Number(m.totalSalesSum || 0), 0);
     const targetMetrics = buildYearlyTargetMetrics_(monthRows);
@@ -8201,6 +8384,8 @@ export default function SalesModule({ events = [], navigateBack }) {
       operatingProfitRateTop3,
     };
   }, [adminTab, yearlyMonthData, priorYearMonthData, targetYear, currentBusinessDate]);
+  const yearlyPendingCount = (yearlyMonthData || []).filter((item) => item?.pending).length;
+  const yearlyFailedCount = (yearlyMonthData || []).filter((item) => item && !item.ok && !item.pending).length;
   const staffTodayRows = useMemo(
     () => rows.filter((r) => r.businessDate === currentBusinessDate),
     [rows, currentBusinessDate]
@@ -8977,14 +9162,15 @@ export default function SalesModule({ events = [], navigateBack }) {
             </select>
           </div>
 
-          {yearlyLoading && (
-            <div style={{ ...S.card, textAlign: "center", color: "rgba(201,168,76,0.85)", letterSpacing: ".08em", padding: "1.2rem" }}>
-              年次データを読み込み中...
-            </div>
-          )}
-
-          {!yearlyLoading && yearlyAnalysis && (
+          {yearlyAnalysis ? (
             <>
+              {(yearlyPendingCount > 0 || yearlyFailedCount > 0) && (
+                <div style={{ ...S.card, color: "rgba(240,232,208,0.78)", fontSize: vp.narrow ? ".74rem" : ".8rem", lineHeight: 1.55, padding: ".75rem 1rem" }}>
+                  {yearlyPendingCount > 0
+                    ? `取得できた月から表示しています。${yearlyPendingCount}ヶ月を再取得中です。`
+                    : `${yearlyFailedCount}ヶ月は取得に失敗しました。成功した月はそのまま閲覧できます。`}
+                </div>
+              )}
               <div style={{ ...analysisCardWrap("summary", vp.narrow) }}>
                 <div style={analysisSecTitle("summary", ".55rem", vp.narrow)}>{targetYear}年 年次サマリー</div>
                 <YearlySummarySixBlocks
@@ -9309,6 +9495,10 @@ export default function SalesModule({ events = [], navigateBack }) {
                 </div>
               </div>
             </>
+          ) : (
+            <div style={{ ...S.card, textAlign: "center", color: "rgba(201,168,76,0.85)", letterSpacing: ".08em", padding: "1.2rem" }}>
+              年次データを準備しています...
+            </div>
           )}
         </div>
       )}
